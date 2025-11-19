@@ -9,6 +9,12 @@ import (
     pb "github.com/accretional/collector/gen/collector"
 )
 
+// Checkpoint forces a WAL checkpoint (useful for testing durability)
+func (c *Collection) Checkpoint() error {
+    _, err := c.db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+    return err
+}
+
 // initDatabase creates the SQLite tables and indexes
 func (c *Collection) initDatabase() error {
     db, err := sql.Open("sqlite", c.dbPath)
