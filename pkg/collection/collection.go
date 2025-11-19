@@ -7,7 +7,7 @@ import (
     "path/filepath"
     "time"
 
-    pb "github.com/yourusername/collector/gen/collector"
+    pb "github.com/accretional/collector/gen/collector"
     _ "modernc.org/sqlite"
 )
 
