@@ -1,0 +1,629 @@
+// collector.proto
+syntax = "proto3";
+
+package collector;
+
+import "google/protobuf/any.proto";
+import "google/protobuf/descriptor.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+// ============================================================================
+// Note - pasting init LLM design here to use as a starting point only
+// ============================================================================
+
+message NamespacedName {
+  string namespace = 1;
+  string name = 2;
+}
+
+message MessageTypeRef {
+  string namespace = 1;
+  string message_name = 2;
+  google.protobuf.DescriptorProto descriptor = 3;
+}
+
+message ServiceTypeRef {
+  string namespace = 1;
+  string service_name = 2;
+  google.protobuf.ServiceDescriptorProto descriptor = 3;
+}
+
+message Status {
+  enum Code {
+    OK = 0;
+    CANCELLED = 1;
+    UNKNOWN = 2;
+    INVALID_ARGUMENT = 3;
+    NOT_FOUND = 4;
+    ALREADY_EXISTS = 5;
+    PERMISSION_DENIED = 6;
+    RESOURCE_EXHAUSTED = 7;
+    FAILED_PRECONDITION = 8;
+    ABORTED = 9;
+    OUT_OF_RANGE = 10;
+    UNIMPLEMENTED = 11;
+    INTERNAL = 12;
+    UNAVAILABLE = 13;
+    DATA_LOSS = 14;
+  }
+  
+  Code code = 1;
+  string message = 2;
+  map<string, string> details = 3;
+}
+
+// ============================================================================
+// Collection Structure Types
+// ============================================================================
+
+// File-like entity
+message CollectionData {
+  string name = 1;
+  oneof content {
+    bytes data = 2;
+    string uri = 3;
+  }
+}
+
+// Directory-like entity
+message CollectionDir {
+  string name = 1;
+  map<string, CollectionDir> subdirs = 2;
+  map<string, CollectionData> files = 3;
+}
+
+// Database row
+message CollectionRecord {
+  string name = 1;
+  string json = 2;
+  bytes proto = 3;
+  string data_uri = 4;
+}
+
+// Database table/collection
+message Collection {
+  string name = 1;
+  string message_type = 2;
+  bytes proto_descriptor = 3;
+  string schema_uri = 4;
+  repeated CollectionRecord records = 5;
+  CollectionDir dir = 6; // Optional associated files/artifacts
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+  int64 record_count = 9;
+  map<string, string> labels = 10;
+  repeated string indexed_fields = 11;
+  string server_endpoint = 12;
+}
+
+// ============================================================================
+// CollectorRegistry Service
+// Maintains Collections: RegisteredProtos, RegisteredServices
+// Query them via CollectionServer
+// ============================================================================
+
+message RegisterProtoRequest {
+  string namespace = 1;
+  google.protobuf.FileDescriptorProto file_descriptor = 2;
+  repeated google.protobuf.FileDescriptorProto dependencies = 3;
+}
+
+message RegisterProtoResponse {
+  Status status = 1;
+  repeated string registered_messages = 2;
+  repeated string registered_enums = 3;
+}
+
+message RegisterServiceRequest {
+  string namespace = 1;
+  string service_name = 2;
+  google.protobuf.ServiceDescriptorProto service_descriptor = 3;
+  google.protobuf.FileDescriptorProto file_descriptor = 4;
+}
+
+message RegisterServiceResponse {
+  Status status = 1;
+  repeated string registered_methods = 2;
+}
+
+service CollectorRegistry {
+  rpc RegisterProto(RegisterProtoRequest) returns (RegisterProtoResponse);
+  rpc RegisterService(RegisterServiceRequest) returns (RegisterServiceResponse);
+}
+
+// ============================================================================
+// CollectionRepo Service
+// Maintains a Collection of Collections
+// Provides discovery, routing, and search for CollectionServers
+// ============================================================================
+
+message CreateCollectionRequest {
+  string namespace = 1;
+  string name = 2;
+  string message_type = 3;
+  bytes proto_descriptor = 4;
+  map<string, string> labels = 5;
+  repeated string index_fields = 6;
+  string schema_uri = 7; // Optional
+}
+
+message CreateCollectionResponse {
+  Status status = 1;
+  string collection_id = 2;
+  string server_endpoint = 3;
+}
+
+// Discover available collections
+message DiscoverRequest {
+  string namespace = 1; // Empty for all namespaces
+  map<string, string> label_filter = 2;
+  string message_type_filter = 3; // Filter by message type
+  int32 page_size = 4;
+  string page_token = 5;
+}
+
+message DiscoverResponse {
+  Status status = 1;
+  repeated Collection collections = 2;
+  string next_page_token = 3;
+  int64 total_count = 4;
+}
+
+// Route to appropriate CollectionServer
+message RouteRequest {
+  string namespace = 1;
+  string collection_name = 2;
+}
+
+message RouteResponse {
+  Status status = 1;
+  string server_endpoint = 2;
+  Collection collection = 3;
+}
+
+// Search across multiple collections
+message SearchCollectionsRequest {
+  string namespace = 1;
+  repeated string collection_names = 2; // Empty for all in namespace
+  google.protobuf.Struct query = 3;
+  int32 limit = 4;
+  int32 offset = 5;
+  string order_by = 6;
+}
+
+message SearchCollectionsResponse {
+  message CollectionResult {
+    string collection_name = 1;
+    repeated CollectionRecord records = 2;
+    int64 match_count = 3;
+  }
+  
+  Status status = 1;
+  repeated CollectionResult results = 2;
+  int64 total_matches = 3;
+}
+
+service CollectionRepo {
+  rpc CreateCollection(CreateCollectionRequest) returns (CreateCollectionResponse);
+  rpc Discover(DiscoverRequest) returns (DiscoverResponse);
+  rpc Route(RouteRequest) returns (RouteResponse);
+  rpc Search(SearchCollectionsRequest) returns (SearchCollectionsResponse);
+}
+
+// ============================================================================
+// CollectionServer Service - The Uniform Interface
+// ============================================================================
+
+message CreateRequest {
+  string namespace = 1;
+  string collection_name = 2;
+  google.protobuf.Any item = 3;
+  string id = 4; // Optional
+}
+
+message CreateResponse {
+  Status status = 1;
+  string id = 2;
+  google.protobuf.Timestamp created_at = 3;
+}
+
+message GetRequest {
+  string namespace = 1;
+  string collection_name = 2;
+  string id = 3;
+}
+
+message GetResponse {
+  Status status = 1;
+  CollectionRecord record = 2;
+  google.protobuf.Any item = 3;
+  MessageTypeRef message_type = 4;
+}
+
+message UpdateRequest {
+  string namespace = 1;
+  string collection_name = 2;
+  string id = 3;
+  google.protobuf.Any item = 4;
+  repeated string update_fields = 5;
+}
+
+message UpdateResponse {
+  Status status = 1;
+  google.protobuf.Timestamp updated_at = 2;
+}
+
+message DeleteRequest {
+  string namespace = 1;
+  string collection_name = 2;
+  string id = 3;
+}
+
+message DeleteResponse {
+  Status status = 1;
+}
+
+message ListRequest {
+  string namespace = 1;
+  string collection_name = 2;
+  int32 page_size = 3;
+  string page_token = 4;
+  google.protobuf.Struct filter = 5;
+  string order_by = 6;
+}
+
+message ListResponse {
+  Status status = 1;
+  repeated CollectionRecord records = 2;
+  repeated google.protobuf.Any items = 3;
+  MessageTypeRef message_type = 4;
+  string next_page_token = 5;
+  int64 total_count = 6;
+}
+
+message SearchRequest {
+  string namespace = 1;
+  string collection_name = 2;
+  google.protobuf.Struct query = 3;
+  int32 limit = 4;
+  int32 offset = 5;
+  string order_by = 6;
+}
+
+message SearchResponse {
+  Status status = 1;
+  repeated CollectionRecord records = 2;
+  repeated google.protobuf.Any items = 3;
+  MessageTypeRef message_type = 4;
+  map<string, double> scores = 5;
+  int64 total_count = 6;
+}
+
+message InvokeRequest {
+  string namespace = 1;
+  string collection_name = 2;
+  string method_name = 3;
+  google.protobuf.Any input = 4;
+  string item_id = 5; // Optional
+  MessageTypeRef input_type = 6;
+}
+
+message InvokeResponse {
+  Status status = 1;
+  google.protobuf.Any output = 2;
+  MessageTypeRef output_type = 3;
+}
+
+service CollectionServer {
+  rpc Create(CreateRequest) returns (CreateResponse);
+  rpc Get(GetRequest) returns (GetResponse);
+  rpc Update(UpdateRequest) returns (UpdateResponse);
+  rpc Delete(DeleteRequest) returns (DeleteResponse);
+  rpc List(ListRequest) returns (ListResponse);
+  rpc Search(SearchRequest) returns (SearchResponse);
+  rpc Invoke(InvokeRequest) returns (InvokeResponse);
+}
+
+// ============================================================================
+// CollectiveDispatcher Service
+// Maintains Collections: DispatchServers, Connections
+// Query them via CollectionServer
+// ============================================================================
+
+// Stored in DispatchServers Collection
+message DispatchServer {
+  string id = 1;
+  string address = 2;
+  repeated string namespaces = 3;
+  repeated string capabilities = 4;
+  google.protobuf.Timestamp registered_at = 5;
+  google.protobuf.Timestamp last_heartbeat = 6;
+  map<string, string> metadata = 7;
+}
+
+// Stored in Connections Collection
+message Connection {
+  string id = 1;
+  string source_collector_id = 2;
+  string target_collector_id = 3;
+  string address = 4;
+  repeated string shared_namespaces = 5;
+  google.protobuf.Timestamp connected_at = 6;
+  google.protobuf.Timestamp last_activity = 7;
+  map<string, string> metadata = 8;
+}
+
+message ServeRequest {
+  string namespace = 1;
+  string service_name = 2;
+  string method_name = 3;
+  google.protobuf.Any input = 4;
+  MessageTypeRef input_type = 5;
+  MessageTypeRef output_type = 6;
+  map<string, string> execution_context = 7;
+}
+
+message ServeResponse {
+  Status status = 1;
+  google.protobuf.Any output = 2;
+  MessageTypeRef output_type = 3;
+  google.protobuf.Timestamp executed_at = 4;
+  string executor_id = 5;
+}
+
+message ConnectRequest {
+  string address = 1;
+  repeated string namespaces = 2;
+  map<string, string> metadata = 3;
+}
+
+message ConnectResponse {
+  Status status = 1;
+  string connection_id = 2;
+  string target_collector_id = 3;
+}
+
+message DispatchRequest {
+  string namespace = 1;
+  string service_name = 2;
+  string method_name = 3;
+  google.protobuf.Any input = 4;
+  MessageTypeRef input_type = 5;
+  MessageTypeRef output_type = 6;
+  string target_collector_id = 7; // Optional
+  map<string, string> routing_hints = 8;
+}
+
+message DispatchResponse {
+  Status status = 1;
+  google.protobuf.Any output = 2;
+  MessageTypeRef output_type = 3;
+  string handled_by_collector_id = 4;
+  google.protobuf.Timestamp dispatched_at = 5;
+}
+
+service CollectiveDispatcher {
+  rpc Serve(ServeRequest) returns (ServeResponse);
+  rpc Connect(ConnectRequest) returns (ConnectResponse);
+  rpc Dispatch(DispatchRequest) returns (DispatchResponse);
+}
+
+// ============================================================================
+// CollectiveWorker Service
+// Maintains Collections: WorkflowDefinitions, ActiveWorkflows, Executions
+// Query them via CollectionServer
+// ============================================================================
+
+// Stored in WorkflowDefinitions Collection
+message WorkflowDefinition {
+  string id = 1;
+  string namespace = 2;
+  string name = 3;
+  repeated Task tasks = 4;
+  map<string, string> metadata = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp updated_at = 7;
+}
+
+message Task {
+  string id = 1;
+  string name = 2;
+  string service_name = 3;
+  string method_name = 4;
+  MessageTypeRef input_type = 5;
+  MessageTypeRef output_type = 6;
+  google.protobuf.Struct input_config = 7;
+  repeated string dependencies = 8;
+  RetryPolicy retry_policy = 9;
+}
+
+message RetryPolicy {
+  int32 max_attempts = 1;
+  int32 initial_delay_seconds = 2;
+  int32 max_delay_seconds = 3;
+  double backoff_multiplier = 4;
+}
+
+// Stored in ActiveWorkflows Collection
+message ActiveWorkflow {
+  string id = 1;
+  string workflow_definition_id = 2;
+  string namespace = 3;
+  google.protobuf.Timestamp started_at = 4;
+  google.protobuf.Timestamp updated_at = 5;
+  WorkflowState state = 6;
+  google.protobuf.Any input = 7;
+  MessageTypeRef input_type = 8;
+  google.protobuf.Any current_state = 9;
+  MessageTypeRef state_type = 10;
+  map<string, TaskExecution> task_executions = 11; // task_id -> execution info
+  map<string, string> metadata = 12;
+}
+
+enum WorkflowState {
+  WORKFLOW_PENDING = 0;
+  WORKFLOW_RUNNING = 1;
+  WORKFLOW_SUCCEEDED = 2;
+  WORKFLOW_FAILED = 3;
+  WORKFLOW_CANCELLED = 4;
+  WORKFLOW_PAUSED = 5;
+}
+
+message TaskExecution {
+  string task_id = 1;
+  string execution_id = 2;
+  ExecutionState state = 3;
+  int32 attempt_number = 4;
+  google.protobuf.Timestamp started_at = 5;
+  google.protobuf.Timestamp completed_at = 6;
+}
+
+// Stored in Executions Collection
+message Execution {
+  string id = 1;
+  string workflow_id = 2;
+  string task_id = 3;
+  string namespace = 4;
+  string service_name = 5;
+  string method_name = 6;
+  google.protobuf.Any input = 7;
+  MessageTypeRef input_type = 8;
+  google.protobuf.Any output = 9;
+  MessageTypeRef output_type = 10;
+  ExecutionState state = 11;
+  Status error = 12;
+  google.protobuf.Timestamp started_at = 13;
+  google.protobuf.Timestamp completed_at = 14;
+  int32 attempt_number = 15;
+  string executor_id = 16;
+  map<string, string> metadata = 17;
+}
+
+enum ExecutionState {
+  EXECUTION_PENDING = 0;
+  EXECUTION_RUNNING = 1;
+  EXECUTION_SUCCEEDED = 2;
+  EXECUTION_FAILED = 3;
+  EXECUTION_CANCELLED = 4;
+  EXECUTION_RETRYING = 5;
+}
+
+message StartWorkflowRequest {
+  string namespace = 1;
+  string workflow_name = 2; // Or workflow_definition_id
+  google.protobuf.Any input = 3;
+  MessageTypeRef input_type = 4;
+  map<string, string> metadata = 5;
+}
+
+message StartWorkflowResponse {
+  Status status = 1;
+  string workflow_id = 2;
+  google.protobuf.Timestamp started_at = 3;
+}
+
+message QueryWorkflowStatusRequest {
+  string namespace = 1;
+  string workflow_id = 2;
+}
+
+message QueryWorkflowStatusResponse {
+  Status status = 1;
+  WorkflowState workflow_state = 2;
+  repeated TaskExecution task_executions = 3;
+  google.protobuf.Timestamp started_at = 4;
+  google.protobuf.Timestamp updated_at = 5;
+  int32 completed_tasks = 6;
+  int32 total_tasks = 7;
+}
+
+message GetWorkflowHistoryRequest {
+  string namespace = 1;
+  string workflow_id = 2;
+  int32 page_size = 3;
+  string page_token = 4;
+}
+
+message GetWorkflowHistoryResponse {
+  Status status = 1;
+  repeated Execution executions = 2;
+  string next_page_token = 3;
+  int64 total_executions = 4;
+}
+
+service CollectiveWorker {
+  rpc StartWorkflow(StartWorkflowRequest) returns (StartWorkflowResponse);
+  rpc QueryWorkflowStatus(QueryWorkflowStatusRequest) returns (QueryWorkflowStatusResponse);
+  rpc GetWorkflowHistory(GetWorkflowHistoryRequest) returns (GetWorkflowHistoryResponse);
+}
+
+// ============================================================================
+// CollectorConsole Service
+// ============================================================================
+
+message DisplayRequest {
+  enum DisplayType {
+    OVERVIEW = 0;
+    REGISTRIES = 1;
+    COLLECTIONS = 2;
+    WORKFLOWS = 3;
+    EXECUTIONS = 4;
+    CONNECTIONS = 5;
+  }
+  
+  DisplayType display_type = 1;
+  string namespace = 2;
+  map<string, string> filters = 3;
+}
+
+message DisplayResponse {
+  Status status = 1;
+  google.protobuf.Struct display_data = 2;
+  string summary = 3;
+}
+
+message StopRequest {
+  enum Target {
+    ALL = 0;
+    DISPATCHER = 1;
+    WORKER = 2;
+    COLLECTIONS = 3;
+  }
+  
+  Target target = 1;
+  bool graceful = 2;
+  int32 timeout_seconds = 3;
+}
+
+message StopResponse {
+  Status status = 1;
+  repeated string stopped_components = 2;
+}
+
+message ResetRequest {
+  enum Scope {
+    EVERYTHING = 0;
+    REGISTRIES = 1;
+    COLLECTIONS = 2;
+    WORKFLOWS = 3;
+    EXECUTIONS = 4;
+  }
+  
+  Scope scope = 1;
+  string namespace = 2;
+  bool confirm = 3;
+}
+
+message ResetResponse {
+  Status status = 1;
+  repeated string reset_components = 2;
+  map<string, int64> deleted_counts = 3;
+}
+
+service CollectorConsole {
+  rpc Display(DisplayRequest) returns (DisplayResponse);
+  rpc Stop(StopRequest) returns (StopResponse);
+  rpc Reset(ResetRequest) returns (ResetResponse);
+}
