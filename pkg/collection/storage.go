@@ -180,6 +180,7 @@ func (c *Collection) loadMetadata() (*pb.Collection, error) {
 }
 
 // CreateRecord adds a new record to the collection
+// Add to CreateRecord method after the INSERT
 func (c *Collection) CreateRecord(record *pb.CollectionRecord) error {
     if record.Id == "" {
         return fmt.Errorf("record id is required")
@@ -207,7 +208,16 @@ func (c *Collection) CreateRecord(record *pb.CollectionRecord) error {
         string(labelsJSON),
     )
 
-    return err
+    if err != nil {
+        return err
+    }
+
+    // Update FTS index
+    if err := c.updateFTSIndex(record.Id, record.ProtoData); err != nil {
+        return fmt.Errorf("failed to update FTS index: %w", err)
+    }
+
+    return nil
 }
 
 // GetRecord retrieves a record by ID
@@ -256,6 +266,7 @@ func (c *Collection) GetRecord(id string) (*pb.CollectionRecord, error) {
 }
 
 // UpdateRecord updates an existing record
+// Add to UpdateRecord method after the UPDATE
 func (c *Collection) UpdateRecord(record *pb.CollectionRecord) error {
     if record.Id == "" {
         return fmt.Errorf("record id is required")
@@ -293,10 +304,16 @@ func (c *Collection) UpdateRecord(record *pb.CollectionRecord) error {
         return fmt.Errorf("record not found: %s", record.Id)
     }
 
+    // Update FTS index
+    if err := c.updateFTSIndex(record.Id, record.ProtoData); err != nil {
+        return fmt.Errorf("failed to update FTS index: %w", err)
+    }
+
     return nil
 }
 
 // DeleteRecord removes a record by ID
+// Add to DeleteRecord method after the DELETE
 func (c *Collection) DeleteRecord(id string) error {
     result, err := c.db.Exec("DELETE FROM records WHERE id = ?", id)
     if err != nil {
@@ -309,6 +326,11 @@ func (c *Collection) DeleteRecord(id string) error {
     }
     if rows == 0 {
         return fmt.Errorf("record not found: %s", id)
+    }
+
+    // Delete from FTS index
+    if err := c.deleteFTSIndex(id); err != nil {
+        return fmt.Errorf("failed to delete from FTS index: %w", err)
     }
 
     return nil
