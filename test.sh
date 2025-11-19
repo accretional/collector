@@ -7,19 +7,21 @@ protoc --go_out=./gen --go_opt=paths=source_relative \
 # Run main
 go run cmd/main.go
 
-echo "Running all collection tests..."
-echo "================================"
-echo
+# Run all durability tests
+go test -v ./pkg/collection/ -run Durability
+go test -v ./pkg/collection/ -run Recovery
+go test -v ./pkg/collection/ -run Concurrent
+go test -v ./pkg/collection/ -run Stress
 
-# Run tests with coverage
+# Run with race detector (important for concurrency tests)
+go test -race -v ./pkg/collection/ -run Concurrent
+
+# Run stress tests (skipped by default)
+go test -v ./pkg/collection/ -run Stress -timeout 5m
+
+# Run benchmarks
+go test -bench=. ./pkg/collection/ -benchtime=5s
+
+# Run all tests with coverage
 go test -v -race -coverprofile=coverage.out ./pkg/collection/...
-
-# Show coverage
-echo
-echo "Coverage Summary:"
-echo "================"
-go tool cover -func=coverage.out | grep total
-
-# Optional: Generate HTML coverage report
-# go tool cover -html=coverage.out -o coverage.html
-# echo "HTML coverage report generated: coverage.html"
+go tool cover -func=coverage.out
