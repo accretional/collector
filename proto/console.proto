@@ -1,0 +1,77 @@
+// console.proto
+syntax = "proto3";
+
+package collector;
+
+import "common.proto";
+import "google/protobuf/struct.proto";
+
+// ============================================================================
+// CollectorConsole Service
+// UI, analysis, debugging, configuration
+// ============================================================================
+
+message DisplayRequest {
+  enum DisplayType {
+    OVERVIEW = 0;
+    REGISTRIES = 1;
+    COLLECTIONS = 2;
+    WORKFLOWS = 3;
+    EXECUTIONS = 4;
+    CONNECTIONS = 5;
+  }
+  
+  DisplayType display_type = 1;
+  string namespace = 2;
+  map<string, string> filters = 3;
+}
+
+message DisplayResponse {
+  Status status = 1;
+  google.protobuf.Struct display_data = 2;
+  string summary = 3;
+}
+
+message StopRequest {
+  enum Target {
+    ALL = 0;
+    DISPATCHER = 1;
+    WORKER = 2;
+    COLLECTIONS = 3;
+  }
+  
+  Target target = 1;
+  bool graceful = 2;
+  int32 timeout_seconds = 3;
+}
+
+message StopResponse {
+  Status status = 1;
+  repeated string stopped_components = 2;
+}
+
+message ResetRequest {
+  enum Scope {
+    EVERYTHING = 0;
+    REGISTRIES = 1;
+    COLLECTIONS = 2;
+    WORKFLOWS = 3;
+    EXECUTIONS = 4;
+  }
+  
+  Scope scope = 1;
+  string namespace = 2;
+  bool confirm = 3;
+}
+
+message ResetResponse {
+  Status status = 1;
+  repeated string reset_components = 2;
+  map<string, int64> deleted_counts = 3;
+}
+
+service CollectorConsole {
+  rpc Display(DisplayRequest) returns (DisplayResponse);
+  rpc Stop(StopRequest) returns (StopResponse);
+  rpc Reset(ResetRequest) returns (ResetResponse);
+}
