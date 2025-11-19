@@ -1,0 +1,76 @@
+// collection_repo.proto
+syntax = "proto3";
+
+package collector;
+
+import "common.proto";
+import "collection.proto";
+import "google/protobuf/struct.proto";
+
+// ============================================================================
+// CollectionRepo Service
+// Maintains a Collection of Collections
+// Provides discovery, routing, and cross-collection search
+// ============================================================================
+
+message CreateCollectionRequest {
+  Collection collection = 1;
+}
+
+message CreateCollectionResponse {
+  Status status = 1;
+  string collection_id = 2;
+  string server_endpoint = 3;
+}
+
+message DiscoverRequest {
+  string namespace = 1;  // Empty for all
+  map<string, string> label_filter = 2;
+  MessageTypeRef message_type_filter = 3;
+  int32 page_size = 4;
+  string page_token = 5;
+}
+
+message DiscoverResponse {
+  Status status = 1;
+  repeated Collection collections = 2;
+  string next_page_token = 3;
+}
+
+message RouteRequest {
+  NamespacedName collection = 1;
+}
+
+message RouteResponse {
+  Status status = 1;
+  string server_endpoint = 2;
+  Collection collection = 3;
+}
+
+// Search across multiple collections
+message SearchCollectionsRequest {
+  string namespace = 1;
+  repeated string collection_names = 2;  // Empty for all
+  google.protobuf.Struct query = 3;
+  int32 limit = 4;
+  string order_by = 5;
+}
+
+message SearchCollectionsResponse {
+  message CollectionResult {
+    string collection_name = 1;
+    repeated google.protobuf.Any items = 2;
+    map<string, double> scores = 3;
+  }
+  
+  Status status = 1;
+  repeated CollectionResult results = 2;
+  int64 total_matches = 3;
+}
+
+service CollectionRepo {
+  rpc CreateCollection(CreateCollectionRequest) returns (CreateCollectionResponse);
+  rpc Discover(DiscoverRequest) returns (DiscoverResponse);
+  rpc Route(RouteRequest) returns (RouteResponse);
+  rpc SearchCollections(SearchCollectionsRequest) returns (SearchCollectionsResponse);
+}
