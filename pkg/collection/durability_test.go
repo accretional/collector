@@ -14,6 +14,37 @@ import (
     pb "github.com/accretional/collector/gen/collector"
 )
 
+func TestWAL_Checkpoint(t *testing.T) {
+    coll, cleanup := setupTestCollection(t)
+    defer cleanup()
+
+    // Create records
+    for i := 0; i < 10; i++ {
+        record := &pb.CollectionRecord{
+            Id:        fmt.Sprintf("wal-%d", i),
+            ProtoData: []byte(fmt.Sprintf(`{"id": %d}`, i)),
+        }
+        if err := coll.CreateRecord(record); err != nil {
+            t.Fatalf("failed to create record: %v", err)
+        }
+    }
+
+    // Force checkpoint
+    if err := coll.Checkpoint(); err != nil {
+        t.Fatalf("checkpoint failed: %v", err)
+    }
+
+    // Verify data is still accessible
+    count, err := coll.CountRecords()
+    if err != nil {
+        t.Fatalf("failed to count after checkpoint: %v", err)
+    }
+
+    if count != 10 {
+        t.Errorf("expected 10 records after checkpoint, got %d", count)
+    }
+}
+
 // Transaction & Atomicity Tests
 func TestCreateRecord_AtomicityOnFailure(t *testing.T) {
     coll, cleanup := setupTestCollection(t)
