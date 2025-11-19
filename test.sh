@@ -5,3 +5,5 @@ protoc --go_out=./gen --go_opt=paths=source_relative \
 
 # Run main
 go run cmd/main.go
+
+go test -v ./pkg/collection/...
