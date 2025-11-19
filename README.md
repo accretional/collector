@@ -18,13 +18,20 @@ Is collector for LLMs, distributed sytems, or humans? Yes. It's for all of them.
 
 Stay tuned for more information. As you might guess, a distributed system for dynamic dispatch, discovery, storage, and registration of strongly-typed RPCs/Messages/Workflows into tables and sandbox environments is agent-friendly. But it's built for much more than that, too.
 
-# Fundamentals
+# Design
 
-Collector is the name for the bundle of grpc services that work together using reflection, proto registries, grpc, and other [magic](https://pkg.go.dev/google.golang.org/protobuf@v1.36.10/reflect/protodesc).
+Everything in Collector is namespaced, besides the top-level entities implementing those namespaces. In the data layer, this essentially means that each namespace has a separate directory from others at the same level of scope. At the API layer, it means that we use namespace, name, and URI (may also encode sub-structure) fields as identifiers quite a lot.
 
-* CollectorRegistry is the system for storing proto messages and grpc service definitions in namespaced [proto registries](https://pkg.go.dev/google.golang.org/protobuf/reflect/protoregistry), as trees of files under a specified path.
-* CollectionRepo is the system for managing and using Collections (sqlite tables containing protobufs of a common type) to store data, and for aggregate operations or queries across Colections. Collections are exposed to clients under CollectionServers.
-* CollectionServer is the per-Collection "ORM" implementing common API calls, as well as a Search api based on sqlite's jsonb indexing and grpc's JSON encoding. It also allows CollectedMessages to be called with custom and dynamic grpc methods registered in the same namespace for their particular types.
-* CollectiveDispatcher implements the powerful Serve, Connect, and Dispatch APIs for dynamic/distributed dispatch of custom RPCs' execution, or multi-Collector systems.
-* CollectiveWorker implements the Workflow, Task, Continuation, Invocation, and Execution APIs for coordinating long-running and chained work spanning multiple CollectiveDispatcher RPCs. Default functionality includes the ability to compile golang code into grpc servers (kinda).
-* CollectorConsole implements some UI/analysis/helper APIs for visualizing the system, debugging it, and configuring it.
+The most fundamental datastructure to Collector is the Collection. One part of it is the sqlite table of named protobufs, indexed by name but searchable via sqlite's JSONB filtering. These protobufs may have data uris corresponding to data stored elsewhere, but their protobufs/configs remains in the Collection. A Collection can also have a hierarchical arrange of data in a more filesytem-liked structure, called CollectionDirs and containing CollectionData. Generally, we reocmmend thinking of the Collection and its tables a kind of "inode" at the root of a hierarchical filesystem consisting of CollectionData. Like an inode, it literally indexes and provides metadata for the rest of the files, and it is key to navigating them.
+
+Next is the CollectionServer. This is an actual "loaded" Collection serving CRUD, search, and custom RPCs. As much as possible, the rest of the internals of Collector try to leverage CollectionServer to reduce the size and complexity of its interfaces/state. This is what we intend for humans to use it for too, of course. Because CollectionServer may be running untrusted code, CollectionServer does introduce a Call RPC but delegates its actual implementation to DynamicDispatcher's Serve. It also implements a Search API based on sqlite's jsonb indexing and grpc's JSON encoding.
+
+DynamicDispatcher has to have its Serve functionality configured or implemented specially to maintain security. It uses the Connect API to open DynamicDispatcherServers to other entities and Dispatch to begin dispatching something to a DynamicDispatcherServer within Serve. The Dispatch protobuf is a general model for contextualized RPCs between Collector instances. DynamicDispatcher maintains four collections: DispatchServers, Connections, Dispatches, and Collectors (cluster peers/indirect peers).
+
+CollectionRepo is the system for managing and using individual/aggregate Collections, and answering search queries across Collections. It is a Collection of CollectionServers (the table) and their Collections (the files), containing both "system" Collections and those created by clients. It implements the Discover, Route, and RepoSearch APIs.
+
+CollectiveWorker is a workflow system for aggregated or iterated RPCs across a cluster of Collectors. Three collections: WorkflowDefinitions, ActiveWorkflows, Executions. Has a notion of subtypes of Workflows: Tasks (non-root nodes in a workflow), Continuations (callbacks that can loop), Invocations, Executions(history). Has StartWorkflow, QueryWorkflowStatus, and GetWorkflowHistroy APIs.
+
+CollectorConsole implements some UI/analysis/helper APIs for visualizing the system, debugging it, and configuring it. It does cool stuff with reflection.
+
+CollectorRegistry is what allows new protomessages and grpc services to be registered via golang's [proto registries](https://pkg.go.dev/google.golang.org/protobuf/reflect/protoregistry) registries, as trees of files under a specified path.
