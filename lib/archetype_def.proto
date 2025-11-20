@@ -1,0 +1,52 @@
+syntax = "proto3";
+
+package tenant.compute.v1;
+
+import "resource_definitions.proto";
+
+// 1. Service Declaration
+service ComputeService {
+  option (platform.resource.v1.resource) = {
+    name: "VirtualMachine"
+    owner_team: "cloud-infrastructure"
+  };
+
+  // 2. Method Declaration
+  // We mark this as a CONSTRUCTOR, which tells the framework:
+  // "Generate a Builder SDK for this method."
+  rpc CreateInstance(CreateInstanceRequest) returns (Instance) {
+    option (platform.resource.v1.method_type) = METHOD_TYPE_CONSTRUCTOR;
+  }
+}
+
+// 3. Archetype Declaration
+// The user defines their "Standard" configurations here.
+message CreateInstanceRequest {
+  option (platform.resource.v1.presets) = {
+    name: "Micro"
+    doc: "A cheap instance for dev environments."
+    defaults_json: "{ 'cpu': 1, 'ram_mb': 512, 'image': 'alpine' }"
+  };
+  
+  option (platform.resource.v1.presets) = {
+    name: "HighPerformance"
+    doc: "Optimized for compute-heavy workloads."
+    defaults_json: "{ 'cpu': 16, 'ram_mb': 32000, 'tags': {'class': 'premium'} }"
+  };
+
+  string image = 1;
+  
+  // 4. Trait Usage
+  // By tagging this, the framework generates `WithRegion()` automatically
+  // and ensures it aligns with other services using the same trait.
+  string zone = 2 [(platform.resource.v1.trait) = "geographic_location"];
+  
+  int32 cpu = 3;
+  int32 ram_mb = 4;
+  map<string, string> tags = 5;
+}
+
+message Instance {
+  string id = 1;
+  // ... fields ...
+}
