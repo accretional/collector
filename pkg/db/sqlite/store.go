@@ -287,9 +287,9 @@ func (s *SqliteStore) Search(ctx context.Context, q *collection.SearchQuery) ([]
 	var results []*collection.SearchResult
 	for rows.Next() {
 		var r pb.CollectionRecord
-		var score sql.NullFloat64 // Use NullFloat64 for optional score
+		var score sql.NullFloat64 
 
-		var scanArgs []interface{}{&r.Id, &r.ProtoData}
+		var scanArgs = []any{r.Id, r.ProtoData}
 		if q.FullText != "" {
 			scanArgs = append(scanArgs, &score)
 		}
