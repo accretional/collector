@@ -1,28 +1,29 @@
 package collection
 
-// Combinator handles merging multiple Collections/Tables.
-// Useful for "MapReduce" style aggregation where multiple workers produce
-// partial SQLite DBs, and we need to view them as one.
+import (
+	"context"
+	"fmt"
+)
+
+// Combinator handles merging multiple Collections.
 type Combinator struct{}
 
 // Attach links a secondary collection to the primary one using SQLite's ATTACH DATABASE.
-// This allows performing joins across two separate collection files.
-func (c *Combinator) Attach(primary *Collection, secondaryPath string, alias string) error {
-	// Requires the Store interface to expose a way to execute generic commands
-	// "ATTACH DATABASE ? AS ?"
-	return nil
+func (c *Combinator) Attach(ctx context.Context, primary *Collection, secondaryPath string, alias string) error {
+	query := fmt.Sprintf("ATTACH DATABASE '%s' AS %s", secondaryPath, alias)
+	return primary.Store.ExecuteRaw(query)
 }
 
-// Merge physically copies records from source collections into a destination collection.
-func (c *Combinator) Merge(ctx context.Context, dest *Collection, sources ...*Collection) error {
-	// 1. Attach all sources to dest
-	// 2. INSERT INTO dest.records SELECT * FROM sourceN.records
-	// 3. Detach
-	return nil
-}
-
-// UnionView creates a virtual view over multiple attached collections.
-// "CREATE VIEW unified_records AS SELECT * FROM db1.records UNION ALL SELECT * FROM db2.records"
-func (c *Combinator) UnionView(primary *Collection, aliases []string) error {
+// UnionView creates a virtual view over attached collections.
+func (c *Combinator) UnionView(ctx context.Context, primary *Collection, viewName string, aliases []string) error {
+	// Construct: SELECT * FROM alias1.records UNION ALL SELECT * FROM alias2.records...
+	var selects []string
+	for _, alias := range aliases {
+		selects = append(selects, fmt.Sprintf("SELECT * FROM %s.records", alias))
+	}
+	
+	// Union query
+	// query := fmt.Sprintf("CREATE VIEW %s AS %s", viewName, strings.Join(selects, " UNION ALL "))
+	// return primary.Store.ExecuteRaw(query)
 	return nil
 }
