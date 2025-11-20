@@ -10,36 +10,40 @@ import (
 	"github.com/accretional/collector/pkg/db/sqlite"
 )
 
-// setupTestCollection creates a real SQLite-backed collection for integration testing
+// setupTestCollection creates a REAL SQLite-backed collection for integration testing.
 func setupTestCollection(t *testing.T) (*collection.Collection, func()) {
 	t.Helper()
 
-	// 1. Temp Dir
+	// 1. Create a temporary directory for this test run
 	tempDir, err := os.MkdirTemp("", "coll-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
 
-	// 2. Setup Store
+	// 2. Initialize the REAL SQLite Store
 	dbPath := filepath.Join(tempDir, "test.db")
+	
 	store, err := sqlite.NewSqliteStore(dbPath, collection.Options{
-		EnableFTS:  true,
-		EnableJSON: true,
+		EnableFTS:  true,  // Test FTS tables
+		EnableJSON: true,  // Test JSON columns
 	})
 	if err != nil {
 		os.RemoveAll(tempDir)
-		t.Fatalf("failed to create store: %v", err)
+		t.Fatalf("failed to create sqlite store: %v", err)
 	}
 
-	// 3. Setup FS
-	fs := &collection.LocalFileSystem{Root: filepath.Join(tempDir, "files")}
+	// 3. Initialize the REAL Local Filesystem
+	fs := &collection.LocalFileSystem{
+		Root: filepath.Join(tempDir, "files"),
+	}
 
-	// 4. Setup Collection
+	// 4. Create the Collection Domain Object
 	proto := &pb.Collection{
-		Namespace: "test",
-		Name:      "unit-test",
+		Namespace: "test-ns",
+		Name:      "test-collection",
+		Metadata:  &pb.Metadata{},
 	}
-	
+
 	coll, err := collection.NewCollection(proto, store, fs)
 	if err != nil {
 		store.Close()
@@ -47,8 +51,9 @@ func setupTestCollection(t *testing.T) (*collection.Collection, func()) {
 		t.Fatalf("failed to create collection: %v", err)
 	}
 
+	// Cleanup function to remove DB and files after test
 	cleanup := func() {
-		coll.Close() // Closes store
+		coll.Close() // Closes SQLite connection
 		os.RemoveAll(tempDir)
 	}
 
