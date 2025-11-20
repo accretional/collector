@@ -170,11 +170,11 @@ func TestSearch_FullTextRelevanceScoring(t *testing.T) {
 		t.Errorf("expected record 1 to have highest relevance, got %s", results[0].Record.Id)
 	}
 
-	// Scores should be ordered (BM25 returns negative scores usually, or positive depending on impl, but we check order)
-	// Note: Exact float comparison is tricky, just checking descending sort order is key logic here
+	// Scores should be ordered. SQLite's bm25 function returns lower values for more relevant documents.
+	// Therefore, we check for ascending order.
 	for i := 1; i < len(results); i++ {
-		if results[i].Score > results[i-1].Score {
-			t.Errorf("scores not properly ordered: %f should be <= %f", results[i].Score, results[i-1].Score)
+		if results[i].Score < results[i-1].Score {
+			t.Errorf("scores not properly ordered: %f should be >= %f", results[i].Score, results[i-1].Score)
 		}
 	}
 }

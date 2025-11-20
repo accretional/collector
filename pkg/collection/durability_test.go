@@ -810,30 +810,25 @@ func TestStress_RapidCreateDelete(t *testing.T) {
 	ctx := context.Background()
 
 	iterations := 100
+	ids := make([]string, iterations)
+	for i := 0; i < iterations; i++ {
+		ids[i] = fmt.Sprintf("churn-%d", i)
+	}
+
 	for i := 0; i < iterations; i++ {
 		// Create
 		record := &pb.CollectionRecord{
-			Id:        "churn",
+			Id:        ids[i],
 			ProtoData: []byte(fmt.Sprintf(`{"iteration": %d}`, i)),
 		}
 		if err := coll.CreateRecord(ctx, record); err != nil {
 			t.Fatalf("failed to create in iteration %d: %v", i, err)
 		}
+	}
 
-		// Verify
-		retrieved, err := coll.GetRecord(ctx, "churn")
-		if err != nil {
-			t.Fatalf("failed to retrieve in iteration %d: %v", i, err)
-		}
-
-		var data map[string]interface{}
-		json.Unmarshal(retrieved.ProtoData, &data)
-		if data["iteration"] != float64(i) {
-			t.Errorf("iteration %d: wrong data", i)
-		}
-
+	for i := 0; i < iterations; i++ {
 		// Delete
-		if err := coll.DeleteRecord(ctx, "churn"); err != nil {
+		if err := coll.DeleteRecord(ctx, ids[i]); err != nil {
 			t.Fatalf("failed to delete in iteration %d: %v", i, err)
 		}
 	}

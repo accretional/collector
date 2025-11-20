@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Add Go's bin directory to the PATH
+export PATH="$PATH:$(go env GOPATH)/bin"
+
 # 1. Fix Proto definitions
 echo "🔧 Fixing proto definitions..."
 for f in proto/*.proto; do

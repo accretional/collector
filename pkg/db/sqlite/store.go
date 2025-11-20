@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/accretional/collector/pkg/collection"
 	pb "github.com/accretional/collector/gen/collector"
@@ -18,12 +19,13 @@ type SqliteStore struct {
 	db      *sql.DB
 	path    string
 	options collection.Options
+	mu      sync.RWMutex
 }
 
 // NewSqliteStore initializes the database and applies schemas.
 func NewSqliteStore(path string, opts collection.Options) (*SqliteStore, error) {
 	// WAL mode + busy_timeout are critical for concurrent access.
-	dsn := fmt.Sprintf("file:%s?_journal_mode=WAL&_busy_timeout=5000", path)
+	dsn := fmt.Sprintf("file:%s?_journal_mode=WAL&_busy_timeout=10000", path)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open db: %w", err)
@@ -54,26 +56,39 @@ func NewSqliteStore(path string, opts collection.Options) (*SqliteStore, error) 
 	}
 
 	if opts.EnableFTS {
-		if _, err := db.Exec(collection.FTSSchema); err != nil {
+		tx, err := db.Begin()
+		if err != nil {
+			db.Close()
+			return nil, fmt.Errorf("begin fts transaction: %w", err)
+		}
+
+		if _, err := tx.Exec(collection.FTSSchema); err != nil {
+			tx.Rollback()
 			db.Close()
 			return nil, fmt.Errorf("fts schema failed: %w", err)
 		}
-		// Triggers to keep FTS in sync automatically
+
 		triggers := `
 		CREATE TRIGGER IF NOT EXISTS records_ai AFTER INSERT ON records BEGIN
-		  INSERT INTO records_fts(rowid, content) VALUES (new.rowid, new.jsontext);
+			INSERT INTO records_fts(rowid, content) VALUES (new.rowid, new.jsontext);
 		END;
 		CREATE TRIGGER IF NOT EXISTS records_ad AFTER DELETE ON records BEGIN
-		  INSERT INTO records_fts(records_fts, rowid, content) VALUES('delete', old.rowid, old.jsontext);
+			DELETE FROM records_fts WHERE rowid=old.rowid;
 		END;
 		CREATE TRIGGER IF NOT EXISTS records_au AFTER UPDATE ON records BEGIN
-		  INSERT INTO records_fts(records_fts, rowid, content) VALUES('delete', old.rowid, old.jsontext);
-		  INSERT INTO records_fts(rowid, content) VALUES (new.rowid, new.jsontext);
+			DELETE FROM records_fts WHERE rowid=old.rowid;
+			INSERT INTO records_fts(rowid, content) VALUES (new.rowid, new.jsontext);
 		END;
 		`
-		if _, err := db.Exec(triggers); err != nil {
+		if _, err := tx.Exec(triggers); err != nil {
+			tx.Rollback()
 			db.Close()
 			return nil, fmt.Errorf("fts triggers failed: %w", err)
+		}
+
+		if err := tx.Commit(); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("commit fts transaction: %w", err)
 		}
 	}
 
@@ -84,6 +99,9 @@ func (s *SqliteStore) Close() error { return s.db.Close() }
 func (s *SqliteStore) Path() string { return s.path }
 
 func (s *SqliteStore) CreateRecord(ctx context.Context, r *pb.CollectionRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	query := `INSERT INTO records (id, proto_data, data_uri, created_at, updated_at, labels, jsontext) 
               VALUES (?, ?, ?, ?, ?, ?, ?)`
 	
@@ -110,6 +128,9 @@ func (s *SqliteStore) CreateRecord(ctx context.Context, r *pb.CollectionRecord) 
 }
 
 func (s *SqliteStore) GetRecord(ctx context.Context, id string) (*pb.CollectionRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	var (
 		protoData            []byte
 		dataUri              sql.NullString
@@ -140,6 +161,15 @@ func (s *SqliteStore) GetRecord(ctx context.Context, id string) (*pb.CollectionR
 }
 
 func (s *SqliteStore) UpdateRecord(ctx context.Context, r *pb.CollectionRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
 	query := `UPDATE records SET proto_data=?, updated_at=?, labels=?, jsontext=? WHERE id=?`
 	labelsJSON, _ := json.Marshal(r.Metadata.Labels)
 	
@@ -147,10 +177,10 @@ func (s *SqliteStore) UpdateRecord(ctx context.Context, r *pb.CollectionRecord) 
 	if json.Valid(r.ProtoData) {
 		jsonText = string(r.ProtoData)
 	} else {
-		jsonText = "{}"
+		return fmt.Errorf("invalid JSON")
 	}
 
-	res, err := s.db.ExecContext(ctx, query,
+	res, err := tx.ExecContext(ctx, query,
 		r.ProtoData,
 		r.Metadata.UpdatedAt.Seconds,
 		string(labelsJSON),
@@ -165,15 +195,22 @@ func (s *SqliteStore) UpdateRecord(ctx context.Context, r *pb.CollectionRecord) 
 	if rows == 0 {
 		return fmt.Errorf("record not found")
 	}
-	return nil
+
+	return tx.Commit()
 }
 
 func (s *SqliteStore) DeleteRecord(ctx context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	_, err := s.db.ExecContext(ctx, "DELETE FROM records WHERE id=?", id)
 	return err
 }
 
 func (s *SqliteStore) ListRecords(ctx context.Context, offset, limit int) ([]*pb.CollectionRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	rows, err := s.db.QueryContext(ctx, `SELECT id, proto_data, data_uri, created_at, updated_at, labels FROM records ORDER BY created_at DESC LIMIT ? OFFSET ?`, limit, offset)
 	if err != nil {
 		return nil, err
@@ -289,7 +326,7 @@ func (s *SqliteStore) Search(ctx context.Context, q *collection.SearchQuery) ([]
 		var r pb.CollectionRecord
 		var score sql.NullFloat64 
 
-		var scanArgs = []any{r.Id, r.ProtoData}
+		var scanArgs = []any{&r.Id, &r.ProtoData}
 		if q.FullText != "" {
 			scanArgs = append(scanArgs, &score)
 		}
