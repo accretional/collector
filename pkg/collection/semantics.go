@@ -4,14 +4,15 @@ import (
 	"context"
 )
 
-// SemanticEngine defines high-level intelligence operations on a Collection.
-type SemanticEngine struct {
-	Collection *Collection
-	Embedder   Embedder // Interface for generating vectors
-}
-
+// Embedder defines how to turn text into vectors.
 type Embedder interface {
 	Embed(ctx context.Context, text string) ([]float32, error)
+}
+
+// SemanticEngine defines intelligence operations on a Collection.
+type SemanticEngine struct {
+	Collection *Collection
+	Embedder   Embedder
 }
 
 // FindSimilar performs a semantic search by embedding the query text 
@@ -25,23 +26,7 @@ func (s *SemanticEngine) FindSimilar(ctx context.Context, queryText string, limi
 	q := &SearchQuery{
 		Vector: vector,
 		Limit:  limit,
-		// We can also mix in filters or FTS here for hybrid search
 	}
 	
-	return s.Collection.Store.Search(ctx, q)
-}
-
-// AutoTag generates labels for a record based on its content using an LLM or heuristic.
-func (s *SemanticEngine) AutoTag(ctx context.Context, recordID string) error {
-	// 1. Fetch record
-	// 2. Send text representation to LLM
-	// 3. Parse tags
-	// 4. Update record metadata
-	return nil
-}
-
-// Deduplicate finds semantically identical records using vector distance.
-func (s *SemanticEngine) Deduplicate(ctx context.Context, threshold float64) ([]string, error) {
-	// Queries the vector index for pairs with distance < threshold
-	return nil, nil
+	return s.Collection.Search(ctx, q)
 }
