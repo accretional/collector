@@ -1,181 +1,75 @@
 package collection
 
 import (
-    "database/sql"
-    "fmt"
-    "os"
-    "path/filepath"
-    "time"
+	"context"
+	"fmt"
+	"time"
 
-    pb "github.com/accretional/collector/gen/collector"
-    _ "modernc.org/sqlite"
+	pb "github.com/accretional/collector/gen/collector"
 )
 
-// Collection wraps the proto message and manages persistence
+// Collection is the domain entity handling logic, validation, and high-level operations.
 type Collection struct {
-    proto      *pb.Collection
-    db         *sql.DB
-    basePath   string
-    dbPath     string
-    filesPath  string
+	Meta  *pb.Collection // Metadata state (kept in memory or managed externally)
+	Store Store          // The persistence layer
+	FS    FileSystem     // The filesystem layer
 }
 
-// CollectionOptions configures collection creation/loading
-type CollectionOptions struct {
-    BasePath string // Root directory for all collections
+// Options configures the collection features.
+type Options struct {
+	EnableFTS      bool
+	EnableJSON     bool // Enable JSON indexing/extraction
+	EnableVector   bool // Enable vector search capabilities
+	VectorDimensions int
 }
 
-// NewCollection creates a new Collection and initializes storage
-func NewCollection(proto *pb.Collection, opts CollectionOptions) (*Collection, error) {
-    if proto.Namespace == "" || proto.Name == "" {
-        return nil, fmt.Errorf("namespace and name are required")
-    }
+// NewCollection initializes a Collection with provided implementations.
+// Note: specific SQLite initialization happens in the factory/caller, not here.
+func NewCollection(meta *pb.Collection, store Store, fs FileSystem) (*Collection, error) {
+	if meta.Namespace == "" || meta.Name == "" {
+		return nil, fmt.Errorf("namespace and name are required")
+	}
 
-    // Setup paths: basePath/namespace/name/
-    collectionPath := filepath.Join(opts.BasePath, proto.Namespace, proto.Name)
-    dbPath := filepath.Join(collectionPath, "data.db")
-    filesPath := filepath.Join(collectionPath, "files")
+	// Initialize metadata timestamps if new
+	now := time.Now()
+	if meta.Metadata == nil {
+		meta.Metadata = &pb.Metadata{
+			CreatedAt: &pb.Timestamp{Seconds: now.Unix()},
+			UpdatedAt: &pb.Timestamp{Seconds: now.Unix()},
+		}
+	}
 
-    c := &Collection{
-        proto:     proto,
-        basePath:  opts.BasePath,
-        dbPath:    dbPath,
-        filesPath: filesPath,
-    }
-
-    // Create directory structure
-    if err := os.MkdirAll(collectionPath, 0755); err != nil {
-        return nil, fmt.Errorf("failed to create collection directory: %w", err)
-    }
-
-    if err := os.MkdirAll(filesPath, 0755); err != nil {
-        return nil, fmt.Errorf("failed to create files directory: %w", err)
-    }
-
-    // Initialize SQLite database
-    if err := c.initDatabase(); err != nil {
-        return nil, fmt.Errorf("failed to initialize database: %w", err)
-    }
-
-    // Set metadata timestamps
-    now := time.Now()
-    if proto.Metadata == nil {
-        proto.Metadata = &pb.Metadata{
-            CreatedAt: timestampProto(now),
-            UpdatedAt: timestampProto(now),
-        }
-    }
-
-    // Save the collection metadata
-    if err := c.saveMetadata(); err != nil {
-        return nil, fmt.Errorf("failed to save metadata: %w", err)
-    }
-
-    return c, nil
+	return &Collection{
+		Meta:  meta,
+		Store: store,
+		FS:    fs,
+	}, nil
 }
 
-// LoadCollection loads an existing collection from storage
-func LoadCollection(namespace, name string, opts CollectionOptions) (*Collection, error) {
-    collectionPath := filepath.Join(opts.BasePath, namespace, name)
-    dbPath := filepath.Join(collectionPath, "data.db")
-    filesPath := filepath.Join(collectionPath, "files")
+func (c *Collection) Create(ctx context.Context, record *pb.CollectionRecord) error {
+	// Validate record or enforce schema constraints here if needed
+	if record.Id == "" {
+		return fmt.Errorf("record id required")
+	}
+	
+	now := time.Now().Unix()
+	if record.Metadata == nil {
+		record.Metadata = &pb.Metadata{}
+	}
+	record.Metadata.CreatedAt = &pb.Timestamp{Seconds: now}
+	record.Metadata.UpdatedAt = &pb.Timestamp{Seconds: now}
 
-    // Check if collection exists
-    if _, err := os.Stat(dbPath); os.IsNotExist(err) {
-        return nil, fmt.Errorf("collection %s/%s does not exist", namespace, name)
-    }
-
-    c := &Collection{
-        basePath:  opts.BasePath,
-        dbPath:    dbPath,
-        filesPath: filesPath,
-    }
-
-    // Open database
-    db, err := sql.Open("sqlite", dbPath)
-    if err != nil {
-        return nil, fmt.Errorf("failed to open database: %w", err)
-    }
-    c.db = db
-
-    // Load metadata
-    proto, err := c.loadMetadata()
-    if err != nil {
-        return nil, fmt.Errorf("failed to load metadata: %w", err)
-    }
-    c.proto = proto
-
-    // Load filesystem structure if it exists
-    if err := c.loadFilesystem(); err != nil {
-        return nil, fmt.Errorf("failed to load filesystem: %w", err)
-    }
-
-    return c, nil
+	return c.Store.CreateRecord(ctx, record)
 }
 
-// ToProto returns the current state as a proto message
-func (c *Collection) ToProto(includeRecords bool) (*pb.Collection, error) {
-    proto := &pb.Collection{
-        Namespace:      c.proto.Namespace,
-        Name:           c.proto.Name,
-        MessageType:    c.proto.MessageType,
-        IndexedFields:  c.proto.IndexedFields,
-        ServerEndpoint: c.proto.ServerEndpoint,
-        Metadata:       c.proto.Metadata,
-    }
-
-    if includeRecords {
-        records, err := c.ListRecords(0, 1000) // Default limit
-        if err != nil {
-            return nil, fmt.Errorf("failed to list records: %w", err)
-        }
-        // Note: We don't populate records in the proto directly,
-        // they're accessed via storage methods
-    }
-
-    // Filesystem structure is loaded on-demand
-    if c.proto.Dir != nil {
-        proto.Dir = c.proto.Dir
-    }
-
-    return proto, nil
+func (c *Collection) Get(ctx context.Context, id string) (*pb.CollectionRecord, error) {
+	return c.Store.GetRecord(ctx, id)
 }
 
-// Close closes the database connection
+func (c *Collection) Search(ctx context.Context, query *SearchQuery) ([]*SearchResult, error) {
+	return c.Store.Search(ctx, query)
+}
+
 func (c *Collection) Close() error {
-    if c.db != nil {
-        return c.db.Close()
-    }
-    return nil
-}
-
-// GetPath returns the collection's filesystem path
-func (c *Collection) GetPath() string {
-    return filepath.Join(c.basePath, c.proto.Namespace, c.proto.Name)
-}
-
-// GetNamespace returns the namespace
-func (c *Collection) GetNamespace() string {
-    return c.proto.Namespace
-}
-
-// GetName returns the name
-func (c *Collection) GetName() string {
-    return c.proto.Name
-}
-
-// Helper to convert time.Time to protobuf Timestamp
-func timestampProto(t time.Time) *pb.Timestamp {
-    return &pb.Timestamp{
-        Seconds: t.Unix(),
-        Nanos:   int32(t.Nanosecond()),
-    }
-}
-
-// Helper to convert protobuf Timestamp to time.Time
-func timeFromProto(ts *pb.Timestamp) time.Time {
-    if ts == nil {
-        return time.Time{}
-    }
-    return time.Unix(ts.Seconds, int64(ts.Nanos))
+	return c.Store.Close()
 }
