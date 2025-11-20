@@ -5,6 +5,7 @@ go 1.24.0
 toolchain go1.24.10
 
 require (
+	github.com/amenzhinsky/go-memexec v0.7.1
 	github.com/google/uuid v1.6.0
 	google.golang.org/grpc v1.77.0
 	google.golang.org/protobuf v1.36.10

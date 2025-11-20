@@ -1,3 +1,5 @@
+github.com/amenzhinsky/go-memexec v0.7.1 h1:DVm4cXzklaNWZoTJgZUi/dlXtelhC7QBtX4luKjl1qk=
+github.com/amenzhinsky/go-memexec v0.7.1/go.mod h1:ApTO9/i2bcii7kvIXi74gum+/zYDzkiOXtuBZoYOKVE=
 github.com/dustin/go-humanize v1.0.1 h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkpeCY=
 github.com/dustin/go-humanize v1.0.1/go.mod h1:Mu1zIs6XwVuF/gI1OepvI0qD18qycQx+mFykh5fBlto=
 github.com/go-logr/logr v1.4.3 h1:CjnDlHq8ikf6E492q6eKboGOC0T8CDaOvkHCIg8idEI=
