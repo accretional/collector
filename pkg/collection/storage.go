@@ -197,31 +197,45 @@ func (c *Collection) loadMetadata() (*pb.Collection, error) {
     return proto, nil
 }
 
-// protoToJSON converts proto_data bytes to JSON text
-// This assumes proto_data is already JSON or converts it if needed
-func protoToJSON(protoData []byte) (string, error) {
-    // Check if it's already valid JSON
-    var js json.RawMessage
-    if err := json.Unmarshal(protoData, &js); err == nil {
-        // Already JSON, compact it
-        compact := &bytes.Buffer{}
-        if err := json.Compact(compact, protoData); err == nil {
-            return compact.String(), nil
-        }
+// You need to store the MessageDescriptor in the Collection struct when you load it
+// (This requires resolving the descriptor from your Registry using the MessageTypeRef)
+
+func (c *Collection) protoToJSON(protoData []byte) (string, error) {
+    // 1. If it's already JSON (text), just return it
+    if isJSON(protoData) {
         return string(protoData), nil
     }
-    
-    // If not JSON, try to decode as protobuf and marshal to JSON
-    // For now, we'll just store the bytes as a base64-encoded string in a JSON object
-    // In a real implementation, you'd use protojson to convert the proto to JSON
-    fallback := map[string]interface{}{
-        "_raw": string(protoData),
+
+    // 2. If we have a descriptor, use it to unmarshal binary -> dynamic message -> json
+    if c.messageDescriptor != nil {
+        // Create a dynamic message based on the known schema
+        msg := dynamicpb.NewMessage(c.messageDescriptor)
+        
+        // Unmarshal the binary wire format into the message
+        if err := proto.Unmarshal(protoData, msg); err != nil {
+             return "", fmt.Errorf("failed to unmarshal proto bytes: %w", err)
+        }
+
+        // Marshal the message to JSON using protojson
+        marshalOpts := protojson.MarshalOptions{
+            UseProtoNames:   true,
+            EmitUnpopulated: true,
+        }
+        jsonBytes, err := marshalOpts.Marshal(msg)
+        if err != nil {
+            return "", fmt.Errorf("failed to marshal to protojson: %w", err)
+        }
+        return string(jsonBytes), nil
     }
-    jsonBytes, err := json.Marshal(fallback)
-    if err != nil {
-        return "", fmt.Errorf("failed to convert proto to JSON: %w", err)
-    }
-    return string(jsonBytes), nil
+
+    // 3. Fallback if no descriptor is available (Legacy behavior)
+    return "", fmt.Errorf("cannot convert binary proto to JSON without message descriptor")
+}
+
+// Helper to check for JSON prefix
+func isJSON(b []byte) bool {
+    x := bytes.TrimLeft(b, " \t\r\n")
+    return len(x) > 0 && (x[0] == '{' || x[0] == '[')
 }
 
 // CreateRecord adds a new record to the collection
