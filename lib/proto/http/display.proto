@@ -1,0 +1,154 @@
+syntax = "proto3";
+
+package rpc.http.v1;
+
+import "google/protobuf/struct.proto";
+
+option go_package = "github.com/yourorg/rpc/gen/http/v1;httpv1";
+
+// =============================================================================
+// Display / UI Eventing
+// =============================================================================
+
+message HTMLEncode {
+  string target_element_id = 1;
+
+  enum SwapStrategy {
+    INNER_HTML = 0;
+    OUTER_HTML = 1;
+    APPEND = 2;
+    PREPEND = 3;
+    DELETE = 4;
+    UPDATE_ATTRIBUTES = 5;
+    NONE = 6;
+  }
+  SwapStrategy swap = 2;
+
+  oneof content {
+    string html = 3;
+    string markdown = 4;
+    Component component = 5;
+  }
+
+  map<string, string> kv_attributes = 6;
+  BrowserIntent browser_intent = 7;
+}
+
+message Component {
+  oneof type {
+    google.protobuf.Struct json_tree = 1;
+    Table table = 2;
+    Image image = 3;
+    LoadingSpinner spinner = 4;
+    Form form = 5;
+    LogViewer logs = 6;
+    CodeBlock code = 7;
+    CustomComponent custom = 8;
+  }
+}
+
+// =============================================================================
+// Component Definitions
+// =============================================================================
+
+message LoadingSpinner {
+  string message = 1;
+  bool is_visible = 2;
+}
+
+message Form {
+  string title = 1;
+  string submit_target = 2; 
+  string submit_label = 3;
+  repeated FormField fields = 4;
+}
+
+message FormField {
+  string name = 1;
+  string label = 2;
+  string placeholder = 3;
+  
+  enum Type {
+    TEXT = 0;
+    PASSWORD = 1;
+    NUMBER = 2;
+    CHECKBOX = 3;
+    SELECT = 4;
+    TEXTAREA = 5;
+  }
+  Type type = 4;
+  string default_value = 5;
+  repeated string options = 6;
+  bool required = 7;
+}
+
+message LogViewer {
+  repeated LogEntry entries = 1;
+  bool enable_search = 2;
+  bool enable_tail = 3; 
+}
+
+message LogEntry {
+  string timestamp = 1;
+  enum Level {
+    INFO = 0;
+    WARN = 1;
+    ERROR = 2;
+    DEBUG = 3;
+  }
+  Level level = 2;
+  string message = 3;
+}
+
+message CodeBlock {
+  string language = 1; 
+  string code = 2;
+  bool copy_button = 3;
+}
+
+message CustomComponent {
+  string name = 1;
+  map<string, google.protobuf.Value> props = 2;
+}
+
+message Image {
+  string alt_text = 1;
+  oneof source {
+    string url = 2;
+    bytes base64_data = 3;
+  }
+  string mime_type = 4;
+}
+
+message Table {
+  repeated string headers = 1;
+  repeated Row rows = 2;
+  message Row {
+    repeated string cells = 1;
+  }
+}
+
+// =============================================================================
+// Browser Intents
+// =============================================================================
+
+message BrowserIntent {
+  oneof action {
+    string open_url = 1;
+    string copy_to_clipboard = 2;
+    Notification notification = 3;
+  }
+}
+
+message Notification {
+  enum Type {
+    TYPE_UNSPECIFIED = 0;
+    TYPE_INFO = 1;
+    TYPE_SUCCESS = 2;
+    TYPE_WARNING = 3;
+    TYPE_ERROR = 4;
+  }
+  Type type = 1;
+  string title = 2;
+  string message = 3;
+}
