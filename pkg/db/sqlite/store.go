@@ -6,10 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/accretional/collector/pkg/collection"
 	pb "github.com/accretional/collector/gen/collector"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	_ "modernc.org/sqlite" // Using modernc.org/sqlite (cgo-free)
 )
@@ -88,13 +88,7 @@ func (s *SqliteStore) CreateRecord(ctx context.Context, r *pb.CollectionRecord) 
               VALUES (?, ?, ?, ?, ?, ?, ?)`
 	
 	labelsJSON, _ := json.Marshal(r.Metadata.Labels)
-	
-	// In a real app, you'd use protojson.Marshal, but for the test we can just verify the string
-	// or use a placeholder if the proto definition isn't fully generated yet.
-	jsonText := "{}" 
-	// Attempt to convert if possible, otherwise fallback
-	// jsonBytes, _ := protojson.Marshal(r) 
-	// jsonText = string(jsonBytes)
+	jsonText := "{}" // Placeholder
 
 	_, err := s.db.ExecContext(ctx, query,
 		r.Id,
@@ -103,7 +97,7 @@ func (s *SqliteStore) CreateRecord(ctx context.Context, r *pb.CollectionRecord) 
 		r.Metadata.CreatedAt.Seconds,
 		r.Metadata.UpdatedAt.Seconds,
 		string(labelsJSON),
-		jsonText, // Populating this ensures FTS trigger fires correctly
+		jsonText,
 	)
 	return err
 }
@@ -128,8 +122,8 @@ func (s *SqliteStore) GetRecord(ctx context.Context, id string) (*pb.CollectionR
 		Id:        id,
 		ProtoData: protoData,
 		Metadata: &pb.Metadata{
-			CreatedAt: &pb.Timestamp{Seconds: createdAt},
-			UpdatedAt: &pb.Timestamp{Seconds: updatedAt},
+			CreatedAt: &timestamppb.Timestamp{Seconds: createdAt},
+			UpdatedAt: &timestamppb.Timestamp{Seconds: updatedAt},
 		},
 	}
 	if dataUri.Valid { r.DataUri = dataUri.String }
@@ -161,16 +155,28 @@ func (s *SqliteStore) DeleteRecord(ctx context.Context, id string) error {
 }
 
 func (s *SqliteStore) ListRecords(ctx context.Context, offset, limit int) ([]*pb.CollectionRecord, error) {
-	// Basic list implementation
-	rows, err := s.db.QueryContext(ctx, `SELECT id, proto_data FROM records ORDER BY created_at DESC LIMIT ? OFFSET ?`, limit, offset)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, proto_data, data_uri, created_at, updated_at, labels FROM records ORDER BY created_at DESC LIMIT ? OFFSET ?`, limit, offset)
 	if err != nil { return nil, err }
 	defer rows.Close()
 
 	var items []*pb.CollectionRecord
 	for rows.Next() {
-		var r pb.CollectionRecord
-		rows.Scan(&r.Id, &r.ProtoData)
-		// (Omitting full hydrate for brevity in list)
+		var (
+			r pb.CollectionRecord
+			dUri sql.NullString
+			created, updated int64
+			lJSON string
+		)
+		
+		rows.Scan(&r.Id, &r.ProtoData, &dUri, &created, &updated, &lJSON)
+		
+		r.Metadata = &pb.Metadata{
+			CreatedAt: &timestamppb.Timestamp{Seconds: created},
+			UpdatedAt: &timestamppb.Timestamp{Seconds: updated},
+		}
+		if dUri.Valid { r.DataUri = dUri.String }
+		if lJSON != "" { json.Unmarshal([]byte(lJSON), &r.Metadata.Labels) }
+
 		items = append(items, &r)
 	}
 	return items, nil
@@ -183,8 +189,6 @@ func (s *SqliteStore) CountRecords(ctx context.Context) (int64, error) {
 }
 
 func (s *SqliteStore) Search(ctx context.Context, q *collection.SearchQuery) ([]*collection.SearchResult, error) {
-	// This is where the real power is.
-	// We construct a query that joins the FTS table.
 	var query strings.Builder
 	var args []interface{}
 

@@ -2,7 +2,6 @@ package collection
 
 import (
 	"context"
-	"io"
 	"os"
 	"path/filepath"
 )

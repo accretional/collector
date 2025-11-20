@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
-	"time"
 
 	pb "github.com/accretional/collector/gen/collector"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // Options configures the feature set for a Collection.
@@ -31,10 +31,10 @@ func NewCollection(meta *pb.Collection, store Store, fs FileSystem) (*Collection
 	}
 
 	if meta.Metadata == nil {
-		now := time.Now().Unix()
+		now := timestamppb.Now()
 		meta.Metadata = &pb.Metadata{
-			CreatedAt: &pb.Timestamp{Seconds: now},
-			UpdatedAt: &pb.Timestamp{Seconds: now},
+			CreatedAt: now,
+			UpdatedAt: now,
 		}
 	}
 
@@ -51,11 +51,14 @@ func (c *Collection) CreateRecord(ctx context.Context, record *pb.CollectionReco
 	if record.Id == "" { return fmt.Errorf("record id required") }
 	// Ensure metadata exists
 	if record.Metadata == nil { record.Metadata = &pb.Metadata{} }
+	
+	// Set timestamps if missing
 	if record.Metadata.CreatedAt == nil {
-		now := time.Now().Unix()
-		record.Metadata.CreatedAt = &pb.Timestamp{Seconds: now}
-		record.Metadata.UpdatedAt = &pb.Timestamp{Seconds: now}
+		now := timestamppb.Now()
+		record.Metadata.CreatedAt = now
+		record.Metadata.UpdatedAt = now
 	}
+	
 	return c.Store.CreateRecord(ctx, record)
 }
 
@@ -65,7 +68,10 @@ func (c *Collection) GetRecord(ctx context.Context, id string) (*pb.CollectionRe
 
 func (c *Collection) UpdateRecord(ctx context.Context, record *pb.CollectionRecord) error {
 	if record.Id == "" { return fmt.Errorf("record id required") }
-	record.Metadata.UpdatedAt = &pb.Timestamp{Seconds: time.Now().Unix()}
+	
+	// Always update the UpdatedAt timestamp
+	record.Metadata.UpdatedAt = timestamppb.Now()
+	
 	return c.Store.UpdateRecord(ctx, record)
 }
 

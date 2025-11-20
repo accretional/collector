@@ -2,7 +2,6 @@ package collection
 
 import (
 	"context"
-	"io"
 
 	pb "github.com/accretional/collector/gen/collector"
 )

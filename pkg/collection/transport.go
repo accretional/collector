@@ -3,7 +3,6 @@ package collection
 import (
 	"context"
 	"fmt"
-	"io"
 )
 
 // Transport defines how a Collection is moved between nodes.

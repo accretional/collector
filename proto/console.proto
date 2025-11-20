@@ -2,6 +2,7 @@
 syntax = "proto3";
 
 package collector;
+option go_package = "github.com/accretional/collector/gen/collector";
 
 import "common.proto";
 import "google/protobuf/struct.proto";

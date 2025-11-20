@@ -2,10 +2,12 @@
 syntax = "proto3";
 
 package collector;
+option go_package = "github.com/accretional/collector/gen/collector";
 
 import "common.proto";
 import "collection.proto";
 import "google/protobuf/struct.proto";
+import "google/protobuf/any.proto"; // <--- ADDED THIS IMPORT
 
 // ============================================================================
 // CollectionRepo Service
@@ -50,7 +52,8 @@ message RouteResponse {
 // Search across multiple collections
 message SearchCollectionsRequest {
   string namespace = 1;
-  repeated string collection_names = 2;  // Empty for all
+  repeated string collection_names = 2;
+  // Empty for all
   google.protobuf.Struct query = 3;
   int32 limit = 4;
   string order_by = 5;

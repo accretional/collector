@@ -2,9 +2,11 @@
 syntax = "proto3";
 
 package collector;
+option go_package = "github.com/accretional/collector/gen/collector";
 
 import "common.proto";
 import "google/protobuf/any.proto";
+import "google/protobuf/timestamp.proto"; // <--- ADDED THIS IMPORT
 
 // ============================================================================
 // CollectiveDispatcher Service (aka DynamicDispatcher in design)
@@ -51,7 +53,8 @@ message Collector {
   string address = 2;
   repeated string namespaces = 3;
   repeated string capabilities = 4;
-  bool is_direct_peer = 5;  // vs indirect/discovered
+  bool is_direct_peer = 5;
+  // vs indirect/discovered
   Metadata metadata = 6;
   google.protobuf.Timestamp last_seen = 7;
 }
