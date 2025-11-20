@@ -1,0 +1,59 @@
+// common.proto
+syntax = "proto3";
+
+package collector;
+option go_package = "github.com/accretional/collector/gen/collector";
+
+import "google/protobuf/descriptor.proto";
+import "google/protobuf/timestamp.proto";
+
+// ============================================================================
+// Common Shared Types
+// ============================================================================
+
+message NamespacedName {
+  string namespace = 1;
+  string name = 2;
+}
+
+// Simplified - descriptor is optional, can be fetched from registry if needed
+message MessageTypeRef {
+  string namespace = 1;
+  string message_name = 2;
+}
+
+message ServiceTypeRef {
+  string namespace = 1;
+  string service_name = 2;
+}
+
+message Status {
+  enum Code {
+    OK = 0;
+    CANCELLED = 1;
+    UNKNOWN = 2;
+    INVALID_ARGUMENT = 3;
+    NOT_FOUND = 4;
+    ALREADY_EXISTS = 5;
+    PERMISSION_DENIED = 6;
+    RESOURCE_EXHAUSTED = 7;
+    FAILED_PRECONDITION = 8;
+    ABORTED = 9;
+    OUT_OF_RANGE = 10;
+    UNIMPLEMENTED = 11;
+    INTERNAL = 12;
+    UNAVAILABLE = 13;
+    DATA_LOSS = 14;
+  }
+  
+  Code code = 1;
+  string message = 2;
+  map<string, string> details = 3;
+}
+
+// Generic metadata wrapper used by many stored types
+message Metadata {
+  google.protobuf.Timestamp created_at = 1;
+  google.protobuf.Timestamp updated_at = 2;
+  map<string, string> labels = 3;
+}

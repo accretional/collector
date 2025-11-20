@@ -1,0 +1,170 @@
+// worker.proto
+syntax = "proto3";
+
+package collector;
+option go_package = "github.com/accretional/collector/gen/collector";
+
+import "common.proto";
+import "google/protobuf/any.proto";
+import "google/protobuf/struct.proto";
+
+// ============================================================================
+// CollectiveWorker Service
+// Maintains Collections: WorkflowDefinitions, ActiveWorkflows, Executions
+// Subtypes: Tasks, Continuations, Invocations
+// ============================================================================
+
+enum WorkflowState {
+  WORKFLOW_PENDING = 0;
+  WORKFLOW_RUNNING = 1;
+  WORKFLOW_SUCCEEDED = 2;
+  WORKFLOW_FAILED = 3;
+  WORKFLOW_CANCELLED = 4;
+  WORKFLOW_PAUSED = 5;
+}
+
+enum ExecutionState {
+  EXECUTION_PENDING = 0;
+  EXECUTION_RUNNING = 1;
+  EXECUTION_SUCCEEDED = 2;
+  EXECUTION_FAILED = 3;
+  EXECUTION_CANCELLED = 4;
+  EXECUTION_RETRYING = 5;
+}
+
+message RetryPolicy {
+  int32 max_attempts = 1;
+  int32 initial_delay_seconds = 2;
+  int32 max_delay_seconds = 3;
+  double backoff_multiplier = 4;
+}
+
+// Stored in WorkflowDefinitions Collection
+message WorkflowDefinition {
+  string id = 1;
+  string namespace = 2;
+  string name = 3;
+  repeated Task tasks = 4;
+  MessageTypeRef input_type = 5;
+  MessageTypeRef output_type = 6;
+  Metadata metadata = 7;
+}
+
+// Tasks are non-root nodes in a workflow
+message Task {
+  string id = 1;
+  string name = 2;
+  ServiceTypeRef service = 3;
+  string method_name = 4;
+  MessageTypeRef input_type = 5;
+  MessageTypeRef output_type = 6;
+  google.protobuf.Struct input_config = 7;
+  repeated string dependencies = 8;  // Other task IDs
+  RetryPolicy retry_policy = 9;
+  string continuation_id = 10;  // Optional: callback continuation
+}
+
+// Continuations are callbacks that can loop
+message Continuation {
+  string id = 1;
+  string namespace = 2;
+  string name = 3;
+  ServiceTypeRef service = 4;
+  string method_name = 5;
+  MessageTypeRef input_type = 6;
+  MessageTypeRef output_type = 7;
+  google.protobuf.Struct loop_condition = 8;  // When to continue looping
+  int32 max_iterations = 9;
+  Metadata metadata = 10;
+}
+
+// Stored in ActiveWorkflows Collection
+message ActiveWorkflow {
+  string id = 1;
+  string workflow_definition_id = 2;
+  string namespace = 3;
+  WorkflowState state = 4;
+  google.protobuf.Any input = 5;
+  google.protobuf.Any current_output = 6;
+  map<string, TaskExecution> task_executions = 7;
+  Metadata metadata = 8;
+}
+
+message TaskExecution {
+  string task_id = 1;
+  string execution_id = 2;
+  ExecutionState state = 3;
+  int32 attempt_number = 4;
+  Metadata metadata = 5;
+}
+
+// Stored in Executions Collection (history)
+message Execution {
+  string id = 1;
+  string workflow_id = 2;
+  string task_id = 3;
+  string namespace = 4;
+  ServiceTypeRef service = 5;
+  string method_name = 6;
+  google.protobuf.Any input = 7;
+  google.protobuf.Any output = 8;
+  ExecutionState state = 9;
+  Status error = 10;
+  int32 attempt_number = 11;
+  string executor_id = 12;
+  Metadata metadata = 13;
+}
+
+// Invocations are single RPC calls (can be standalone or part of workflow)
+message Invocation {
+  string id = 1;
+  string namespace = 2;
+  ServiceTypeRef service = 3;
+  string method_name = 4;
+  google.protobuf.Any input = 5;
+  string workflow_id = 6;  // Optional: if part of a workflow
+  string task_id = 7;  // Optional: if part of a task
+  Metadata metadata = 8;
+}
+
+// API Messages
+message StartWorkflowRequest {
+  string namespace = 1;
+  string workflow_name = 2;
+  google.protobuf.Any input = 3;
+  map<string, string> metadata = 4;
+}
+
+message StartWorkflowResponse {
+  Status status = 1;
+  string workflow_id = 2;
+}
+
+message GetWorkflowStatusRequest {
+  string namespace = 1;
+  string workflow_id = 2;
+}
+
+message GetWorkflowStatusResponse {
+  Status status = 1;
+  ActiveWorkflow workflow = 2;
+}
+
+message GetWorkflowHistoryRequest {
+  string namespace = 1;
+  string workflow_id = 2;
+  int32 page_size = 3;
+  string page_token = 4;
+}
+
+message GetWorkflowHistoryResponse {
+  Status status = 1;
+  repeated Execution executions = 2;
+  string next_page_token = 3;
+}
+
+service CollectiveWorker {
+  rpc StartWorkflow(StartWorkflowRequest) returns (StartWorkflowResponse);
+  rpc GetWorkflowStatus(GetWorkflowStatusRequest) returns (GetWorkflowStatusResponse);
+  rpc GetWorkflowHistory(GetWorkflowHistoryRequest) returns (GetWorkflowHistoryResponse);
+}

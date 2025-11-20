@@ -1,0 +1,116 @@
+// collection_server.proto
+syntax = "proto3";
+
+package collector;
+option go_package = "github.com/accretional/collector/gen/collector";
+
+import "common.proto";
+import "google/protobuf/any.proto";
+import "google/protobuf/struct.proto";
+
+// ============================================================================
+// CollectionServer Service - The Uniform CRUD Interface
+// All responses follow a consistent pattern
+// ============================================================================
+
+message CreateRequest {
+  string namespace = 1;
+  string collection_name = 2;
+  google.protobuf.Any item = 3;
+  string id = 4; // Optional, generated if not provided
+}
+
+message CreateResponse {
+  Status status = 1;
+  string id = 2;
+}
+
+message GetRequest {
+  string namespace = 1;
+  string collection_name = 2;
+  string id = 3;
+}
+
+message GetResponse {
+  Status status = 1;
+  google.protobuf.Any item = 2;
+}
+
+message UpdateRequest {
+  string namespace = 1;
+  string collection_name = 2;
+  string id = 3;
+  google.protobuf.Any item = 4;
+  repeated string update_mask = 5; // Field paths to update
+}
+
+message UpdateResponse {
+  Status status = 1;
+}
+
+message DeleteRequest {
+  string namespace = 1;
+  string collection_name = 2;
+  string id = 3;
+}
+
+message DeleteResponse {
+  Status status = 1;
+}
+
+message ListRequest {
+  string namespace = 1;
+  string collection_name = 2;
+  google.protobuf.Struct filter = 3;  // JSONB filter for SQLite
+  string order_by = 4;
+  int32 page_size = 5;
+  string page_token = 6;
+}
+
+message ListResponse {
+  Status status = 1;
+  repeated google.protobuf.Any items = 2;
+  string next_page_token = 3;
+  int64 total_count = 4;
+}
+
+message SearchRequest {
+  string namespace = 1;
+  string collection_name = 2;
+  google.protobuf.Struct query = 3;  // JSONB query for SQLite FTS
+  string order_by = 4;
+  int32 limit = 5;
+  int32 offset = 6;
+}
+
+message SearchResponse {
+  Status status = 1;
+  repeated google.protobuf.Any items = 2;
+  map<string, double> scores = 3;  // id -> relevance score
+  int64 total_count = 4;
+}
+
+// Invoke custom RPC method on items in collection
+// Delegates to CollectiveDispatcher.Serve for actual execution
+message InvokeRequest {
+  string namespace = 1;
+  string collection_name = 2;
+  string method_name = 3;
+  repeated string item_ids = 4;  // Can invoke on multiple items
+  google.protobuf.Any input = 5;
+}
+
+message InvokeResponse {
+  Status status = 1;
+  repeated google.protobuf.Any outputs = 2;  // One per item_id
+}
+
+service CollectionServer {
+  rpc Create(CreateRequest) returns (CreateResponse);
+  rpc Get(GetRequest) returns (GetResponse);
+  rpc Update(UpdateRequest) returns (UpdateResponse);
+  rpc Delete(DeleteRequest) returns (DeleteResponse);
+  rpc List(ListRequest) returns (ListResponse);
+  rpc Search(SearchRequest) returns (SearchResponse);
+  rpc Invoke(InvokeRequest) returns (InvokeResponse);
+}

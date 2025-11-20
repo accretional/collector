@@ -1,0 +1,51 @@
+// collection.proto
+syntax = "proto3";
+
+package collector;
+option go_package = "github.com/accretional/collector/gen/collector";
+
+import "common.proto";
+
+// ============================================================================
+// Collection Structure Types
+// These model the fundamental "inode + filesystem" concept
+// ============================================================================
+
+// File-like entity (leaf node in the filesystem)
+message CollectionData {
+  string name = 1;
+  oneof content {
+    bytes data = 2;
+    string uri = 3;  // Reference to external storage
+  }
+}
+
+// Directory-like entity (branch node in the filesystem)
+message CollectionDir {
+  string name = 1;
+  map<string, CollectionDir> subdirs = 2;
+  map<string, CollectionData> files = 3;
+}
+
+// A record in the Collection table (the "inode")
+// Only serialized proto bytes here, derive JSON as needed.
+// Note that table records do have a json_data field
+message CollectionRecord {
+  string id = 1;  // Primary key
+  bytes proto_data = 2;  // Serialized protobuf
+  string data_uri = 3;  // Optional reference to CollectionData/Dir
+  Metadata metadata = 4;
+}
+
+// The Collection itself: table (inode) + optional filesystem
+message Collection {
+  string namespace = 1;
+  string name = 2;
+  MessageTypeRef message_type = 3;
+  repeated string indexed_fields = 4;
+  
+  // Optional: if this Collection is served by a separate CollectionServer
+  string server_endpoint = 5;
+  
+  Metadata metadata = 6;
+}

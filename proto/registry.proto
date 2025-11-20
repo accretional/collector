@@ -1,0 +1,63 @@
+// registry.proto
+syntax = "proto3";
+
+package collector;
+option go_package = "github.com/accretional/collector/gen/collector";
+
+import "common.proto";
+import "google/protobuf/descriptor.proto";
+
+// ============================================================================
+// CollectorRegistry Service
+// Maintains Collections: RegisteredProtos, RegisteredServices
+// ============================================================================
+
+// Stored in RegisteredProtos Collection
+message RegisteredProto {
+  string id = 1;  // namespace/message_name
+  string namespace = 2;
+  string message_name = 3;
+  google.protobuf.FileDescriptorProto file_descriptor = 4;
+  repeated string dependencies = 5;  // List of dependency IDs
+  Metadata metadata = 6;
+}
+
+// Stored in RegisteredServices Collection
+message RegisteredService {
+  string id = 1;  // namespace/service_name
+  string namespace = 2;
+  string service_name = 3;
+  google.protobuf.ServiceDescriptorProto service_descriptor = 4;
+  repeated string method_names = 5;
+  Metadata metadata = 6;
+}
+
+// API Messages
+message RegisterProtoRequest {
+  string namespace = 1;
+  google.protobuf.FileDescriptorProto file_descriptor = 2;
+  repeated google.protobuf.FileDescriptorProto dependencies = 3;
+}
+
+message RegisterProtoResponse {
+  Status status = 1;
+  string proto_id = 2;
+  repeated string registered_messages = 3;
+}
+
+message RegisterServiceRequest {
+  string namespace = 1;
+  google.protobuf.ServiceDescriptorProto service_descriptor = 2;
+  google.protobuf.FileDescriptorProto file_descriptor = 3;
+}
+
+message RegisterServiceResponse {
+  Status status = 1;
+  string service_id = 2;
+  repeated string registered_methods = 3;
+}
+
+service CollectorRegistry {
+  rpc RegisterProto(RegisterProtoRequest) returns (RegisterProtoResponse);
+  rpc RegisterService(RegisterServiceRequest) returns (RegisterServiceResponse);
+}
