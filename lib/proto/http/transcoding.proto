@@ -4,7 +4,7 @@ package rpc.http.v1;
 
 import "google/protobuf/struct.proto";
 
-option go_package = "github.com/yourorg/rpc/gen/http/v1;httpv1";
+option go_package = "github.com/accretional/collector/lib/proto/http/v1;httpv1";
 
 // =============================================================================
 // HTTP Encoding (Request Builder)
