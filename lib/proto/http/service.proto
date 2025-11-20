@@ -1,0 +1,122 @@
+syntax = "proto3";
+
+package rpc.http.v1;
+
+import "http_primitives.proto";
+import "http_transcoding.proto";
+import "ui_types.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/struct.proto";
+
+option go_package = "github.com/accretional/collector/lib/proto/http/v1;httpv1";
+
+// =============================================================================
+// Service Definitions
+// =============================================================================
+
+service HTTPService {
+  // Configure updates the runtime behavior of the service.
+  rpc Configure(ServiceConfig) returns (ServiceConfig);
+
+  // Fetch is a Unary convenience wrapper.
+  rpc Fetch(HTTPRequest) returns (HTTPResponse);
+
+  // Execute performs the HTTP request with full streaming control.
+  rpc Execute(HTTPRequest) returns (stream HTTPResponseChunk);
+
+  // ConnectWebSocket opens a bidirectional stream.
+  rpc ConnectWebSocket(stream WebSocketClientMessage) returns (stream WebSocketServerMessage);
+}
+
+service DisplayService {
+  // Render sends an `HTMLEncode` event to the user interface.
+  rpc Render(HTMLEncode) returns (google.protobuf.Empty);
+}
+
+// =============================================================================
+// Request & Response Objects
+// =============================================================================
+
+message HTTPRequest {
+  HTTPMethod method = 1;
+  
+  // Low-level fields (Manual Mode).
+  Target target = 2;
+  RequestOptions options = 3;
+  Body body = 4;
+
+  // High-Level Builder (Templating Mode).
+  HTTPEncode encode = 6;
+
+  // Instructions on how to parse the response.
+  HTTPDecode decode = 5;
+}
+
+message HTTPResponse {
+  int32 status_code = 1;
+  repeated HTTPHeader headers = 2;
+  Body body = 3;
+  map<string, google.protobuf.Value> decoded_data = 4;
+}
+
+message HTTPResponseChunk {
+  oneof content {
+    ResponseMetadata metadata = 1;
+    bytes data_chunk = 2;
+    google.protobuf.Struct json_chunk = 3;
+    ResponseTrailers trailers = 4;
+  }
+}
+
+message ResponseMetadata {
+  int32 status_code = 1;
+  string status_reason = 2;
+  repeated HTTPHeader headers = 3;
+  CacheControl cache_control = 4;
+  repeated Cookie cookies = 5;
+}
+
+message ResponseTrailers {
+  repeated HTTPHeader headers = 1;
+}
+
+// =============================================================================
+// WebSocket Types
+// =============================================================================
+
+message WebSocketClientMessage {
+  oneof payload {
+    HTTPRequest handshake = 1;
+    WebSocketFrame frame = 2;
+  }
+}
+
+message WebSocketServerMessage {
+  oneof payload {
+    ResponseMetadata handshake_response = 1;
+    WebSocketFrame frame = 2;
+  }
+}
+
+message WebSocketFrame {
+  enum Type {
+    TYPE_UNSPECIFIED = 0;
+    TYPE_TEXT = 1;
+    TYPE_BINARY = 2;
+    TYPE_PING = 3;
+    TYPE_PONG = 4;
+    TYPE_CLOSE = 8;
+  }
+  Type type = 1;
+  bytes data = 2;
+}
+
+// =============================================================================
+// Configuration
+// =============================================================================
+
+message ServiceConfig {
+  RedirectPolicy default_redirect_policy = 1;
+  int64 default_timeout_ms = 2;
+  string user_agent = 3;
+}
