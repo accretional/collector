@@ -2,31 +2,47 @@ package collection
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"net/http"
+	"os"
 )
 
 // Fetcher handles retrieving Collection databases from remote sources.
-// This allows a client to download a full "Table" to query locally.
 type Fetcher struct {
-	Transport Transport
-	Client    *http.Client
+	Client *http.Client
 }
 
-// FetchRemoteDB downloads a sqlite database from a URL and initializes a Collection around it.
-// This enables "Serverless" read-replicas where the logic moves to the data.
-func (f *Fetcher) FetchRemoteDB(ctx context.Context, url string, localPath string) (*Collection, error) {
-	// 1. Stream download to temp location
-	// 2. Verify integrity (checksums)
-	// 3. Use Transport.Unpack or simple file move
-	// 4. Initialize Read-Only Store
-	return nil, nil
-}
+// FetchRemoteDB downloads a database and prepares a Collection.
+// In a real scenario, this would inject a specific Store implementation factory.
+func (f *Fetcher) FetchRemoteDB(ctx context.Context, url string, localPath string) error {
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return err
+	}
 
-// HotSwap replaces the underlying DB of a live collection with a fresher fetched version.
-func (f *Fetcher) HotSwap(ctx context.Context, target *Collection, newDBPath string) error {
-	// SQLite specific logic:
-	// 1. Close current Store connection.
-	// 2. Swap file paths atomically.
-	// 3. Re-open Store connection.
-	return nil
+	resp, err := f.Client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("bad status: %s", resp.Status)
+	}
+
+	// Write to temp file first
+	tmp := localPath + ".tmp"
+	out, err := os.Create(tmp)
+	if err != nil {
+		return err
+	}
+	
+	if _, err := io.Copy(out, resp.Body); err != nil {
+		out.Close()
+		return err
+	}
+	out.Close()
+
+	return os.Rename(tmp, localPath)
 }
