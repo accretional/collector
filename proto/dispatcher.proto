@@ -66,6 +66,12 @@ message ServeRequest {
   string method_name = 3;
   google.protobuf.Any input = 4;
   map<string, string> execution_context = 5;
+  
+  // Service definition - can be binary data or URI
+  oneof service_def {
+    bytes service_binary = 6;  // Binary service implementation
+    string service_uri = 7;    // URI to service implementation
+  }
 }
 
 message ServeResponse {

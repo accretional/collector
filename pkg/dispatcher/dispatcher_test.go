@@ -123,6 +123,7 @@ func TestServe_ServiceNotFound(t *testing.T) {
 		},
 		MethodName: "TestMethod",
 		Input:      &anypb.Any{},
+		// No service_binary or service_uri provided
 	}
 
 	resp, err := d.Serve(ctx, req)
@@ -133,7 +134,7 @@ func TestServe_ServiceNotFound(t *testing.T) {
 	if resp.Status.Code != pb.Status_NOT_FOUND {
 		t.Errorf("Expected NOT_FOUND, got %v", resp.Status.Code)
 	}
-	if resp.Status.Message != "service not found: test/test/TestService" {
+	if resp.Status.Message != "service not found and no service_def provided: test/test/TestService" {
 		t.Errorf("Unexpected error message: %s", resp.Status.Message)
 	}
 }
@@ -181,6 +182,91 @@ func TestDispatch_Placeholder(t *testing.T) {
 	}
 }
 
+func TestServe_WithServiceBinary_EmptyBinary(t *testing.T) {
+	d := New()
+	ctx := context.Background()
+
+	req := &pb.ServeRequest{
+		Namespace: "test",
+		Service: &pb.ServiceTypeRef{
+			Namespace:   "test",
+			ServiceName: "TestService",
+		},
+		MethodName: "TestMethod",
+		Input:      &anypb.Any{},
+		ServiceDef: &pb.ServeRequest_ServiceBinary{ServiceBinary: []byte{}},
+	}
+
+	resp, err := d.Serve(ctx, req)
+	if err != nil {
+		t.Fatalf("Serve returned error: %v", err)
+	}
+
+	if resp.Status.Code != pb.Status_INTERNAL {
+		t.Errorf("Expected INTERNAL, got %v", resp.Status.Code)
+	}
+	if !contains(resp.Status.Message, "execution failed") && !contains(resp.Status.Message, "service binary is empty") {
+		t.Errorf("Expected 'execution failed' or 'service binary is empty' in message, got: %s", resp.Status.Message)
+	}
+}
+
+func TestServe_WithServiceBinary_InvalidBinary(t *testing.T) {
+	d := New()
+	ctx := context.Background()
+
+	req := &pb.ServeRequest{
+		Namespace: "test",
+		Service: &pb.ServiceTypeRef{
+			Namespace:   "test",
+			ServiceName: "TestService",
+		},
+		MethodName: "TestMethod",
+		Input:      &anypb.Any{},
+		ServiceDef: &pb.ServeRequest_ServiceBinary{ServiceBinary: []byte("invalid binary")},
+	}
+
+	resp, err := d.Serve(ctx, req)
+	if err != nil {
+		t.Fatalf("Serve returned error: %v", err)
+	}
+
+	if resp.Status.Code != pb.Status_INTERNAL {
+		t.Errorf("Expected INTERNAL, got %v", resp.Status.Code)
+	}
+	if !contains(resp.Status.Message, "execution failed") {
+		t.Errorf("Expected 'execution failed' in message, got: %s", resp.Status.Message)
+	}
+}
+
+func TestServe_WithServiceURI(t *testing.T) {
+	d := New()
+	ctx := context.Background()
+
+	req := &pb.ServeRequest{
+		Namespace: "test",
+		Service: &pb.ServiceTypeRef{
+			Namespace:   "test",
+			ServiceName: "TestService",
+		},
+		MethodName: "TestMethod",
+		Input:      &anypb.Any{},
+		ServiceDef: &pb.ServeRequest_ServiceUri{ServiceUri: "http://example.com/service"},
+	}
+
+	resp, err := d.Serve(ctx, req)
+	if err != nil {
+		t.Fatalf("Serve returned error: %v", err)
+	}
+
+	// Currently returns UNIMPLEMENTED as placeholder
+	if resp.Status.Code != pb.Status_UNIMPLEMENTED {
+		t.Errorf("Expected UNIMPLEMENTED, got %v", resp.Status.Code)
+	}
+	if resp.Status.Message != "service URI resolution not yet implemented" {
+		t.Errorf("Unexpected message: %s", resp.Status.Message)
+	}
+}
+
 func TestConvertGRPCCode(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -212,4 +298,14 @@ func TestConvertGRPCCode(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Helper function to check if string contains substring
+func contains(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }

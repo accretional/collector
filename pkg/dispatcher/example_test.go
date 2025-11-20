@@ -45,7 +45,7 @@ func ExampleDynamicDispatcher() {
 	}
 
 	// Output:
-	// Service not found: service not found: example/example/GreeterService
+	// Service not found: service not found and no service_def provided: example/example/GreeterService
 }
 
 // Example demonstrates registering a service (placeholder for future functionality)

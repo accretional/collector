@@ -21,13 +21,22 @@ type DynamicDispatcher struct {
 
 	// methodRegistry maps service+method names to their handlers
 	methodRegistry map[string]grpc.MethodDesc
+
+	// executor handles the actual method execution
+	executor *ServiceExecutor
 }
 
 // New creates a new DynamicDispatcher instance
 func New() *DynamicDispatcher {
+	return NewWithConfig(DefaultExecutorConfig())
+}
+
+// NewWithConfig creates a new DynamicDispatcher instance with custom executor configuration
+func NewWithConfig(config *ExecutorConfig) *DynamicDispatcher {
 	return &DynamicDispatcher{
 		serviceRegistry: make(map[string]interface{}),
 		methodRegistry:  make(map[string]grpc.MethodDesc),
+		executor:        NewServiceExecutor(config),
 	}
 }
 
@@ -71,6 +80,41 @@ func (d *DynamicDispatcher) Serve(ctx context.Context, req *pb.ServeRequest) (*p
 		}, nil
 	}
 
+	// Check if we have service binary data for direct execution
+	if serviceBinary := req.GetServiceBinary(); serviceBinary != nil {
+		// Execute using the service binary
+		result, err := d.executor.ExecuteMethod(ctx, req, serviceBinary)
+		if err != nil {
+			return &pb.ServeResponse{
+				Status: &pb.Status{
+					Code:    pb.Status_INTERNAL,
+					Message: fmt.Sprintf("execution failed: %v", err),
+				},
+			}, nil
+		}
+
+		return &pb.ServeResponse{
+			Status: &pb.Status{
+				Code:    pb.Status_OK,
+				Message: "success",
+			},
+			Output:     result,
+			ExecutorId: fmt.Sprintf("dynamic-dispatcher-mode-%d", d.executor.config.Mode),
+		}, nil
+	}
+
+	// Check if we have a service URI for resolution
+	if serviceURI := req.GetServiceUri(); serviceURI != "" {
+		// TODO: Implement service URI resolution and execution
+		return &pb.ServeResponse{
+			Status: &pb.Status{
+				Code:    pb.Status_UNIMPLEMENTED,
+				Message: "service URI resolution not yet implemented",
+			},
+		}, nil
+	}
+
+	// Fall back to registry-based execution (legacy approach)
 	// Create service key for lookup
 	serviceKey := fmt.Sprintf("%s/%s/%s", req.Namespace, req.Service.Namespace, req.Service.ServiceName)
 
@@ -80,7 +124,7 @@ func (d *DynamicDispatcher) Serve(ctx context.Context, req *pb.ServeRequest) (*p
 		return &pb.ServeResponse{
 			Status: &pb.Status{
 				Code:    pb.Status_NOT_FOUND,
-				Message: fmt.Sprintf("service not found: %s", serviceKey),
+				Message: fmt.Sprintf("service not found and no service_def provided: %s", serviceKey),
 			},
 		}, nil
 	}
@@ -99,9 +143,7 @@ func (d *DynamicDispatcher) Serve(ctx context.Context, req *pb.ServeRequest) (*p
 		}, nil
 	}
 
-	// Execute the method using reflection-like approach
-	// This is a basic implementation that would need to be enhanced
-	// for full dynamic dispatch capabilities
+	// Execute the method using registry-based approach
 	result, err := d.executeMethod(ctx, serviceImpl, methodDesc, req.Input)
 	if err != nil {
 		// Convert gRPC status errors to our Status format

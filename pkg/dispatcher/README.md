@@ -15,10 +15,20 @@ The `DynamicDispatcher` implements the `CollectiveDispatcher` service defined in
 ```go
 import "github.com/accretional/collector/pkg/dispatcher"
 
-// Create a new dispatcher
+// Create a new dispatcher with default config (direct execution)
 d := dispatcher.New()
 
-// Create a serve request
+// Or create with custom configuration
+config := &dispatcher.ExecutorConfig{
+    Mode:           dispatcher.ExecutionModeContainer, // Use container execution
+    Timeout:        30 * time.Second,
+    ContainerImage: "golang:1.21-alpine",
+    MaxMemory:      "512m",
+    MaxCPU:         "1",
+}
+d = dispatcher.NewWithConfig(config)
+
+// Create a serve request with service binary
 req := &pb.ServeRequest{
     Namespace: "example",
     Service: &pb.ServiceTypeRef{
@@ -27,6 +37,9 @@ req := &pb.ServeRequest{
     },
     MethodName: "SayHello",
     Input:      inputAny, // protobuf Any containing request data
+    ServiceDef: &pb.ServeRequest_ServiceBinary{
+        ServiceBinary: serviceBinaryData, // Actual executable binary
+    },
 }
 
 // Execute the request
@@ -45,25 +58,44 @@ if resp.Status.Code == pb.Status_OK {
 
 ### ✅ Implemented
 - Basic `Serve` method with validation and error handling
-- Service and method registry structure
+- **Two execution modes**: Direct (unsafe/fast) and Container (sandboxed)
+- **Direct execution**: Uses go-memexec to execute binary data from memory
+- **Container execution**: Runs service binaries in sandboxed Docker containers
+- Service binary and URI support in ServeRequest (oneof service_def)
+- Service and method registry structure (fallback mode)
 - gRPC status code conversion
 - Comprehensive test coverage
 - Input validation for required fields
 
 ### 🚧 Placeholder/Future Work
-- Actual method execution (currently returns UNIMPLEMENTED)
+- Service URI resolution and execution
 - Service registration and discovery
 - `Connect` method implementation
 - `Dispatch` method implementation
-- Security and sandboxing features mentioned in the design
+- Enhanced security features and resource limits
 
 ## Architecture
 
-The `DynamicDispatcher` maintains two internal registries:
+The `DynamicDispatcher` supports multiple execution modes:
+
+### 1. Binary Execution (Primary)
+When `service_binary` is provided in the ServeRequest:
+- **Direct Mode**: Uses `go-memexec` to execute binary data directly from memory
+- **Container Mode**: Executes binary in a sandboxed Docker container with resource limits
+
+### 2. URI Resolution (Future)
+When `service_uri` is provided, the dispatcher will resolve and fetch the service implementation.
+
+### 3. Registry-based (Fallback)
+Maintains two internal registries for backwards compatibility:
 - `serviceRegistry`: Maps namespace+service keys to service implementations
 - `methodRegistry`: Maps service+method keys to gRPC method descriptors
 
-This allows for dynamic registration and execution of gRPC services without compile-time binding.
+### Execution Flow
+1. Validate request fields (namespace, service, method_name)
+2. Check for service_binary → execute directly or in container
+3. Check for service_uri → resolve and execute (not yet implemented)
+4. Fall back to registry lookup → execute via registered handlers
 
 ## Security Considerations
 
