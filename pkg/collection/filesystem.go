@@ -98,6 +98,9 @@ func (c *Collection) loadFile(fsPath, name string) (*pb.CollectionData, error) {
 // SaveFile saves a CollectionData to the filesystem
 func (c *Collection) SaveFile(path string, data *pb.CollectionData) error {
     fullPath := filepath.Join(c.filesPath, path)
+    if !strings.HasPrefix(filepath.Clean(fullPath), filepath.Clean(c.filesPath)) {
+        return fmt.Errorf("invalid file path: traversal detected")
+    }
 
     // Create parent directories
     if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
