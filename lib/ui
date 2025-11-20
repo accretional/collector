@@ -1,0 +1,83 @@
+package ui
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"html/template"
+
+	"google.golang.org/protobuf/types/known/structpb"
+	httpv1 "github.com/accretional/collector/lib/proto/http/v1"
+)
+
+// DisplayClient wraps the UI service.
+type DisplayClient struct {
+	client httpv1.DisplayServiceClient
+}
+
+// Render sends a structured UI component (Client-Side Rendered).
+func (d *DisplayClient) Render(ctx context.Context, component *httpv1.Component) error {
+	_, err := d.client.Render(ctx, &httpv1.HTMLEncode{
+		Swap:            httpv1.HTMLEncode_APPEND,
+		TargetElementId: "main-output",
+		Content: &httpv1.HTMLEncode_Component{
+			Component: component,
+		},
+	})
+	return err
+}
+
+// RenderHTML sends raw HTML strings (Server-Side Rendered).
+func (d *DisplayClient) RenderHTML(ctx context.Context, htmlContent string) error {
+	_, err := d.client.Render(ctx, &httpv1.HTMLEncode{
+		Swap:            httpv1.HTMLEncode_APPEND,
+		TargetElementId: "main-output",
+		Content: &httpv1.HTMLEncode_Html{
+			Html: htmlContent,
+		},
+	})
+	return err
+}
+
+// --- Client-Side Component Generators ---
+
+func Markdown(text string) *httpv1.Component {
+	return &httpv1.Component{Type: &httpv1.Component_Markdown{Markdown: text}}
+}
+
+func JSONTree(data any) *httpv1.Component {
+	bytes, _ := json.Marshal(data)
+	s := &structpb.Struct{}
+	_ = s.UnmarshalJSON(bytes)
+	return &httpv1.Component{Type: &httpv1.Component_JsonTree{JsonTree: s}}
+}
+
+func Table(headers []string, rows [][]string) *httpv1.Component {
+	pbRows := make([]*httpv1.Table_Row, len(rows))
+	for i, r := range rows {
+		pbRows[i] = &httpv1.Table_Row{Cells: r}
+	}
+	return &httpv1.Component{
+		Type: &httpv1.Component_Table{
+			Table: &httpv1.Table{Headers: headers, Rows: pbRows},
+		},
+	}
+}
+
+func CodeBlock(lang, code string) *httpv1.Component {
+	return &httpv1.Component{
+		Type: &httpv1.Component_Code{
+			Code: &httpv1.CodeBlock{Language: lang, Code: code, CopyButton: true},
+		},
+	}
+}
+
+func Custom(name string, props map[string]any) *httpv1.Component {
+	s, err := structpb.NewStruct(props)
+	if err != nil { return nil }
+	return &httpv1.Component{
+		Type: &httpv1.Component_Custom{
+			Custom: &httpv1.CustomComponent{Name: name, Props: s.GetFields()},
+		},
+	}
+}
