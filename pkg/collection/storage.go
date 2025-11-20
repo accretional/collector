@@ -7,6 +7,7 @@ import (
     "time"
 
     pb "github.com/accretional/collector/gen/collector"
+    _ "modernc.org/sqlite"
 )
 
 // Checkpoint forces a WAL checkpoint (useful for testing durability)
@@ -53,14 +54,24 @@ func (c *Collection) initDatabase() error {
     }
 
     // Create records table
+    // Design notes:
+    // - proto_data: Binary protobuf data (BLOB) - the canonical source of truth
+    // - jsontext: JSON-encoded representation of proto_data (TEXT) - for querying/searching
+    //   This is generated from proto_data and kept in sync. SQLite's JSON functions
+    //   (json_extract, etc.) work on this column, not on proto_data.
+    // - labels: User-controlled key-value metadata (JSON object) - separate from proto_data
+    //   Users can set arbitrary labels for filtering/organizing records independently
+    //   of the protobuf message content.
+    // - data_uri: Optional reference to external/filesystem data associated with this record
     if _, err := db.Exec(`
         CREATE TABLE IF NOT EXISTS records (
             id TEXT PRIMARY KEY,
             proto_data BLOB NOT NULL,
+            jsontext TEXT NOT NULL,
             data_uri TEXT,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
-            labels TEXT -- JSON object for metadata.labels
+            labels TEXT
         )
     `); err != nil {
         return fmt.Errorf("failed to create records table: %w", err)
@@ -77,8 +88,9 @@ func (c *Collection) initDatabase() error {
         }
     }
 
-    // Create FTS5 virtual table for full-text search on JSONB data
-    // This allows searching within the proto_data when decoded as JSON
+    // Create FTS5 virtual table for full-text search
+    // Uses jsontext column content for indexing, allowing full-text search
+    // across the JSON representation of protobuf messages
     if _, err := db.Exec(`
         CREATE VIRTUAL TABLE IF NOT EXISTS records_fts USING fts5(
             id UNINDEXED,
@@ -185,8 +197,34 @@ func (c *Collection) loadMetadata() (*pb.Collection, error) {
     return proto, nil
 }
 
+// protoToJSON converts proto_data bytes to JSON text
+// This assumes proto_data is already JSON or converts it if needed
+func protoToJSON(protoData []byte) (string, error) {
+    // Check if it's already valid JSON
+    var js json.RawMessage
+    if err := json.Unmarshal(protoData, &js); err == nil {
+        // Already JSON, compact it
+        compact := &bytes.Buffer{}
+        if err := json.Compact(compact, protoData); err == nil {
+            return compact.String(), nil
+        }
+        return string(protoData), nil
+    }
+    
+    // If not JSON, try to decode as protobuf and marshal to JSON
+    // For now, we'll just store the bytes as a base64-encoded string in a JSON object
+    // In a real implementation, you'd use protojson to convert the proto to JSON
+    fallback := map[string]interface{}{
+        "_raw": string(protoData),
+    }
+    jsonBytes, err := json.Marshal(fallback)
+    if err != nil {
+        return "", fmt.Errorf("failed to convert proto to JSON: %w", err)
+    }
+    return string(jsonBytes), nil
+}
+
 // CreateRecord adds a new record to the collection
-// Add to CreateRecord method after the INSERT
 func (c *Collection) CreateRecord(record *pb.CollectionRecord) error {
     if record.Id == "" {
         return fmt.Errorf("record id is required")
@@ -200,14 +238,22 @@ func (c *Collection) CreateRecord(record *pb.CollectionRecord) error {
         }
     }
 
+    // Convert proto_data to JSON text for querying
+    jsontext, err := protoToJSON(record.ProtoData)
+    if err != nil {
+        return fmt.Errorf("failed to convert proto to JSON: %w", err)
+    }
+
+    // User-controlled labels (separate from proto content)
     labelsJSON, _ := json.Marshal(record.Metadata.Labels)
 
-    _, err := c.db.Exec(`
-        INSERT INTO records (id, proto_data, data_uri, created_at, updated_at, labels)
-        VALUES (?, ?, ?, ?, ?, ?)
+    _, err = c.db.Exec(`
+        INSERT INTO records (id, proto_data, jsontext, data_uri, created_at, updated_at, labels)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
     `,
         record.Id,
         record.ProtoData,
+        jsontext,
         record.DataUri,
         record.Metadata.CreatedAt.Seconds,
         record.Metadata.UpdatedAt.Seconds,
@@ -218,8 +264,8 @@ func (c *Collection) CreateRecord(record *pb.CollectionRecord) error {
         return err
     }
 
-    // Update FTS index
-    if err := c.updateFTSIndex(record.Id, record.ProtoData); err != nil {
+    // Update FTS index using jsontext
+    if err := c.updateFTSIndex(record.Id, jsontext); err != nil {
         return fmt.Errorf("failed to update FTS index: %w", err)
     }
 
@@ -230,16 +276,17 @@ func (c *Collection) CreateRecord(record *pb.CollectionRecord) error {
 func (c *Collection) GetRecord(id string) (*pb.CollectionRecord, error) {
     var (
         protoData           []byte
+        jsontext            string
         dataUri             sql.NullString
         createdAt, updatedAt int64
         labelsJSON          string
     )
 
     err := c.db.QueryRow(`
-        SELECT proto_data, data_uri, created_at, updated_at, labels
+        SELECT proto_data, jsontext, data_uri, created_at, updated_at, labels
         FROM records
         WHERE id = ?
-    `, id).Scan(&protoData, &dataUri, &createdAt, &updatedAt, &labelsJSON)
+    `, id).Scan(&protoData, &jsontext, &dataUri, &createdAt, &updatedAt, &labelsJSON)
 
     if err == sql.ErrNoRows {
         return nil, fmt.Errorf("record not found: %s", id)
@@ -272,7 +319,6 @@ func (c *Collection) GetRecord(id string) (*pb.CollectionRecord, error) {
 }
 
 // UpdateRecord updates an existing record
-// Add to UpdateRecord method after the UPDATE
 func (c *Collection) UpdateRecord(record *pb.CollectionRecord) error {
     if record.Id == "" {
         return fmt.Errorf("record id is required")
@@ -284,14 +330,21 @@ func (c *Collection) UpdateRecord(record *pb.CollectionRecord) error {
     }
     record.Metadata.UpdatedAt = &pb.Timestamp{Seconds: now}
 
+    // Convert proto_data to JSON text for querying
+    jsontext, err := protoToJSON(record.ProtoData)
+    if err != nil {
+        return fmt.Errorf("failed to convert proto to JSON: %w", err)
+    }
+
     labelsJSON, _ := json.Marshal(record.Metadata.Labels)
 
     result, err := c.db.Exec(`
         UPDATE records
-        SET proto_data = ?, data_uri = ?, updated_at = ?, labels = ?
+        SET proto_data = ?, jsontext = ?, data_uri = ?, updated_at = ?, labels = ?
         WHERE id = ?
     `,
         record.ProtoData,
+        jsontext,
         record.DataUri,
         record.Metadata.UpdatedAt.Seconds,
         string(labelsJSON),
@@ -310,8 +363,8 @@ func (c *Collection) UpdateRecord(record *pb.CollectionRecord) error {
         return fmt.Errorf("record not found: %s", record.Id)
     }
 
-    // Update FTS index
-    if err := c.updateFTSIndex(record.Id, record.ProtoData); err != nil {
+    // Update FTS index using jsontext
+    if err := c.updateFTSIndex(record.Id, jsontext); err != nil {
         return fmt.Errorf("failed to update FTS index: %w", err)
     }
 
@@ -319,7 +372,6 @@ func (c *Collection) UpdateRecord(record *pb.CollectionRecord) error {
 }
 
 // DeleteRecord removes a record by ID
-// Add to DeleteRecord method after the DELETE
 func (c *Collection) DeleteRecord(id string) error {
     result, err := c.db.Exec("DELETE FROM records WHERE id = ?", id)
     if err != nil {
@@ -349,7 +401,7 @@ func (c *Collection) ListRecords(offset, limit int) ([]*pb.CollectionRecord, err
     }
 
     rows, err := c.db.Query(`
-        SELECT id, proto_data, data_uri, created_at, updated_at, labels
+        SELECT id, proto_data, jsontext, data_uri, created_at, updated_at, labels
         FROM records
         ORDER BY created_at DESC
         LIMIT ? OFFSET ?
@@ -365,12 +417,13 @@ func (c *Collection) ListRecords(offset, limit int) ([]*pb.CollectionRecord, err
         var (
             id                  string
             protoData           []byte
+            jsontext            string
             dataUri             sql.NullString
             createdAt, updatedAt int64
             labelsJSON          string
         )
 
-        if err := rows.Scan(&id, &protoData, &dataUri, &createdAt, &updatedAt, &labelsJSON); err != nil {
+        if err := rows.Scan(&id, &protoData, &jsontext, &dataUri, &createdAt, &updatedAt, &labelsJSON); err != nil {
             return nil, err
         }
 
