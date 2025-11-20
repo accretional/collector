@@ -6,6 +6,11 @@ import (
     "fmt"
     "strings"
 
+    "google.golang.org/protobuf/encoding/protojson"
+    "google.golang.org/protobuf/proto"
+    "google.golang.org/protobuf/types/dynamicpb"
+    "google.golang.org/protobuf/reflect/protoreflect"
+
     pb "github.com/accretional/collector/gen/collector"
 )
 
@@ -174,25 +179,34 @@ func (c *Collection) buildSearchQuery(query SearchQuery) (string, []interface{},
         whereSQL = " WHERE " + strings.Join(whereClause, " AND ")
     }
 
-    // Construct ORDER BY clause
+    // Validate OrderBy
     if query.OrderBy != "" {
+        // 1. Check for valid characters to prevent injection
+        if !validOrderByRegex.MatchString(query.OrderBy) {
+            return "", nil, fmt.Errorf("invalid order_by parameter: potential injection detected")
+        }
+
         direction := "DESC"
         if query.Ascending {
             direction = "ASC"
         }
-        
-        // Check if ordering by a JSON field (operates on jsontext)
-        if strings.Contains(query.OrderBy, ".") {
+
+        // 2. Construct the clause safely based on known patterns
+        if query.OrderBy == "score" && joinFTS {
+             orderClause = fmt.Sprintf(" ORDER BY score %s", direction) // BM25 scores
+        } else if strings.Contains(query.OrderBy, ".") {
+            // JSON path ordering
             orderClause = fmt.Sprintf(" ORDER BY json_extract(r.jsontext, '$.%s') %s", query.OrderBy, direction)
-        } else if query.OrderBy == "score" && joinFTS {
-            // Order by relevance score
-            orderClause = " ORDER BY score ASC" // BM25 returns negative scores, lower is better
         } else {
-            orderClause = fmt.Sprintf(" ORDER BY r.%s %s", query.OrderBy, direction)
+            // Standard column ordering (whitelist the allowable columns)
+            switch query.OrderBy {
+            case "created_at", "updated_at", "id":
+                orderClause = fmt.Sprintf(" ORDER BY r.%s %s", query.OrderBy, direction)
+            default:
+                // Fallback for unknown columns: assume it's a top-level JSON field or reject it
+                orderClause = fmt.Sprintf(" ORDER BY json_extract(r.jsontext, '$.%s') %s", query.OrderBy, direction)
+            }
         }
-    } else if joinFTS {
-        // Default to score ordering for FTS queries
-        orderClause = " ORDER BY score ASC"
     }
 
     // Construct LIMIT and OFFSET
