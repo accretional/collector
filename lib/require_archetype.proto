@@ -1,0 +1,67 @@
+syntax = "proto3";
+
+package platform.resource.v1;
+
+import "google/protobuf/descriptor.proto";
+
+// We extend the standard Protobuf options to add our own "Framework Rules".
+
+extend google.protobuf.ServiceOptions {
+  // 1. Service-Level Enforcement
+  // Marks a service as a "Managed Resource". 
+  // tooling can fail build if this is missing.
+  ResourceConfig resource = 60001;
+}
+
+extend google.protobuf.MethodOptions {
+  // 2. Method Categorization
+  // Forces methods to be categorized (e.g., "Constructor", "Mutator", "Accessor").
+  // This helps the generator know which methods represent "Creation" (and thus need Archetypes).
+  MethodType method_type = 60002;
+}
+
+extend google.protobuf.MessageOptions {
+  // 3. Archetype Definitions
+  // If a message is used as a Request for a Constructor method, 
+  // it MUST define at least one archetype here.
+  repeated ArchetypePreset presets = 60003;
+}
+
+extend google.protobuf.FieldOptions {
+  // 4. Trait Definitions (Common Modifiers)
+  // Instead of writing "WithRegion", "WithZone" manually,
+  // users tag fields with a standard trait.
+  // e.g. string zone = 1 [(trait) = "geographic_location"];
+  string trait = 60004;
+}
+
+// --- Configuration Objects ---
+
+message ResourceConfig {
+  // The noun of the resource, e.g., "Instance", "Database"
+  string name = 1;
+  // The team responsible for this resource (for accountability)
+  string owner_team = 2;
+}
+
+enum MethodType {
+  METHOD_TYPE_UNSPECIFIED = 0;
+  // A method that creates a new resource (Target for Archetypes)
+  METHOD_TYPE_CONSTRUCTOR = 1;
+  // A method that changes state (Target for Modifiers)
+  METHOD_TYPE_MUTATOR = 2;
+  // A method that reads state (Target for Lenses)
+  METHOD_TYPE_ACCESSOR = 3;
+}
+
+message ArchetypePreset {
+  // The name of the archetype, e.g., "Production", "Micro", "GPU_Workstation"
+  string name = 1;
+  
+  // A description for the generated documentation/IDE tooltip.
+  string doc = 2;
+
+  // The generic defaults, represented as JSON.
+  // The generator will parse this and bake it into the Go struct.
+  string defaults_json = 3;
+}
