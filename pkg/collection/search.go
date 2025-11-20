@@ -6,7 +6,7 @@ import (
     "fmt"
     "strings"
 
-    pb "github.com/yourusername/collector/gen/collector"
+    pb "github.com/accretional/collector/gen/collector"
 )
 
 // SearchQuery represents a structured search query
@@ -15,7 +15,11 @@ type SearchQuery struct {
     FullText string
     
     // JSONB filters: field path -> filter
+    // These operate on the jsontext column
     Filters map[string]Filter
+    
+    // Label filters: operate on the user-controlled labels column
+    LabelFilters map[string]string
     
     // Ordering
     OrderBy   string
@@ -76,13 +80,14 @@ func (c *Collection) Search(query SearchQuery) ([]*SearchResult, error) {
         var (
             id                   string
             protoData            []byte
+            jsontext             string
             dataUri              sql.NullString
             createdAt, updatedAt int64
             labelsJSON           string
             score                sql.NullFloat64
         )
 
-        if err := rows.Scan(&id, &protoData, &dataUri, &createdAt, &updatedAt, &labelsJSON, &score); err != nil {
+        if err := rows.Scan(&id, &protoData, &jsontext, &dataUri, &createdAt, &updatedAt, &labelsJSON, &score); err != nil {
             return nil, fmt.Errorf("failed to scan row: %w", err)
         }
 
@@ -123,7 +128,7 @@ func (c *Collection) Search(query SearchQuery) ([]*SearchResult, error) {
 // buildSearchQuery constructs the SQL query from SearchQuery
 func (c *Collection) buildSearchQuery(query SearchQuery) (string, []interface{}, error) {
     var (
-        selectClause = "SELECT r.id, r.proto_data, r.data_uri, r.created_at, r.updated_at, r.labels"
+        selectClause = "SELECT r.id, r.proto_data, r.jsontext, r.data_uri, r.created_at, r.updated_at, r.labels"
         fromClause   = "FROM records r"
         whereClause  []string
         args         []interface{}
@@ -142,7 +147,7 @@ func (c *Collection) buildSearchQuery(query SearchQuery) (string, []interface{},
         selectClause += ", 0.0 as score"
     }
 
-    // Add JSONB filters
+    // Add JSONB filters (operate on jsontext column)
     if len(query.Filters) > 0 {
         for path, filter := range query.Filters {
             condition, filterArgs, err := c.buildFilterCondition(path, filter)
@@ -151,6 +156,15 @@ func (c *Collection) buildSearchQuery(query SearchQuery) (string, []interface{},
             }
             whereClause = append(whereClause, condition)
             args = append(args, filterArgs...)
+        }
+    }
+
+    // Add label filters (operate on labels column)
+    if len(query.LabelFilters) > 0 {
+        for key, value := range query.LabelFilters {
+            // Use json_extract on the labels column specifically
+            whereClause = append(whereClause, "json_extract(r.labels, ?) = ?")
+            args = append(args, "$."+key, value)
         }
     }
 
@@ -167,9 +181,9 @@ func (c *Collection) buildSearchQuery(query SearchQuery) (string, []interface{},
             direction = "ASC"
         }
         
-        // Check if ordering by a JSON field
+        // Check if ordering by a JSON field (operates on jsontext)
         if strings.Contains(query.OrderBy, ".") {
-            orderClause = fmt.Sprintf(" ORDER BY json_extract(r.proto_data, '$.%s') %s", query.OrderBy, direction)
+            orderClause = fmt.Sprintf(" ORDER BY json_extract(r.jsontext, '$.%s') %s", query.OrderBy, direction)
         } else if query.OrderBy == "score" && joinFTS {
             // Order by relevance score
             orderClause = " ORDER BY score ASC" // BM25 returns negative scores, lower is better
@@ -191,6 +205,7 @@ func (c *Collection) buildSearchQuery(query SearchQuery) (string, []interface{},
 }
 
 // buildFilterCondition builds a WHERE condition for a JSONB filter
+// All JSON operations now work on the jsontext column, not proto_data
 func (c *Collection) buildFilterCondition(path string, filter Filter) (string, []interface{}, error) {
     jsonPath := "$." + path
     var condition string
@@ -198,31 +213,32 @@ func (c *Collection) buildFilterCondition(path string, filter Filter) (string, [
 
     switch filter.Operator {
     case OpEquals:
-        condition = "json_extract(proto_data, ?) = ?"
+        // Operate on jsontext column for JSON extraction
+        condition = "json_extract(jsontext, ?) = ?"
         args = []interface{}{jsonPath, filter.Value}
     
     case OpNotEquals:
-        condition = "json_extract(proto_data, ?) != ?"
+        condition = "json_extract(jsontext, ?) != ?"
         args = []interface{}{jsonPath, filter.Value}
     
     case OpGreaterThan:
-        condition = "CAST(json_extract(proto_data, ?) AS REAL) > ?"
+        condition = "CAST(json_extract(jsontext, ?) AS REAL) > ?"
         args = []interface{}{jsonPath, filter.Value}
     
     case OpLessThan:
-        condition = "CAST(json_extract(proto_data, ?) AS REAL) < ?"
+        condition = "CAST(json_extract(jsontext, ?) AS REAL) < ?"
         args = []interface{}{jsonPath, filter.Value}
     
     case OpGreaterEqual:
-        condition = "CAST(json_extract(proto_data, ?) AS REAL) >= ?"
+        condition = "CAST(json_extract(jsontext, ?) AS REAL) >= ?"
         args = []interface{}{jsonPath, filter.Value}
     
     case OpLessEqual:
-        condition = "CAST(json_extract(proto_data, ?) AS REAL) <= ?"
+        condition = "CAST(json_extract(jsontext, ?) AS REAL) <= ?"
         args = []interface{}{jsonPath, filter.Value}
     
     case OpContains:
-        condition = "json_extract(proto_data, ?) LIKE ?"
+        condition = "json_extract(jsontext, ?) LIKE ?"
         args = []interface{}{jsonPath, fmt.Sprintf("%%%v%%", filter.Value)}
     
     case OpIn:
@@ -236,14 +252,14 @@ func (c *Collection) buildFilterCondition(path string, filter Filter) (string, [
             placeholders[i] = "?"
             args = append(args, values[i])
         }
-        condition = fmt.Sprintf("json_extract(proto_data, '%s') IN (%s)", jsonPath, strings.Join(placeholders, ","))
+        condition = fmt.Sprintf("json_extract(jsontext, '%s') IN (%s)", jsonPath, strings.Join(placeholders, ","))
     
     case OpExists:
-        condition = "json_extract(proto_data, ?) IS NOT NULL"
+        condition = "json_extract(jsontext, ?) IS NOT NULL"
         args = []interface{}{jsonPath}
     
     case OpNotExists:
-        condition = "json_extract(proto_data, ?) IS NULL"
+        condition = "json_extract(jsontext, ?) IS NULL"
         args = []interface{}{jsonPath}
     
     default:
@@ -254,13 +270,13 @@ func (c *Collection) buildFilterCondition(path string, filter Filter) (string, [
 }
 
 // updateFTSIndex updates the FTS5 index for a record
-func (c *Collection) updateFTSIndex(id string, protoData []byte) error {
-    // Convert proto data to searchable text
-    // For now, we'll just use the raw JSON representation
+// Now accepts jsontext directly instead of proto bytes
+func (c *Collection) updateFTSIndex(id string, jsontext string) error {
+    // Parse JSON and flatten to searchable text
     var jsonData map[string]interface{}
-    if err := json.Unmarshal(protoData, &jsonData); err != nil {
-        // If not JSON, use raw bytes as text
-        jsonData = map[string]interface{}{"data": string(protoData)}
+    if err := json.Unmarshal([]byte(jsontext), &jsonData); err != nil {
+        // If not valid JSON, use the raw text
+        jsonData = map[string]interface{}{"_content": jsontext}
     }
 
     // Flatten JSON to searchable text
