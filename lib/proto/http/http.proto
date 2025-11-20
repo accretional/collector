@@ -1,0 +1,126 @@
+syntax = "proto3";
+
+package rpc.http.v1;
+
+import "google/protobuf/struct.proto";
+
+option go_package = "github.com/yourorg/rpc/gen/http/v1;httpv1";
+
+// =============================================================================
+// Method & Routing
+// =============================================================================
+
+enum HTTPMethod {
+  METHOD_UNSPECIFIED = 0;
+  METHOD_GET = 1;
+  METHOD_POST = 2;
+  METHOD_PUT = 3;
+  METHOD_DELETE = 4;
+  METHOD_PATCH = 5;
+  METHOD_HEAD = 6;
+  METHOD_OPTIONS = 7;
+  METHOD_TRACE = 8;
+  METHOD_CONNECT = 9;
+}
+
+message Target {
+  string sub_domain = 1;
+  string domain = 2;
+  int32 port = 3;
+  repeated string path_segments = 4;
+  string fragment = 5;
+  repeated URLParameter parameters = 6;
+  string uri = 7; // Override
+}
+
+message URLParameter {
+  string key = 1;
+  repeated string values = 2;
+}
+
+// =============================================================================
+// Headers & Options
+// =============================================================================
+
+message RequestOptions {
+  CacheControl cache_control = 1;
+  FormatControl format = 2;
+  int64 timeout_ms = 4;
+  repeated Cookie cookies = 5;
+  RedirectPolicy redirect_policy = 6;
+  repeated HTTPHeader headers = 3;
+  map<string, string> simple_headers = 7;
+}
+
+message HTTPHeader {
+  string key = 1;
+  repeated string values = 2;
+}
+
+message Cookie {
+  string name = 1;
+  string value = 2;
+  int32 max_age = 3;
+  int64 expires_unix = 4;
+  string domain = 5;
+  string path = 6;
+  bool secure = 7;
+  bool http_only = 8;
+  string same_site = 9;
+}
+
+enum RedirectPolicy {
+  REDIRECT_POLICY_UNSPECIFIED = 0;
+  REDIRECT_POLICY_FOLLOW = 1;
+  REDIRECT_POLICY_NO_FOLLOW = 2;
+}
+
+message CacheControl {
+  bool no_cache = 1;
+  bool no_store = 2;
+  bool no_transform = 3;
+  bool only_if_cached = 4;
+  int32 max_age_seconds = 5;
+  int32 max_stale_seconds = 6;
+  int32 min_fresh_seconds = 7;
+}
+
+message FormatControl {
+  string content_type = 1;
+  ContentEncoding encoding = 2;
+  repeated string languages = 3;
+}
+
+enum ContentEncoding {
+  ENCODING_UNSPECIFIED = 0;
+  ENCODING_IDENTITY = 1;
+  ENCODING_GZIP = 2;
+  ENCODING_COMPRESS = 3;
+  ENCODING_DEFLATE = 4;
+  ENCODING_BR = 5;
+  ENCODING_ZSTD = 6;
+}
+
+// =============================================================================
+// Body & Payload
+// =============================================================================
+
+message Body {
+  oneof payload {
+    bytes raw_bytes = 1;
+    google.protobuf.Struct json_data = 2;
+    bool empty = 3;
+    MultipartBody multipart = 4;
+  }
+}
+
+message MultipartBody {
+  repeated Part parts = 1;
+  string boundary = 2; 
+  string subtype = 3; 
+}
+
+message Part {
+  repeated HTTPHeader headers = 1;
+  Body body = 2;
+}
