@@ -3,12 +3,10 @@ package collection_test
 import (
 	"bytes"
 	"context"
-	"os"
 	"path/filepath"
 	"testing"
 
 	pb "github.com/accretional/collector/gen/collector"
-	"github.com/accretional/collector/pkg/collection"
 )
 
 func TestSaveFile_Success(t *testing.T) {

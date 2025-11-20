@@ -3,6 +3,7 @@ package collection_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	pb "github.com/accretional/collector/gen/collector"

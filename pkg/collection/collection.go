@@ -69,6 +69,11 @@ func (c *Collection) GetRecord(ctx context.Context, id string) (*pb.CollectionRe
 func (c *Collection) UpdateRecord(ctx context.Context, record *pb.CollectionRecord) error {
 	if record.Id == "" { return fmt.Errorf("record id required") }
 	
+	// Ensure metadata exists
+	if record.Metadata == nil {
+		record.Metadata = &pb.Metadata{}
+	}
+
 	// Always update the UpdatedAt timestamp
 	record.Metadata.UpdatedAt = timestamppb.Now()
 	

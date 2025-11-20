@@ -22,17 +22,17 @@ type SqliteStore struct {
 
 // NewSqliteStore initializes the database and applies schemas.
 func NewSqliteStore(path string, opts collection.Options) (*SqliteStore, error) {
-	db, err := sql.Open("sqlite", path)
+	// WAL mode + busy_timeout are critical for concurrent access.
+	dsn := fmt.Sprintf("file:%s?_journal_mode=WAL&_busy_timeout=5000", path)
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open db: %w", err)
 	}
 
 	// Performance Pragmas
 	pragmas := []string{
-		"PRAGMA journal_mode = WAL",
 		"PRAGMA synchronous = NORMAL",
 		"PRAGMA foreign_keys = ON",
-		"PRAGMA busy_timeout = 5000",
 	}
 	for _, p := range pragmas {
 		if _, err := db.Exec(p); err != nil {
@@ -88,7 +88,14 @@ func (s *SqliteStore) CreateRecord(ctx context.Context, r *pb.CollectionRecord) 
               VALUES (?, ?, ?, ?, ?, ?, ?)`
 	
 	labelsJSON, _ := json.Marshal(r.Metadata.Labels)
-	jsonText := "{}" // Placeholder
+
+	// If proto_data is valid JSON, use it for jsontext. Otherwise, use a default.
+	var jsonText string
+	if json.Valid(r.ProtoData) {
+		jsonText = string(r.ProtoData)
+	} else {
+		jsonText = "{}"
+	}
 
 	_, err := s.db.ExecContext(ctx, query,
 		r.Id,
@@ -133,19 +140,31 @@ func (s *SqliteStore) GetRecord(ctx context.Context, id string) (*pb.CollectionR
 }
 
 func (s *SqliteStore) UpdateRecord(ctx context.Context, r *pb.CollectionRecord) error {
-	query := `UPDATE records SET proto_data=?, updated_at=?, labels=? WHERE id=?`
+	query := `UPDATE records SET proto_data=?, updated_at=?, labels=?, jsontext=? WHERE id=?`
 	labelsJSON, _ := json.Marshal(r.Metadata.Labels)
 	
-	res, err := s.db.ExecContext(ctx, query, 
-		r.ProtoData, 
-		r.Metadata.UpdatedAt.Seconds, 
-		string(labelsJSON), 
+	var jsonText string
+	if json.Valid(r.ProtoData) {
+		jsonText = string(r.ProtoData)
+	} else {
+		jsonText = "{}"
+	}
+
+	res, err := s.db.ExecContext(ctx, query,
+		r.ProtoData,
+		r.Metadata.UpdatedAt.Seconds,
+		string(labelsJSON),
+		jsonText,
 		r.Id,
 	)
-	if err != nil { return err }
-	
+	if err != nil {
+		return err
+	}
+
 	rows, _ := res.RowsAffected()
-	if rows == 0 { return fmt.Errorf("record not found") }
+	if rows == 0 {
+		return fmt.Errorf("record not found")
+	}
 	return nil
 }
 
@@ -156,7 +175,9 @@ func (s *SqliteStore) DeleteRecord(ctx context.Context, id string) error {
 
 func (s *SqliteStore) ListRecords(ctx context.Context, offset, limit int) ([]*pb.CollectionRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id, proto_data, data_uri, created_at, updated_at, labels FROM records ORDER BY created_at DESC LIMIT ? OFFSET ?`, limit, offset)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	defer rows.Close()
 
 	var items []*pb.CollectionRecord
@@ -191,31 +212,97 @@ func (s *SqliteStore) CountRecords(ctx context.Context) (int64, error) {
 func (s *SqliteStore) Search(ctx context.Context, q *collection.SearchQuery) ([]*collection.SearchResult, error) {
 	var query strings.Builder
 	var args []interface{}
+	var whereClauses []string
 
-	query.WriteString(`SELECT r.id, r.proto_data, bm25(records_fts) as score 
-	                   FROM records r 
-	                   JOIN records_fts fts ON r.rowid = fts.rowid 
-	                   WHERE records_fts MATCH ?`)
-	args = append(args, q.FullText)
+	// Base query
+	query.WriteString(`SELECT r.id, r.proto_data `)
+	if q.FullText != "" {
+		query.WriteString(`, bm25(records_fts) as score `)
+	}
+	query.WriteString(`FROM records r `)
+	if q.FullText != "" {
+		query.WriteString(`JOIN records_fts fts ON r.rowid = fts.rowid `)
+	}
 
+	// Full-text search
+	if q.FullText != "" {
+		whereClauses = append(whereClauses, `records_fts MATCH ?`)
+		args = append(args, q.FullText)
+	}
+
+	// JSON filters
+	for key, filter := range q.Filters {
+		// JSON path needs to be properly quoted for keys with dots.
+		path := `$.` + key
+
+		switch filter.Operator {
+		case collection.OpExists:
+			whereClauses = append(whereClauses, `json_extract(r.jsontext, ?) IS NOT NULL`)
+			args = append(args, path)
+		case collection.OpNotExists:
+			whereClauses = append(whereClauses, `json_extract(r.jsontext, ?) IS NULL`)
+			args = append(args, path)
+		case collection.OpContains:
+			whereClauses = append(whereClauses, `json_extract(r.jsontext, ?) LIKE ?`)
+			args = append(args, path, "%"+fmt.Sprintf("%v", filter.Value)+"%")
+		default:
+			whereClauses = append(whereClauses, fmt.Sprintf(`json_extract(r.jsontext, ?) %s ?`, filter.Operator))
+			args = append(args, path, filter.Value)
+		}
+	}
+
+	// Append WHERE clauses
+	if len(whereClauses) > 0 {
+		query.WriteString("WHERE " + strings.Join(whereClauses, " AND "))
+	}
+
+	// Ordering
+	if q.OrderBy != "" {
+		order := "ASC"
+		if !q.Ascending {
+			order = "DESC"
+		}
+		query.WriteString(fmt.Sprintf(` ORDER BY json_extract(r.jsontext, '$.%s') %s`, q.OrderBy, order))
+	} else if q.FullText != "" {
+		// Default to score for FTS
+		query.WriteString(" ORDER BY score")
+	}
+
+	// Pagination
 	if q.Limit > 0 {
-		query.WriteString(" ORDER BY score LIMIT ? OFFSET ?")
-		args = append(args, q.Limit, q.Offset)
+		query.WriteString(" LIMIT ?")
+		args = append(args, q.Limit)
+	}
+	if q.Offset > 0 {
+		query.WriteString(" OFFSET ?")
+		args = append(args, q.Offset)
 	}
 
 	rows, err := s.db.QueryContext(ctx, query.String(), args...)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	defer rows.Close()
 
 	var results []*collection.SearchResult
 	for rows.Next() {
 		var r pb.CollectionRecord
-		var score float64
-		rows.Scan(&r.Id, &r.ProtoData, &score)
-		results = append(results, &collection.SearchResult{
-			Record: &r,
-			Score:  score,
-		})
+		var score sql.NullFloat64 // Use NullFloat64 for optional score
+
+		var scanArgs []interface{}{&r.Id, &r.ProtoData}
+		if q.FullText != "" {
+			scanArgs = append(scanArgs, &score)
+		}
+
+		if err := rows.Scan(scanArgs...); err != nil {
+			return nil, err
+		}
+
+		searchResult := &collection.SearchResult{Record: &r}
+		if score.Valid {
+			searchResult.Score = score.Float64
+		}
+		results = append(results, searchResult)
 	}
 	return results, nil
 }

@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	pb "github.com/accretional/collector/gen/collector"
-	// "github.com/accretional/collector/pkg/collection"
+	"github.com/accretional/collector/pkg/collection"
 )
 
 func BenchmarkCreateRecord(b *testing.B) {
