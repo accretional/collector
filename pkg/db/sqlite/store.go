@@ -353,3 +353,24 @@ func (s *SqliteStore) ExecuteRaw(q string, args ...interface{}) error {
 	_, err := s.db.Exec(q, args...)
 	return err
 }
+
+func (s *SqliteStore) ReIndex(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, "DELETE FROM records_fts"); err != nil {
+		return err
+	}
+
+	if _, err := tx.ExecContext(ctx, "INSERT INTO records_fts(rowid, content) SELECT rowid, jsontext FROM records"); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}

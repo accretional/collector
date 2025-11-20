@@ -28,8 +28,9 @@ type Store interface {
 
 	// Maintenance
 	Checkpoint(ctx context.Context) error
-	
-	// ExecuteRaw allows lower-level operations required for advanced features 
+	ReIndex(ctx context.Context) error
+
+	// ExecuteRaw allows lower-level operations required for advanced features
 	// like backup (VACUUM INTO) or combination (ATTACH DATABASE).
 	ExecuteRaw(query string, args ...interface{}) error
 }
@@ -84,3 +85,8 @@ const (
 	OpExists       FilterOperator = "EXISTS"
 	OpNotExists    FilterOperator = "NOT_EXISTS"
 )
+
+// CollectionRepo defines the interface for a collection repository.
+type CollectionRepo interface {
+	GetCollection(ctx context.Context, namespace, name string) (*Collection, error)
+}

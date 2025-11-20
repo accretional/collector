@@ -5,13 +5,18 @@ package collector;
 option go_package = "github.com/accretional/collector/gen/collector";
 
 import "common.proto";
+import "collection.proto";
 import "google/protobuf/any.proto";
 import "google/protobuf/struct.proto";
 
 // ============================================================================
-// CollectionServer Service - The Uniform CRUD Interface
+// CollectionService Service - The Uniform CRUD + Search Interface
 // All responses follow a consistent pattern
 // ============================================================================
+
+//-----------------------------------------------------------------------------
+// Core CRUD Operations
+//-----------------------------------------------------------------------------
 
 message CreateRequest {
   string namespace = 1;
@@ -74,21 +79,133 @@ message ListResponse {
   int64 total_count = 4;
 }
 
+
+//-----------------------------------------------------------------------------
+// Search
+// Matches the underlying SearchQuery/SearchResult model
+//-----------------------------------------------------------------------------
+
 message SearchRequest {
   string namespace = 1;
   string collection_name = 2;
-  google.protobuf.Struct query = 3;  // JSONB query for SQLite FTS
-  string order_by = 4;
-  int32 limit = 5;
-  int32 offset = 6;
+
+  string full_text = 3;
+  map<string, Filter> filters = 4;
+  map<string, string> label_filters = 5;
+  repeated float vector = 6;
+  float similarity_threshold = 7;
+  int32 limit = 8;
+  int32 offset = 9;
+  string order_by = 10;
+  bool ascending = 11;
 }
 
 message SearchResponse {
   Status status = 1;
-  repeated google.protobuf.Any items = 2;
-  map<string, double> scores = 3;  // id -> relevance score
-  int64 total_count = 4;
+  repeated SearchResult results = 2;
+  int64 total_count = 3;
 }
+
+message SearchResult {
+  google.protobuf.Any item = 1;
+  double score = 2;      // For text relevance
+  double distance = 3;   // For vector similarity
+}
+
+message Filter {
+  FilterOperator operator = 1;
+  google.protobuf.Value value = 2;
+}
+
+enum FilterOperator {
+  OP_EQUALS = 0;
+  OP_NOT_EQUALS = 1;
+  OP_GREATER_THAN = 2;
+  OP_LESS_THAN = 3;
+  OP_GREATER_EQUAL = 4;
+  OP_LESS_EQUAL = 5;
+  OP_CONTAINS = 6;
+  OP_IN = 7;
+  OP_EXISTS = 8;
+  OP_NOT_EXISTS = 9;
+}
+
+
+//-----------------------------------------------------------------------------
+// Batch Operations
+//-----------------------------------------------------------------------------
+
+message BatchRequest {
+    string namespace = 1;
+    string collection_name = 2;
+    repeated RequestOp operations = 3;
+}
+
+message RequestOp {
+    oneof operation {
+        CreateRequest create = 1;
+        UpdateRequest update = 2;
+        DeleteRequest delete = 3;
+    }
+}
+
+message BatchResponse {
+    Status status = 1;
+    repeated ResponseOp responses = 2;
+}
+
+message ResponseOp {
+    Status status = 1;
+    oneof response {
+        CreateResponse create = 2;
+        UpdateResponse update = 3;
+        DeleteResponse delete = 4;
+    }
+}
+
+
+//-----------------------------------------------------------------------------
+// Introspection and Management
+//-----------------------------------------------------------------------------
+
+message DescribeRequest {
+    string namespace = 1;
+    string collection_name = 2;
+}
+
+message DescribeResponse {
+    Status status = 1;
+    Collection collection_definition = 2;
+    int64 record_count = 3;
+    int64 storage_size_bytes = 4; // Estimated size on disk
+}
+
+message ModifyRequest {
+    string namespace = 1;
+    string collection_name = 2;
+    // For now, only supports changing indexed fields.
+    // Future: could change message type, etc., with careful migration.
+    repeated string indexed_fields = 3;
+}
+
+message ModifyResponse {
+    Status status = 1;
+}
+
+message MetaRequest {
+    // No parameters needed, returns info about the service itself.
+}
+
+message MetaResponse {
+    Status status = 1;
+    string server_version = 2;
+    // Potentially add info about supported features, etc.
+}
+
+
+//-----------------------------------------------------------------------------
+// Custom Logic
+//-----------------------------------------------------------------------------
 
 // Invoke custom RPC method on items in collection
 // Delegates to CollectiveDispatcher.Serve for actual execution
@@ -105,12 +222,30 @@ message InvokeResponse {
   repeated google.protobuf.Any outputs = 2;  // One per item_id
 }
 
-service CollectionServer {
+
+// ============================================================================
+// The Service Definition
+// ============================================================================
+
+service CollectionService {
+  // Core CRUD
   rpc Create(CreateRequest) returns (CreateResponse);
   rpc Get(GetRequest) returns (GetResponse);
   rpc Update(UpdateRequest) returns (UpdateResponse);
   rpc Delete(DeleteRequest) returns (DeleteResponse);
   rpc List(ListRequest) returns (ListResponse);
+
+  // Advanced Search
   rpc Search(SearchRequest) returns (SearchResponse);
+
+  // Batching
+  rpc Batch(BatchRequest) returns (BatchResponse);
+
+  // Introspection & Management
+  rpc Describe(DescribeRequest) returns (DescribeResponse);
+  rpc Modify(ModifyRequest) returns (ModifyResponse);
+  rpc Meta(MetaRequest) returns (MetaResponse);
+
+  // Custom Logic (stubbed for now)
   rpc Invoke(InvokeRequest) returns (InvokeResponse);
 }
