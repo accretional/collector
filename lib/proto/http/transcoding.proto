@@ -1,0 +1,67 @@
+syntax = "proto3";
+
+package rpc.http.v1;
+
+import "google/protobuf/struct.proto";
+
+option go_package = "github.com/yourorg/rpc/gen/http/v1;httpv1";
+
+// =============================================================================
+// HTTP Encoding (Request Builder)
+// =============================================================================
+
+// HTTPEncode defines how to turn a generic data payload into an HTTP Request.
+message HTTPEncode {
+  google.protobuf.Struct data = 1;
+  string path_template = 2;
+  map<string, string> query_params = 3;
+  map<string, string> headers = 4;
+
+  oneof body_strategy {
+    JsonEncode json = 5;
+    FormEncode form = 6;
+    string raw_body_field = 7;
+  }
+}
+
+message JsonEncode {
+  repeated string field_allowlist = 1;
+}
+
+message FormEncode {
+  repeated string field_allowlist = 1;
+}
+
+// =============================================================================
+// HTTP Decoding (Response Extraction)
+// =============================================================================
+
+// HTTPDecode defines how to turn a raw HTTP response into structured data.
+message HTTPDecode {
+  repeated string header_allowlist = 1;
+  map<string, string> json_extract = 2;
+  map<string, HTMLDecode> html_extract = 3;
+  map<string, string> regex_extract = 4;
+
+  enum StreamAccumulation {
+    ACCUMULATE_RAW = 0;
+    ACCUMULATE_JSON_STRING_FIELDS = 1;
+    ACCUMULATE_HTML_TEXT = 2;
+  }
+  StreamAccumulation stream_mode = 5;
+}
+
+message HTMLDecode {
+  string selector = 1;
+  enum Attribute {
+    TEXT_CONTENT = 0;
+    INNER_HTML = 1;
+    OUTER_HTML = 2;
+    HREF = 3;
+    SRC = 4;
+    CUSTOM_ATTR = 5;
+  }
+  Attribute attribute = 2;
+  string custom_attr_name = 3;
+  bool extract_all = 4;
+}
