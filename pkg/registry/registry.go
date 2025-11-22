@@ -6,6 +6,8 @@ import (
 
 	"github.com/accretional/collector/gen/collector"
 	"github.com/accretional/collector/pkg/collection"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -24,15 +26,26 @@ func NewRegistryServer(registeredProtos, registeredServices *collection.Collecti
 
 func (s *RegistryServer) RegisterProto(ctx context.Context, req *collector.RegisterProtoRequest) (*collector.RegisterProtoResponse, error) {
 	if req.FileDescriptor == nil {
-		return nil, fmt.Errorf("file descriptor is required")
+		return nil, status.Errorf(codes.InvalidArgument, "file descriptor is required")
+	}
+	if req.FileDescriptor.GetName() == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "file descriptor name is required")
 	}
 
 	registeredMessages := []string{}
 	for _, msg := range req.FileDescriptor.MessageType {
-		registeredMessages = append(registeredMessages, *msg.Name)
+		registeredMessages = append(registeredMessages, msg.GetName())
 	}
 
 	protoID := fmt.Sprintf("%s/%s", req.Namespace, req.FileDescriptor.GetName())
+
+	// Check for duplicates
+	_, err := s.registeredProtos.GetRecord(ctx, protoID)
+	if err == nil {
+		return nil, status.Errorf(codes.AlreadyExists, "proto already exists")
+	} else if status.Code(err) != codes.NotFound {
+		return nil, err
+	}
 
 	registeredProto := &collector.RegisteredProto{
 		Id:             protoID,
@@ -63,12 +76,27 @@ func (s *RegistryServer) RegisterProto(ctx context.Context, req *collector.Regis
 }
 
 func (s *RegistryServer) RegisterService(ctx context.Context, req *collector.RegisterServiceRequest) (*collector.RegisterServiceResponse, error) {
+	if req.ServiceDescriptor == nil {
+		return nil, status.Errorf(codes.InvalidArgument, "service descriptor is required")
+	}
+	if req.ServiceDescriptor.GetName() == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "service descriptor name is required")
+	}
+
 	methodNames := []string{}
 	for _, method := range req.ServiceDescriptor.Method {
-		methodNames = append(methodNames, *method.Name)
+		methodNames = append(methodNames, method.GetName())
 	}
 
 	serviceID := fmt.Sprintf("%s/%s", req.Namespace, req.ServiceDescriptor.GetName())
+
+	// Check for duplicates
+	_, err := s.registeredServices.GetRecord(ctx, serviceID)
+	if err == nil {
+		return nil, status.Errorf(codes.AlreadyExists, "service already exists")
+	} else if status.Code(err) != codes.NotFound {
+		return nil, err
+	}
 
 	registeredService := &collector.RegisteredService{
 		Id:                serviceID,
