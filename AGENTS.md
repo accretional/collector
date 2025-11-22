@@ -80,12 +80,13 @@ git stash pop
 
 ## Code Quality Standards
 
-### NO TODOs or FIXMEs
+### TODOs AND FIXMEs DISCOURAGED
 
-- ❌ Never leave `TODO` comments in code
-- ❌ Never leave `FIXME` comments
-- ❌ Never leave placeholder implementations
-- ✅ Either implement it properly or document it as a known limitation
+- ❌ PREFER NOT to leave `TODO` comments in code
+- ❌ PREFER NOT to `FIXME` comments
+- ❌ PREFER NOT to placeholder implementations
+- ✅ Implement it properly or document it as a known limitation
+- ✅ Finish your implementation later in the same session
 
 ### Interface Usage
 
@@ -100,12 +101,6 @@ git stash pop
 - ✅ Provide context in error messages
 - ✅ Use `fmt.Errorf("context: %w", err)` for wrapping
 - ❌ Never ignore errors with `_ = err`
-
-### Imports
-
-- ✅ Remove unused imports
-- ✅ Group imports: stdlib, external, internal
-- ✅ Run `gofmt -w` before committing
 
 ## Common Pitfalls
 
@@ -122,6 +117,8 @@ size := info.Size()
 
 The `FS` interface is for file attachments, not database files.
 
+NOTE FROM MAINTAINER: This seems wrong. I'm going to let the LLMs claim this is true, because it's their fault if it is. But we should probably resolve this if possible. We do actually want both files and databases to be on the FS interface.
+
 ### 2. API Signature Mismatches
 
 ```go
@@ -133,6 +130,8 @@ resp, err := registryServer.ListServices(ctx, &pb.ListServicesRequest{
     Namespace: namespace,
 })
 services := resp.Services
+// ❌ ULTRABAD: Mixing API signatures
+// Too unspeakable to show an example here
 ```
 
 ### 3. Proto Field Names
@@ -197,13 +196,9 @@ When adding features:
 **Checklist:**
 
 - [ ] Run `./RUN_ALL_TESTS_BEFORE_SUBMIT.sh` - ALL tests pass
-- [ ] Run `gofmt -w ./pkg/ ./cmd/` - Code is formatted
 - [ ] Check `git diff` - No unintended changes
-- [ ] Review all modified files - Changes are intentional
 - [ ] No TODOs or FIXMEs in code
-- [ ] All imports are used
-- [ ] Documentation is updated
-- [ ] Commit message is clear and descriptive
+- [ ] Documentation is updated if the change is large enough to justify it
 
 ## For Human Reviewers
 
