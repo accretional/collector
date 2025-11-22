@@ -105,6 +105,51 @@ message FetchResponse {
   int64 bytes_transferred = 5;
 }
 
+// Streaming messages for large data transfer
+message PushCollectionRequest {
+  // First message contains metadata
+  message Metadata {
+    NamespacedName source_collection = 1;
+    string dest_namespace = 2;
+    string dest_name = 3;
+    bool include_files = 4;
+    int64 total_size = 5;  // Total bytes to transfer
+  }
+
+  oneof data {
+    Metadata metadata = 1;
+    bytes chunk = 2;  // Data chunk
+  }
+}
+
+message PushCollectionResponse {
+  Status status = 1;
+  string collection_id = 2;
+  int64 records_cloned = 3;
+  int64 files_cloned = 4;
+  int64 bytes_received = 5;
+}
+
+message PullCollectionRequest {
+  NamespacedName source_collection = 1;
+  bool include_files = 2;
+}
+
+message PullCollectionChunk {
+  // First message contains metadata
+  message Metadata {
+    string collection_id = 1;
+    int64 total_size = 2;
+    int64 record_count = 3;
+    int64 file_count = 4;
+  }
+
+  oneof data {
+    Metadata metadata = 1;
+    bytes chunk = 2;  // Data chunk
+  }
+}
+
 service CollectionRepo {
   rpc CreateCollection(CreateCollectionRequest) returns (CreateCollectionResponse);
   rpc Discover(DiscoverRequest) returns (DiscoverResponse);
@@ -112,4 +157,8 @@ service CollectionRepo {
   rpc SearchCollections(SearchCollectionsRequest) returns (SearchCollectionsResponse);
   rpc Clone(CloneRequest) returns (CloneResponse);
   rpc Fetch(FetchRequest) returns (FetchResponse);
+
+  // Streaming RPCs for large data transfer
+  rpc PushCollection(stream PushCollectionRequest) returns (PushCollectionResponse);
+  rpc PullCollection(PullCollectionRequest) returns (stream PullCollectionChunk);
 }

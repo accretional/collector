@@ -26,15 +26,33 @@ type Transport interface {
 type SqliteTransport struct{}
 
 // Clone creates a consistent snapshot of the collection database.
-// Uses SQLite's VACUUM INTO for a consistent copy without long-term locks.
+// Uses SQLite's online backup API for hot backup with minimal locking.
+// This allows concurrent reads and writes during the backup process.
 func (t *SqliteTransport) Clone(ctx context.Context, c *Collection, destPath string) error {
 	// Ensure destination directory exists
 	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
 		return fmt.Errorf("failed to create destination directory: %w", err)
 	}
 
+	// Use the online backup API for hot backup
+	// This works with WAL mode and allows concurrent access
+	if err := c.Store.Backup(ctx, destPath); err != nil {
+		return fmt.Errorf("failed to backup database: %w", err)
+	}
+
+	return nil
+}
+
+// CloneFallback uses VACUUM INTO as a fallback if Backup is not available.
+// Note: This acquires locks and may block writes temporarily.
+func (t *SqliteTransport) CloneFallback(ctx context.Context, c *Collection, destPath string) error {
+	// Ensure destination directory exists
+	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+		return fmt.Errorf("failed to create destination directory: %w", err)
+	}
+
 	// Use VACUUM INTO for consistent snapshot
-	// This creates a complete copy of the database with a brief lock
+	// This creates a complete copy but acquires locks during the operation
 	query := fmt.Sprintf("VACUUM INTO '%s'", destPath)
 	if err := c.Store.ExecuteRaw(query); err != nil {
 		return fmt.Errorf("failed to clone database: %w", err)

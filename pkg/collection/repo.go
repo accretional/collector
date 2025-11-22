@@ -31,6 +31,10 @@ type Store interface {
 	Checkpoint(ctx context.Context) error
 	ReIndex(ctx context.Context) error
 
+	// Backup creates an online backup of the database to the specified path.
+	// This should be implemented in a WAL-friendly way to allow concurrent access.
+	Backup(ctx context.Context, destPath string) error
+
 	// ExecuteRaw allows lower-level operations required for advanced features
 	// like backup (VACUUM INTO) or combination (ATTACH DATABASE).
 	ExecuteRaw(query string, args ...interface{}) error

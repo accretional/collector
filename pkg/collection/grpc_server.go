@@ -90,6 +90,16 @@ func (s *GrpcServer) Fetch(ctx context.Context, req *pb.FetchRequest) (*pb.Fetch
 	return s.cloneManager.FetchRemote(ctx, req)
 }
 
+// PushCollection receives a streamed collection from a client and creates it locally.
+func (s *GrpcServer) PushCollection(stream pb.CollectionRepo_PushCollectionServer) error {
+	return s.cloneManager.ReceivePushedCollection(stream)
+}
+
+// PullCollection streams a collection to a client.
+func (s *GrpcServer) PullCollection(req *pb.PullCollectionRequest, stream pb.CollectionRepo_PullCollectionServer) error {
+	return s.cloneManager.StreamCollectionToPuller(req, stream)
+}
+
 // Start runs the gRPC server on the given port.
 func (s *GrpcServer) Start(port int) error {
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
