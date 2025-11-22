@@ -57,7 +57,45 @@ message RegisterServiceResponse {
   repeated string registered_methods = 3;
 }
 
+// Query Messages
+message LookupServiceRequest {
+  string namespace = 1;
+  string service_name = 2;
+}
+
+message LookupServiceResponse {
+  Status status = 1;
+  RegisteredService service = 2;
+}
+
+message ValidateMethodRequest {
+  string namespace = 1;
+  string service_name = 2;
+  string method_name = 3;
+}
+
+message ValidateMethodResponse {
+  Status status = 1;
+  bool is_valid = 2;
+  string message = 3;
+}
+
+message ListServicesRequest {
+  string namespace = 1;  // Empty for all namespaces
+}
+
+message ListServicesResponse {
+  Status status = 1;
+  repeated RegisteredService services = 2;
+}
+
 service CollectorRegistry {
+  // Registration
   rpc RegisterProto(RegisterProtoRequest) returns (RegisterProtoResponse);
   rpc RegisterService(RegisterServiceRequest) returns (RegisterServiceResponse);
+
+  // Queries
+  rpc LookupService(LookupServiceRequest) returns (LookupServiceResponse);
+  rpc ValidateMethod(ValidateMethodRequest) returns (ValidateMethodResponse);
+  rpc ListServices(ListServicesRequest) returns (ListServicesResponse);
 }

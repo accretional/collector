@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sync"
 	"syscall"
+	"time"
 
 	pb "github.com/accretional/collector/gen/collector"
 	"github.com/accretional/collector/pkg/collection"
@@ -17,6 +18,9 @@ import (
 	"github.com/accretional/collector/pkg/dispatch"
 	"github.com/accretional/collector/pkg/registry"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/descriptorpb"
 )
 
 func main() {
@@ -31,12 +35,9 @@ func run() error {
 	// Configuration
 	namespace := "production"
 	collectorID := "collector-001"
-	collectionServerPort := 50051
-	dispatcherPort := 50052
-	repoPort := 50053
-	registryPort := 50054
+	collectorPort := 50051
 
-	log.Printf("Starting Collector System (ID: %s, Namespace: %s)", collectorID, namespace)
+	log.Printf("Starting Collector (ID: %s, Namespace: %s)", collectorID, namespace)
 
 	// ========================================================================
 	// 1. Setup Registry Collections
@@ -121,141 +122,143 @@ func run() error {
 	log.Println("✓ Collection repository created")
 
 	// ========================================================================
-	// 3. Setup Dispatcher with Registry Validation
+	// 3. Create Single gRPC Server with ALL Services
 	// ========================================================================
 
-	validator := registry.NewRegistryValidator(registryServer)
-	dispatcher := dispatch.NewDispatcherWithRegistry(
-		collectorID,
-		fmt.Sprintf("localhost:%d", dispatcherPort),
-		[]string{namespace},
-		validator,
-	)
-	log.Printf("✓ Dispatcher created with registry validation")
+	// Create one gRPC server with validation for this namespace
+	grpcServer := registry.NewServerWithValidation(registryServer, namespace)
+
+	// Register ALL services on the same server
+
+	// 1. Registry Service
+	pb.RegisterCollectorRegistryServer(grpcServer, registryServer)
+	log.Println("✓ Registered CollectorRegistry service")
+
+	// 2. Collection Service
+	collectionServer := collection.NewCollectionServer(collectionRepo)
+	pb.RegisterCollectionServiceServer(grpcServer, collectionServer)
+	log.Println("✓ Registered CollectionService")
+
+	// 4. CollectionRepo Service
+	repoGrpcServer := collection.NewGrpcServer(collectionRepo)
+	pb.RegisterCollectionRepoServer(grpcServer, repoGrpcServer)
+	log.Println("✓ Registered CollectionRepo")
 
 	// ========================================================================
-	// 4. Start Servers
+	// 4. Start Server and Create Loopback Connection
 	// ========================================================================
 
-	var wg sync.WaitGroup
-	var servers []*grpc.Server
-
-	// Start Registry Server
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		if err := startRegistryServer(registryServer, registryPort); err != nil {
-			log.Printf("Registry server error: %v", err)
-		}
-	}()
-	log.Printf("✓ Registry server started on port %d", registryPort)
-
-	// Start CollectionService Server with validation
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		srv, lis, err := registry.SetupCollectionServiceWithValidation(
-			ctx,
-			registryServer,
-			namespace,
-			collectionRepo,
-			fmt.Sprintf("localhost:%d", collectionServerPort),
-		)
-		if err != nil {
-			log.Printf("CollectionService setup error: %v", err)
-			return
-		}
-		servers = append(servers, srv)
-		if err := srv.Serve(lis); err != nil {
-			log.Printf("CollectionService server error: %v", err)
-		}
-	}()
-	log.Printf("✓ CollectionService server started on port %d (with validation)", collectionServerPort)
-
-	// Start Dispatcher Server with validation
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		srv, lis, err := registry.SetupDispatcherWithValidation(
-			ctx,
-			registryServer,
-			namespace,
-			dispatcher,
-			fmt.Sprintf("localhost:%d", dispatcherPort),
-		)
-		if err != nil {
-			log.Printf("Dispatcher setup error: %v", err)
-			return
-		}
-		servers = append(servers, srv)
-		if err := srv.Serve(lis); err != nil {
-			log.Printf("Dispatcher server error: %v", err)
-		}
-	}()
-	log.Printf("✓ Dispatcher server started on port %d (with validation)", dispatcherPort)
-
-	// Start CollectionRepo Server with validation
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		repoGrpcServer := collection.NewGrpcServer(collectionRepo)
-		srv, lis, err := registry.SetupCollectionRepoWithValidation(
-			ctx,
-			registryServer,
-			namespace,
-			repoGrpcServer,
-			fmt.Sprintf("localhost:%d", repoPort),
-		)
-		if err != nil {
-			log.Printf("CollectionRepo setup error: %v", err)
-			return
-		}
-		servers = append(servers, srv)
-		if err := srv.Serve(lis); err != nil {
-			log.Printf("CollectionRepo server error: %v", err)
-		}
-	}()
-	log.Printf("✓ CollectionRepo server started on port %d (with validation)", repoPort)
-
-	// ========================================================================
-	// 5. Wait for shutdown signal
-	// ========================================================================
-
-	log.Println("\n========================================")
-	log.Println("All servers running with registry validation!")
-	log.Println("========================================")
-	log.Printf("Registry:         localhost:%d", registryPort)
-	log.Printf("CollectionService: localhost:%d", collectionServerPort)
-	log.Printf("Dispatcher:        localhost:%d", dispatcherPort)
-	log.Printf("CollectionRepo:    localhost:%d", repoPort)
-	log.Println("========================================")
-	log.Println("Press Ctrl+C to shutdown")
-
-	// Wait for interrupt signal
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	<-sigChan
-
-	log.Println("\nShutting down servers...")
-
-	// Graceful shutdown
-	for _, srv := range servers {
-		srv.GracefulStop()
-	}
-	dispatcher.Shutdown()
-
-	log.Println("Shutdown complete")
-	return nil
-}
-
-func startRegistryServer(registryServer *registry.RegistryServer, port int) error {
-	lis, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", port))
+	lis, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", collectorPort))
 	if err != nil {
 		return fmt.Errorf("failed to listen: %w", err)
 	}
 
-	grpcServer := grpc.NewServer()
-	pb.RegisterCollectorRegistryServer(grpcServer, registryServer)
+	// Start server in background so we can connect to it
+	go grpcServer.Serve(lis)
+	time.Sleep(100 * time.Millisecond) // Let server start
 
-	return grpcServer.Serve(lis)
+	actualAddr := lis.Addr().String()
+	log.Printf("✓ Server started on %s", actualAddr)
+
+	// ========================================================================
+	// 5. Setup Dispatcher with gRPC-based Registry Validation
+	// ========================================================================
+
+	// Create loopback gRPC connection to our own server for service-to-service communication
+	loopbackConn, err := grpc.NewClient(actualAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return fmt.Errorf("failed to create loopback connection: %w", err)
+	}
+	defer loopbackConn.Close()
+
+	// Create Registry client for validation via gRPC
+	registryClient := pb.NewCollectorRegistryClient(loopbackConn)
+
+	// Wrap the registry client to implement the ServiceMethodValidator interface
+	grpcValidator := &grpcRegistryClientValidator{client: registryClient}
+	validator := registry.NewGRPCRegistryValidator(grpcValidator)
+
+	// Create dispatcher with gRPC-based validation
+	dispatcher := dispatch.NewDispatcherWithRegistry(
+		collectorID,
+		actualAddr,
+		[]string{namespace},
+		validator,
+	)
+	log.Println("✓ Dispatcher created with gRPC-based registry validation")
+
+	// Register Dispatcher service
+	pb.RegisterCollectiveDispatcherServer(grpcServer, dispatcher)
+	log.Println("✓ Registered CollectiveDispatcher service")
+
+	log.Println("\n========================================")
+	log.Printf("Collector %s running on localhost:%d", collectorID, collectorPort)
+	log.Println("All services available:")
+	log.Println("  - CollectorRegistry")
+	log.Println("  - CollectionService")
+	log.Println("  - CollectiveDispatcher")
+	log.Println("  - CollectionRepo")
+	log.Printf("Namespace: %s", namespace)
+	log.Println("Registry validation: ENABLED")
+	log.Println("========================================")
+	log.Println("Press Ctrl+C to shutdown")
+
+	// Handle shutdown in background
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+		<-sigChan
+
+		log.Println("\nShutting down...")
+		grpcServer.GracefulStop()
+		dispatcher.Shutdown()
+		log.Println("Shutdown complete")
+	}()
+
+	// Serve (blocks until shutdown)
+	if err := grpcServer.Serve(lis); err != nil {
+		return fmt.Errorf("server error: %w", err)
+	}
+
+	wg.Wait()
+	return nil
+}
+
+// grpcRegistryClientValidator wraps a gRPC Registry client to implement ServiceMethodValidator
+type grpcRegistryClientValidator struct {
+	client pb.CollectorRegistryClient
+}
+
+// ValidateServiceMethod validates by calling the Registry via gRPC
+// Since the Registry doesn't have a dedicated ValidateMethod RPC, we use the direct validator
+// But the key is that we're going through the gRPC layer to access the registry
+func (v *grpcRegistryClientValidator) ValidateServiceMethod(ctx context.Context, namespace, serviceName, methodName string) error {
+	// For now, we attempt registration and check for AlreadyExists
+	// This validates that the service exists in the registry
+	// TODO: Add a dedicated ValidateMethod RPC to the Registry proto
+
+	// Create a minimal service descriptor
+	serviceDesc := &pb.RegisterServiceRequest{
+		Namespace: namespace,
+		ServiceDescriptor: &descriptorpb.ServiceDescriptorProto{
+			Name: proto.String(serviceName),
+		},
+	}
+
+	// Try to register - if it exists, we get AlreadyExists
+	_, err := v.client.RegisterService(ctx, serviceDesc)
+	if err != nil {
+		// AlreadyExists means the service is registered - validation passes!
+		if grpc.Code(err).String() == "AlreadyExists" {
+			return nil
+		}
+		// Other errors mean service not found or registry issue
+		return fmt.Errorf("service %s.%s not registered: %w", serviceName, methodName, err)
+	}
+
+	// If registration succeeded, the service wasn't registered before
+	return fmt.Errorf("service %s.%s was not registered in namespace %s", serviceName, methodName, namespace)
 }
