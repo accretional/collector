@@ -25,4 +25,5 @@ type CollectionRepo interface {
 	Route(ctx context.Context, req *pb.RouteRequest) (*pb.RouteResponse, error)
 	SearchCollections(ctx context.Context, req *pb.SearchCollectionsRequest) (*pb.SearchCollectionsResponse, error)
 	GetCollection(ctx context.Context, namespace, name string) (*Collection, error)
+	UpdateCollectionMetadata(ctx context.Context, namespace, name string, meta *pb.Collection) error
 }

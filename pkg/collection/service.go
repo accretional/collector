@@ -20,21 +20,18 @@ func NewCollectionRepoService(store Store) *CollectionRepoService {
 
 // CreateCollection creates a new collection.
 func (s *CollectionRepoService) CreateCollection(ctx context.Context, collection *pb.Collection) (*pb.CreateCollectionResponse, error) {
+	// Validate input
+	if collection == nil {
+		return nil, fmt.Errorf("collection cannot be nil")
+	}
+
 	// For simplicity, we'll use the collection's name as its ID.
 	// In a real-world scenario, you'd likely generate a unique ID.
 	id := fmt.Sprintf("%s/%s", collection.Namespace, collection.Name)
 
-	// Create a record to store the collection's metadata.
-	record := &pb.CollectionRecord{
-		Id: id,
-		// We can store the collection's metadata in the proto_data field.
-		// This is a bit of a hack, but it works for our purposes.
-		ProtoData: []byte{}, // Marshal the collection proto here
-	}
-
-	if err := s.store.CreateRecord(ctx, record); err != nil {
-		return nil, fmt.Errorf("could not create collection: %w", err)
-	}
+	// NOTE: We don't store the collection metadata as a record in the store
+	// because it would pollute the data records. The metadata is tracked
+	// in memory by the DefaultCollectionRepo.
 
 	return &pb.CreateCollectionResponse{
 		Status:       &pb.Status{Code: 200, Message: "OK"},

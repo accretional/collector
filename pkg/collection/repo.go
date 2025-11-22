@@ -2,6 +2,7 @@ package collection
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	pb "github.com/accretional/collector/gen/collector"
 )
@@ -39,9 +40,10 @@ type Store interface {
 // DefaultCollectionRepo is a facade that provides a simple interface for managing collections.
 // It uses a CollectionRepoService and a Store to do the heavy lifting.
 type DefaultCollectionRepo struct {
-	service *CollectionRepoService
-	store   Store
-	mu      sync.RWMutex
+	service     *CollectionRepoService
+	store       Store
+	collections map[string]*pb.Collection // Track created collections by namespace/name
+	mu          sync.RWMutex
 }
 
 // NewCollectionRepo creates a new DefaultCollectionRepo with the given Store.
@@ -49,8 +51,9 @@ func NewCollectionRepo(store Store) *DefaultCollectionRepo {
 	service := NewCollectionRepoService(store)
 
 	return &DefaultCollectionRepo{
-		service: service,
-		store:   store,
+		service:     service,
+		store:       store,
+		collections: make(map[string]*pb.Collection),
 	}
 }
 
@@ -58,7 +61,17 @@ func NewCollectionRepo(store Store) *DefaultCollectionRepo {
 func (r *DefaultCollectionRepo) CreateCollection(ctx context.Context, collection *pb.Collection) (*pb.CreateCollectionResponse, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.service.CreateCollection(ctx, collection)
+
+	resp, err := r.service.CreateCollection(ctx, collection)
+	if err != nil {
+		return nil, err
+	}
+
+	// Track the collection
+	key := collection.Namespace + "/" + collection.Name
+	r.collections[key] = collection
+
+	return resp, nil
 }
 
 // Discover finds collections based on the provided criteria.
@@ -84,15 +97,33 @@ func (r *DefaultCollectionRepo) SearchCollections(ctx context.Context, req *pb.S
 
 // GetCollection retrieves a Collection instance by namespace and name.
 func (r *DefaultCollectionRepo) GetCollection(ctx context.Context, namespace, name string) (*Collection, error) {
-	// For now, return a new Collection instance.
-	// In a real implementation, this would look up the collection metadata from the store.
-	meta := &pb.Collection{
-		Namespace: namespace,
-		Name:      name,
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	// Check if collection exists
+	key := namespace + "/" + name
+	meta, exists := r.collections[key]
+	if !exists {
+		return nil, fmt.Errorf("collection %s not found", key)
 	}
 
 	// Use a local filesystem implementation
 	fs := &LocalFileSystem{Root: ""}
 
 	return NewCollection(meta, r.store, fs)
+}
+
+// UpdateCollectionMetadata updates the metadata for an existing collection.
+func (r *DefaultCollectionRepo) UpdateCollectionMetadata(ctx context.Context, namespace, name string, meta *pb.Collection) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	key := namespace + "/" + name
+	if _, exists := r.collections[key]; !exists {
+		return fmt.Errorf("collection %s not found", key)
+	}
+
+	// Update the collection metadata
+	r.collections[key] = meta
+	return nil
 }
