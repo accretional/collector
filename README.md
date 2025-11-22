@@ -28,7 +28,7 @@ Next is the CollectionServer. This is an actual "loaded" Collection serving CRUD
 
 DynamicDispatcher has to have its Serve functionality configured or implemented specially to maintain security. It uses the Connect API to open DynamicDispatcherServers to other entities and Dispatch to begin dispatching something to a DynamicDispatcherServer within Serve. The Dispatch protobuf is a general model for contextualized RPCs between Collector instances. DynamicDispatcher maintains four collections: DispatchServers, Connections, Dispatches, and Collectors (cluster peers/indirect peers).
 
-CollectionRepo is the system for managing and using individual/aggregate Collections, and answering search queries across Collections. It is a Collection of CollectionServers (the table) and their Collections (the files), containing both "system" Collections and those created by clients. It implements the Discover, Route, and RepoSearch APIs.
+CollectionRepo is the system for managing and using individual/aggregate Collections, and answering search queries across Collections. It is a Collection of CollectionServers (the table) and their Collections (the files), containing both "system" Collections and those created by clients. It implements the CreateCollection, Discover, Route, and SearchCollections APIs.
 
 CollectiveWorker is a workflow system for aggregated or iterated RPCs across a cluster of Collectors. Three collections: WorkflowDefinitions, ActiveWorkflows, Executions. Has a notion of subtypes of Workflows: Tasks (non-root nodes in a workflow), Continuations (callbacks that can loop), Invocations, Executions(history). Has StartWorkflow, QueryWorkflowStatus, and GetWorkflowHistroy APIs.
 

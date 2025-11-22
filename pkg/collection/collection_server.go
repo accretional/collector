@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 type CollectionServer struct {
@@ -57,12 +58,50 @@ func (s *CollectionServer) Get(ctx context.Context, req *pb.GetRequest) (*pb.Get
 		return nil, status.Errorf(codes.NotFound, "record not found: %v", err)
 	}
 
+	// Build TypeUrl if MessageType is available
+	typeUrl := "type.googleapis.com/unknown"
+	if collection.Meta.MessageType != nil && collection.Meta.MessageType.MessageName != "" {
+		typeUrl = "type.googleapis.com/collector." + collection.Meta.MessageType.MessageName
+	}
+
 	any := &anypb.Any{
-		TypeUrl: "type.googleapis.com/collector." + collection.Meta.MessageType.MessageName,
+		TypeUrl: typeUrl,
 		Value:   record.ProtoData,
 	}
 
 	return &pb.GetResponse{Item: any}, nil
+}
+
+// buildTypeUrl builds a type URL from a collection's message type
+func buildTypeUrl(coll *Collection) string {
+	if coll.Meta.MessageType != nil && coll.Meta.MessageType.MessageName != "" {
+		return "type.googleapis.com/collector." + coll.Meta.MessageType.MessageName
+	}
+	return "type.googleapis.com/unknown"
+}
+
+// convertStructpbValue converts a structpb.Value to a native Go type
+func convertStructpbValue(v *structpb.Value) interface{} {
+	if v == nil {
+		return nil
+	}
+
+	switch v.Kind.(type) {
+	case *structpb.Value_NullValue:
+		return nil
+	case *structpb.Value_NumberValue:
+		return v.GetNumberValue()
+	case *structpb.Value_StringValue:
+		return v.GetStringValue()
+	case *structpb.Value_BoolValue:
+		return v.GetBoolValue()
+	case *structpb.Value_StructValue:
+		return v.GetStructValue()
+	case *structpb.Value_ListValue:
+		return v.GetListValue()
+	default:
+		return nil
+	}
 }
 
 func (s *CollectionServer) Update(ctx context.Context, req *pb.UpdateRequest) (*pb.UpdateResponse, error) {
@@ -115,10 +154,11 @@ func (s *CollectionServer) List(ctx context.Context, req *pb.ListRequest) (*pb.L
 		return nil, status.Errorf(codes.Internal, "failed to list records: %v", err)
 	}
 
+	typeUrl := buildTypeUrl(collection)
 	items := make([]*anypb.Any, len(records))
 	for i, record := range records {
 		items[i] = &anypb.Any{
-			TypeUrl: "type.googleapis.com/collector." + collection.Meta.MessageType.MessageName,
+			TypeUrl: typeUrl,
 			Value:   record.ProtoData,
 		}
 	}
@@ -180,7 +220,7 @@ func (s *CollectionServer) Search(ctx context.Context, req *pb.SearchRequest) (*
 		}
 		query.Filters[k] = Filter{
 			Operator: op,
-			Value:    v.Value,
+			Value:    convertStructpbValue(v.Value),
 		}
 	}
 
@@ -189,13 +229,14 @@ func (s *CollectionServer) Search(ctx context.Context, req *pb.SearchRequest) (*
 		return nil, status.Errorf(codes.Internal, "search failed: %v", err)
 	}
 
+	typeUrl := buildTypeUrl(collection)
 	resp := &pb.SearchResponse{
 		Results: make([]*pb.SearchResult, len(results)),
 	}
 	for i, res := range results {
 		resp.Results[i] = &pb.SearchResult{
 			Item: &anypb.Any{
-				TypeUrl: "type.googleapis.com/collector." + collection.Meta.MessageType.MessageName,
+				TypeUrl: typeUrl,
 				Value:   res.Record.ProtoData,
 			},
 			Score:    res.Score,
@@ -282,10 +323,19 @@ func (s *CollectionServer) Modify(ctx context.Context, req *pb.ModifyRequest) (*
 		return nil, status.Errorf(codes.NotFound, "collection not found: %v", err)
 	}
 
+	// Update indexed fields
 	collection.Meta.IndexedFields = req.IndexedFields
+
+	// Persist the metadata changes back to the repo
+	if err := s.repo.UpdateCollectionMetadata(ctx, req.Namespace, req.CollectionName, collection.Meta); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to update metadata: %v", err)
+	}
+
+	// Re-index with the new fields
 	if err := collection.Store.ReIndex(ctx); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to re-index: %v", err)
 	}
+
 	return &pb.ModifyResponse{}, nil
 }
 
