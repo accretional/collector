@@ -430,7 +430,7 @@ func (bm *BackupManager) BackupCollection(ctx context.Context, req *pb.BackupCol
 		}
 
 		// Copy files
-		filesBytes, err := CloneCollectionFiles(ctx, sourceCollection.FS.(*local.FileSystem), backupFS, "")
+		filesBytes, err := CloneCollectionFiles(ctx, sourceCollection.FS, backupFS, "")
 		if err != nil {
 			os.Remove(dbBackupPath)
 			os.RemoveAll(filesDir)
@@ -571,11 +571,21 @@ func (bm *BackupManager) RestoreBackup(ctx context.Context, req *pb.RestoreBacku
 		}, nil
 	}
 
-	// If overwriting, we'll need to handle cleanup
-	_ = existingCollection // TODO: implement overwrite logic
+	// If overwriting, remove existing database and files
+	destDBPath := fmt.Sprintf("./data/collections/%s/%s/collection.db", req.DestNamespace, req.DestName)
+	destFilesDir := fmt.Sprintf("./data/files/%s/%s", req.DestNamespace, req.DestName)
+	if existingCollection != nil && req.Overwrite {
+		// Close the existing collection's store if possible
+		if existingCollection.Store != nil {
+			existingCollection.Store.Close()
+		}
+
+		// Remove existing database and files
+		os.Remove(destDBPath)
+		os.RemoveAll(destFilesDir)
+	}
 
 	// Create destination database path
-	destDBPath := fmt.Sprintf("./data/collections/%s/%s/collection.db", req.DestNamespace, req.DestName)
 	if err := os.MkdirAll(filepath.Dir(destDBPath), 0755); err != nil {
 		return &pb.RestoreBackupResponse{
 			Status: &pb.Status{
@@ -610,7 +620,6 @@ func (bm *BackupManager) RestoreBackup(ctx context.Context, req *pb.RestoreBacku
 	if backup.IncludesFiles {
 		filesDir := backup.StoragePath + ".files"
 		if _, err := os.Stat(filesDir); err == nil {
-			destFilesDir := fmt.Sprintf("./data/files/%s/%s", req.DestNamespace, req.DestName)
 			if err := os.MkdirAll(destFilesDir, 0755); err != nil {
 				os.Remove(destDBPath)
 				return &pb.RestoreBackupResponse{
@@ -621,8 +630,44 @@ func (bm *BackupManager) RestoreBackup(ctx context.Context, req *pb.RestoreBacku
 				}, nil
 			}
 
-			// Copy files recursively
-			// TODO: Implement recursive copy
+			// Copy files recursively using filesystem interfaces
+			srcFS, err := NewLocalFileSystem(filesDir)
+			if err != nil {
+				os.Remove(destDBPath)
+				os.RemoveAll(destFilesDir)
+				return &pb.RestoreBackupResponse{
+					Status: &pb.Status{
+						Code:    pb.Status_INTERNAL,
+						Message: fmt.Sprintf("failed to create source filesystem: %v", err),
+					},
+				}, nil
+			}
+
+			destFS, err := NewLocalFileSystem(destFilesDir)
+			if err != nil {
+				os.Remove(destDBPath)
+				os.RemoveAll(destFilesDir)
+				return &pb.RestoreBackupResponse{
+					Status: &pb.Status{
+						Code:    pb.Status_INTERNAL,
+						Message: fmt.Sprintf("failed to create destination filesystem: %v", err),
+					},
+				}, nil
+			}
+
+			// Clone all files
+			_, err = CloneCollectionFiles(ctx, srcFS, destFS, "")
+			if err != nil {
+				os.Remove(destDBPath)
+				os.RemoveAll(destFilesDir)
+				return &pb.RestoreBackupResponse{
+					Status: &pb.Status{
+						Code:    pb.Status_INTERNAL,
+						Message: fmt.Sprintf("failed to restore files: %v", err),
+					},
+				}, nil
+			}
+
 			filesRestored = backup.FileCount
 		}
 	}

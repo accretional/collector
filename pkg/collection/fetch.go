@@ -2,11 +2,14 @@ package collection
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
 
 // Fetcher handles retrieving Collections from remote sources.
@@ -156,8 +159,24 @@ func (f *Fetcher) ValidateRemoteDB(ctx context.Context, dbPath string) error {
 		return fmt.Errorf("database file is empty")
 	}
 
-	// TODO: Add SQLite integrity check
-	// Could open database and run "PRAGMA integrity_check"
+	// Open database and run integrity check
+	dsn := fmt.Sprintf("file:%s?mode=ro", dbPath)
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return fmt.Errorf("failed to open database: %w", err)
+	}
+	defer db.Close()
+
+	// Run SQLite integrity check
+	var result string
+	err = db.QueryRowContext(ctx, "PRAGMA integrity_check").Scan(&result)
+	if err != nil {
+		return fmt.Errorf("integrity check failed: %w", err)
+	}
+
+	if result != "ok" {
+		return fmt.Errorf("database integrity check failed: %s", result)
+	}
 
 	return nil
 }

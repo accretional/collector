@@ -114,6 +114,9 @@ message PushCollectionRequest {
     string dest_name = 3;
     bool include_files = 4;
     int64 total_size = 5;  // Total bytes to transfer
+    MessageTypeRef message_type = 6;  // Message type of the collection
+    int64 record_count = 7;  // Number of records
+    int64 file_count = 8;  // Number of files
   }
 
   oneof data {

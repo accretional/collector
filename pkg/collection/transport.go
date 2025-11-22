@@ -6,8 +6,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-
-	"github.com/accretional/collector/pkg/fs/local"
 )
 
 // Transport defines how a Collection is moved between collectors.
@@ -128,7 +126,7 @@ func (t *SqliteTransport) Unpack(ctx context.Context, reader io.Reader, destPath
 }
 
 // CloneCollectionFiles copies filesystem data from source to destination.
-func CloneCollectionFiles(ctx context.Context, srcFS, destFS *local.FileSystem, collectionID string) (int64, error) {
+func CloneCollectionFiles(ctx context.Context, srcFS, destFS FileSystem, collectionID string) (int64, error) {
 	var totalBytes int64
 
 	// List all files for this collection

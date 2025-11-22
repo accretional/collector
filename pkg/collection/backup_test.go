@@ -567,7 +567,6 @@ func (m *MockCollectionRepo) UpdateCollectionMetadata(ctx context.Context, names
 
 // TestBackupWithFiles tests backup including filesystem data
 func TestBackupWithFiles(t *testing.T) {
-	t.Skip("TODO: Refactor file cloning to use FileSystem interface instead of concrete type")
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 

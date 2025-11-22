@@ -80,10 +80,9 @@ func (cm *CloneManager) CloneLocal(ctx context.Context, req *pb.CloneRequest) (*
 			return nil, fmt.Errorf("failed to create destination filesystem: %w", err)
 		}
 
-		// Get source filesystem
-		srcFS, ok := srcCollection.FS.(*LocalFileSystem)
-		if ok && srcFS.fs != nil {
-			bytes, err := CloneCollectionFiles(ctx, srcFS.fs, destFS, "")
+		// Clone filesystem if source has files
+		if srcCollection.FS != nil {
+			bytes, err := CloneCollectionFiles(ctx, srcCollection.FS, destFS, "")
 			if err != nil {
 				return nil, fmt.Errorf("failed to clone files: %w", err)
 			}
@@ -176,6 +175,7 @@ func (cm *CloneManager) CloneRemote(ctx context.Context, req *pb.CloneRequest) (
 				DestName:         req.DestName,
 				IncludeFiles:     req.IncludeFiles,
 				TotalSize:        size,
+				MessageType:      srcCollection.Meta.MessageType,
 			},
 		},
 	}
@@ -436,15 +436,11 @@ func (cm *CloneManager) ReceivePushedCollection(stream pb.CollectionRepo_PushCol
 	recordCount := int64(0)
 	fileCount := int64(0)
 
-	// Create collection metadata in repository
-	// Note: We need to get the actual MessageType from the source collection
-	// For now, we'll use a placeholder
+	// Create collection metadata in repository using message type from source
 	destMeta := &pb.Collection{
-		Namespace: metadata.DestNamespace,
-		Name:      metadata.DestName,
-		MessageType: &pb.MessageTypeRef{
-			MessageName: metadata.SourceCollection.Name, // TODO: Get actual message type
-		},
+		Namespace:   metadata.DestNamespace,
+		Name:        metadata.DestName,
+		MessageType: metadata.MessageType,
 		Metadata: &pb.Metadata{
 			Labels: map[string]string{
 				"cloned_from": fmt.Sprintf("%s/%s",

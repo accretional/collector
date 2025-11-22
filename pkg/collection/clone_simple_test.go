@@ -48,7 +48,7 @@ func TestCloneCollectionFiles_Simple(t *testing.T) {
 	}
 
 	// Clone files
-	bytesTransferred, err := CloneCollectionFiles(ctx, srcFS.fs, destFS.fs, "")
+	bytesTransferred, err := CloneCollectionFiles(ctx, srcFS, destFS, "")
 	if err != nil {
 		t.Fatalf("CloneCollectionFiles failed: %v", err)
 	}
