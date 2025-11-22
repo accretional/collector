@@ -21,7 +21,7 @@ func main() {
 func run() error {
 	ctx := context.Background()
 	basePath := "./data/collections"
-	
+
 	// 1. Setup Namespace/Name
 	namespace := "demo"
 	name := "tasks"
@@ -41,7 +41,7 @@ func run() error {
 	}
 
 	// 3. Initialize Dependencies (The "Glue")
-	
+
 	// A. SQLite Store
 	dbPath := filepath.Join(fullPath, "data.db")
 	storeOpts := collection.Options{
@@ -69,10 +69,10 @@ func run() error {
 	}
 
 	fmt.Printf("✓ Collection Ready: %s/%s\n", coll.GetNamespace(), coll.GetName())
-	
+
 	// Test a create
 	err = coll.CreateRecord(ctx, &pb.CollectionRecord{
-		Id: "init-001", 
+		Id:        "init-001",
 		ProtoData: []byte(`{"msg": "It works!"}`),
 	})
 	if err != nil {

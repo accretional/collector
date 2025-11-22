@@ -1,4 +1,3 @@
-
 package collection
 
 // DefaultSchema is the core table for storing collection records.

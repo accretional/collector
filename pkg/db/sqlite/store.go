@@ -8,8 +8,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/accretional/collector/pkg/collection"
 	pb "github.com/accretional/collector/gen/collector"
+	"github.com/accretional/collector/pkg/collection"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	_ "modernc.org/sqlite" // Using modernc.org/sqlite (cgo-free)
@@ -104,7 +104,7 @@ func (s *SqliteStore) CreateRecord(ctx context.Context, r *pb.CollectionRecord) 
 
 	query := `INSERT INTO records (id, proto_data, data_uri, created_at, updated_at, labels, jsontext) 
               VALUES (?, ?, ?, ?, ?, ?, ?)`
-	
+
 	labelsJSON, _ := json.Marshal(r.Metadata.Labels)
 
 	// If proto_data is valid JSON, use it for jsontext. Otherwise, use a default.
@@ -154,9 +154,13 @@ func (s *SqliteStore) GetRecord(ctx context.Context, id string) (*pb.CollectionR
 			UpdatedAt: &timestamppb.Timestamp{Seconds: updatedAt},
 		},
 	}
-	if dataUri.Valid { r.DataUri = dataUri.String }
-	if labelsJSON != "" { json.Unmarshal([]byte(labelsJSON), &r.Metadata.Labels) }
-	
+	if dataUri.Valid {
+		r.DataUri = dataUri.String
+	}
+	if labelsJSON != "" {
+		json.Unmarshal([]byte(labelsJSON), &r.Metadata.Labels)
+	}
+
 	return r, nil
 }
 
@@ -172,7 +176,7 @@ func (s *SqliteStore) UpdateRecord(ctx context.Context, r *pb.CollectionRecord) 
 
 	query := `UPDATE records SET proto_data=?, updated_at=?, labels=?, jsontext=? WHERE id=?`
 	labelsJSON, _ := json.Marshal(r.Metadata.Labels)
-	
+
 	var jsonText string
 	if json.Valid(r.ProtoData) {
 		jsonText = string(r.ProtoData)
@@ -220,20 +224,24 @@ func (s *SqliteStore) ListRecords(ctx context.Context, offset, limit int) ([]*pb
 	var items []*pb.CollectionRecord
 	for rows.Next() {
 		var (
-			r pb.CollectionRecord
-			dUri sql.NullString
+			r                pb.CollectionRecord
+			dUri             sql.NullString
 			created, updated int64
-			lJSON string
+			lJSON            string
 		)
-		
+
 		rows.Scan(&r.Id, &r.ProtoData, &dUri, &created, &updated, &lJSON)
-		
+
 		r.Metadata = &pb.Metadata{
 			CreatedAt: &timestamppb.Timestamp{Seconds: created},
 			UpdatedAt: &timestamppb.Timestamp{Seconds: updated},
 		}
-		if dUri.Valid { r.DataUri = dUri.String }
-		if lJSON != "" { json.Unmarshal([]byte(lJSON), &r.Metadata.Labels) }
+		if dUri.Valid {
+			r.DataUri = dUri.String
+		}
+		if lJSON != "" {
+			json.Unmarshal([]byte(lJSON), &r.Metadata.Labels)
+		}
 
 		items = append(items, &r)
 	}
@@ -324,7 +332,7 @@ func (s *SqliteStore) Search(ctx context.Context, q *collection.SearchQuery) ([]
 	var results []*collection.SearchResult
 	for rows.Next() {
 		var r pb.CollectionRecord
-		var score sql.NullFloat64 
+		var score sql.NullFloat64
 
 		var scanArgs = []any{&r.Id, &r.ProtoData}
 		if q.FullText != "" {

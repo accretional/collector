@@ -6,7 +6,6 @@ import (
 	pb "github.com/accretional/collector/gen/collector"
 )
 
-
 // FileSystem defines the interface for file operations associated with a collection.
 // Allows swapping local disk for cloud storage or memory-based VFS.
 type FileSystem interface {
@@ -16,7 +15,6 @@ type FileSystem interface {
 	List(ctx context.Context, prefix string) ([]string, error)
 	Stat(ctx context.Context, path string) (int64, error)
 }
-
 
 // CollectionRepo defines the interface for a collection repository.
 type CollectionRepo interface {

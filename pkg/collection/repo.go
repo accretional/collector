@@ -40,7 +40,6 @@ type Store interface {
 	ExecuteRaw(query string, args ...interface{}) error
 }
 
-
 // DefaultCollectionRepo is a facade that provides a simple interface for managing collections.
 // It uses a CollectionRepoService and a Store to do the heavy lifting.
 type DefaultCollectionRepo struct {

@@ -362,7 +362,7 @@ func TestGrpcServer_SearchCollections_WithQuery(t *testing.T) {
 	query := &structpb.Struct{
 		Fields: map[string]*structpb.Value{
 			"status": structpb.NewStringValue("active"),
-			"score": structpb.NewNumberValue(90),
+			"score":  structpb.NewNumberValue(90),
 		},
 	}
 

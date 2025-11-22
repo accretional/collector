@@ -321,10 +321,10 @@ func TestConnection_InvalidRequests(t *testing.T) {
 	client := pb.NewCollectiveDispatcherClient(conn)
 
 	tests := []struct {
-		name           string
-		req            *pb.ConnectRequest
-		expectedCode   pb.Status_Code
-		expectedInMsg  string
+		name          string
+		req           *pb.ConnectRequest
+		expectedCode  pb.Status_Code
+		expectedInMsg string
 	}{
 		{
 			name: "empty address",

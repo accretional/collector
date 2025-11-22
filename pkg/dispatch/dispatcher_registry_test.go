@@ -81,8 +81,8 @@ func TestDispatcherWithRegistryValidation(t *testing.T) {
 	// Test 1: Valid service call (registered in validator)
 	t.Run("ValidServiceCall", func(t *testing.T) {
 		resp, err := dispatcher.Serve(ctx, &pb.ServeRequest{
-			Namespace: namespace,
-			Service:   &pb.ServiceTypeRef{ServiceName: "TestService"},
+			Namespace:  namespace,
+			Service:    &pb.ServiceTypeRef{ServiceName: "TestService"},
 			MethodName: "TestMethod",
 			Input:      &anypb.Any{},
 		})
@@ -105,8 +105,8 @@ func TestDispatcherWithRegistryValidation(t *testing.T) {
 		validator.callCount = 0
 
 		resp, err := dispatcher.Serve(ctx, &pb.ServeRequest{
-			Namespace: namespace,
-			Service:   &pb.ServiceTypeRef{ServiceName: "TestService"},
+			Namespace:  namespace,
+			Service:    &pb.ServiceTypeRef{ServiceName: "TestService"},
 			MethodName: "UnregisteredMethod",
 			Input:      &anypb.Any{},
 		})
@@ -129,8 +129,8 @@ func TestDispatcherWithRegistryValidation(t *testing.T) {
 		validator.callCount = 0
 
 		resp, err := dispatcher.Serve(ctx, &pb.ServeRequest{
-			Namespace: "wrong-namespace",
-			Service:   &pb.ServiceTypeRef{ServiceName: "TestService"},
+			Namespace:  "wrong-namespace",
+			Service:    &pb.ServiceTypeRef{ServiceName: "TestService"},
 			MethodName: "TestMethod",
 			Input:      &anypb.Any{},
 		})
@@ -168,8 +168,8 @@ func TestDispatcherWithoutRegistryValidation(t *testing.T) {
 	// Test: Should work without validation
 	t.Run("NoValidation", func(t *testing.T) {
 		resp, err := dispatcher.Serve(ctx, &pb.ServeRequest{
-			Namespace: namespace,
-			Service:   &pb.ServiceTypeRef{ServiceName: "TestService"},
+			Namespace:  namespace,
+			Service:    &pb.ServiceTypeRef{ServiceName: "TestService"},
 			MethodName: "TestMethod",
 			Input:      &anypb.Any{},
 		})
@@ -203,8 +203,8 @@ func TestSetRegistryValidator(t *testing.T) {
 	// Test 1: Works without validator
 	t.Run("BeforeValidator", func(t *testing.T) {
 		resp, err := dispatcher.Serve(ctx, &pb.ServeRequest{
-			Namespace: namespace,
-			Service:   &pb.ServiceTypeRef{ServiceName: "TestService"},
+			Namespace:  namespace,
+			Service:    &pb.ServiceTypeRef{ServiceName: "TestService"},
 			MethodName: "TestMethod",
 			Input:      &anypb.Any{},
 		})
@@ -222,8 +222,8 @@ func TestSetRegistryValidator(t *testing.T) {
 	// Test 2: Now uses validator
 	t.Run("AfterValidator", func(t *testing.T) {
 		resp, err := dispatcher.Serve(ctx, &pb.ServeRequest{
-			Namespace: namespace,
-			Service:   &pb.ServiceTypeRef{ServiceName: "TestService"},
+			Namespace:  namespace,
+			Service:    &pb.ServiceTypeRef{ServiceName: "TestService"},
 			MethodName: "TestMethod",
 			Input:      &anypb.Any{},
 		})
@@ -246,8 +246,8 @@ func TestSetRegistryValidator(t *testing.T) {
 		validator.callCount = 0
 
 		resp, err := dispatcher.Serve(ctx, &pb.ServeRequest{
-			Namespace: namespace,
-			Service:   &pb.ServiceTypeRef{ServiceName: "TestService"},
+			Namespace:  namespace,
+			Service:    &pb.ServiceTypeRef{ServiceName: "TestService"},
 			MethodName: "UnregisteredMethod",
 			Input:      &anypb.Any{},
 		})

@@ -21,7 +21,7 @@ func (c *Combinator) UnionView(ctx context.Context, primary *Collection, viewNam
 	for _, alias := range aliases {
 		selects = append(selects, fmt.Sprintf("SELECT * FROM %s.records", alias))
 	}
-	
+
 	// Union query
 	// query := fmt.Sprintf("CREATE VIEW %s AS %s", viewName, strings.Join(selects, " UNION ALL "))
 	// return primary.Store.ExecuteRaw(query)
