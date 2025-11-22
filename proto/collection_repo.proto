@@ -150,6 +150,84 @@ message PullCollectionChunk {
   }
 }
 
+// ============================================================================
+// Backup Operations
+// Create point-in-time snapshots without creating collection metadata
+// ============================================================================
+
+message BackupMetadata {
+  string backup_id = 1;           // Unique backup identifier
+  NamespacedName collection = 2;  // Source collection
+  int64 timestamp = 3;            // Unix timestamp when backup was created
+  int64 size_bytes = 4;           // Total size of backup
+  int64 record_count = 5;         // Number of records at backup time
+  int64 file_count = 6;           // Number of files (if included)
+  bool includes_files = 7;        // Whether filesystem data is included
+  string storage_path = 8;        // Where backup is stored (file path or URI)
+  string storage_type = 9;        // "local", "s3", "gcs", etc.
+  map<string, string> metadata = 10; // Additional metadata (tags, notes)
+}
+
+message BackupCollectionRequest {
+  NamespacedName collection = 1;
+  string dest_path = 2;           // Local file path or URI (s3://, gcs://)
+  bool include_files = 3;         // Include filesystem data
+  map<string, string> metadata = 4; // Optional metadata (tags, notes, retention policy)
+}
+
+message BackupCollectionResponse {
+  Status status = 1;
+  BackupMetadata backup = 2;      // Metadata about the created backup
+  int64 bytes_transferred = 3;
+}
+
+message ListBackupsRequest {
+  NamespacedName collection = 1;  // Optional: filter by collection
+  string namespace = 2;           // Optional: all backups in namespace
+  int32 limit = 3;                // Max backups to return
+  int64 since_timestamp = 4;      // Only backups after this time
+}
+
+message ListBackupsResponse {
+  Status status = 1;
+  repeated BackupMetadata backups = 2;
+  int64 total_count = 3;
+}
+
+message RestoreBackupRequest {
+  string backup_id = 1;           // Which backup to restore
+  string dest_namespace = 2;      // Where to restore
+  string dest_name = 3;           // Name of restored collection
+  bool overwrite = 4;             // Allow overwriting existing collection
+}
+
+message RestoreBackupResponse {
+  Status status = 1;
+  string collection_id = 2;
+  int64 records_restored = 3;
+  int64 files_restored = 4;
+}
+
+message DeleteBackupRequest {
+  string backup_id = 1;
+}
+
+message DeleteBackupResponse {
+  Status status = 1;
+  int64 bytes_freed = 2;
+}
+
+message VerifyBackupRequest {
+  string backup_id = 1;
+}
+
+message VerifyBackupResponse {
+  Status status = 1;
+  bool is_valid = 2;
+  string error_message = 3;       // If invalid, what's wrong
+  BackupMetadata backup = 4;
+}
+
 service CollectionRepo {
   rpc CreateCollection(CreateCollectionRequest) returns (CreateCollectionResponse);
   rpc Discover(DiscoverRequest) returns (DiscoverResponse);
@@ -161,4 +239,11 @@ service CollectionRepo {
   // Streaming RPCs for large data transfer
   rpc PushCollection(stream PushCollectionRequest) returns (PushCollectionResponse);
   rpc PullCollection(PullCollectionRequest) returns (stream PullCollectionChunk);
+
+  // Backup operations - snapshots without creating collection metadata
+  rpc BackupCollection(BackupCollectionRequest) returns (BackupCollectionResponse);
+  rpc ListBackups(ListBackupsRequest) returns (ListBackupsResponse);
+  rpc RestoreBackup(RestoreBackupRequest) returns (RestoreBackupResponse);
+  rpc DeleteBackup(DeleteBackupRequest) returns (DeleteBackupResponse);
+  rpc VerifyBackup(VerifyBackupRequest) returns (VerifyBackupResponse);
 }
