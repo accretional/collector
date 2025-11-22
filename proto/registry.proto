@@ -16,7 +16,7 @@ import "google/protobuf/descriptor.proto";
 message RegisteredProto {
   string id = 1;  // namespace/message_name
   string namespace = 2;
-  string message_name = 3;
+  repeated string message_names = 3;
   google.protobuf.FileDescriptorProto file_descriptor = 4;
   repeated string dependencies = 5;  // List of dependency IDs
   Metadata metadata = 6;
