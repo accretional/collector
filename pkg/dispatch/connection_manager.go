@@ -64,10 +64,16 @@ func (cm *ConnectionManager) HandleConnect(ctx context.Context, req *pb.ConnectR
 	// Generate connection ID
 	connectionID := fmt.Sprintf("conn_%s_%d", req.Address, time.Now().UnixNano())
 
+	// Extract source collector ID from metadata
+	sourceCollectorID := "unknown"
+	if collectorID, ok := req.Metadata["collector_id"]; ok {
+		sourceCollectorID = collectorID
+	}
+
 	// Create connection record
 	conn := &pb.Connection{
 		Id:                connectionID,
-		SourceCollectorId: "remote", // Will be updated when we know the source
+		SourceCollectorId: sourceCollectorID,
 		TargetCollectorId: cm.collectorID,
 		Address:           req.Address,
 		SharedNamespaces:  sharedNamespaces,
@@ -90,8 +96,9 @@ func (cm *ConnectionManager) HandleConnect(ctx context.Context, req *pb.ConnectR
 			Code:    200,
 			Message: fmt.Sprintf("Connected with %d shared namespaces", len(sharedNamespaces)),
 		},
-		ConnectionId:     connectionID,
-		SharedNamespaces: sharedNamespaces,
+		ConnectionId:       connectionID,
+		SharedNamespaces:   sharedNamespaces,
+		TargetCollectorId:  cm.collectorID,
 	}, nil
 }
 
@@ -131,12 +138,12 @@ func (cm *ConnectionManager) ConnectTo(ctx context.Context, address string, name
 	cm.clients[address] = client
 	cm.clientsMutex.Unlock()
 
-	// Store connection state with shared namespaces from the response
+	// Store connection state with shared namespaces and target ID from the response
 	connState := &ConnectionState{
 		Connection: &pb.Connection{
 			Id:                resp.ConnectionId,
 			SourceCollectorId: cm.collectorID,
-			TargetCollectorId: "remote",
+			TargetCollectorId: resp.TargetCollectorId,
 			Address:           address,
 			SharedNamespaces:  resp.SharedNamespaces,
 			Metadata: &pb.Metadata{

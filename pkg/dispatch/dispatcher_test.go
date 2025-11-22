@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -508,5 +509,531 @@ func TestServe_BasicInvocation(t *testing.T) {
 
 	if resp.Output == nil {
 		t.Error("expected output, got nil")
+	}
+}
+
+// TestServe_InvalidRequests tests error handling for Serve
+func TestServe_InvalidRequests(t *testing.T) {
+	ctx := context.Background()
+
+	server := setupTestServer(t, "server1", []string{"test"})
+	defer server.shutdown()
+
+	server.dispatcher.RegisterService("test", "TestService", "Method1", func(ctx context.Context, input interface{}) (interface{}, error) {
+		return input, nil
+	})
+
+	conn, err := server.dialContext(ctx)
+	if err != nil {
+		t.Fatalf("failed to dial: %v", err)
+	}
+	defer conn.Close()
+
+	client := pb.NewCollectiveDispatcherClient(conn)
+	inputData, _ := anypb.New(&pb.Status{Code: 123, Message: "test"})
+
+	tests := []struct {
+		name         string
+		req          *pb.ServeRequest
+		expectedCode pb.Status_Code
+		expectedMsg  string
+	}{
+		{
+			name: "empty namespace",
+			req: &pb.ServeRequest{
+				Namespace:  "",
+				Service:    &pb.ServiceTypeRef{ServiceName: "TestService"},
+				MethodName: "Method1",
+				Input:      inputData,
+			},
+			expectedCode: 400,
+			expectedMsg:  "namespace is required",
+		},
+		{
+			name: "nil service",
+			req: &pb.ServeRequest{
+				Namespace:  "test",
+				Service:    nil,
+				MethodName: "Method1",
+				Input:      inputData,
+			},
+			expectedCode: 400,
+			expectedMsg:  "service is required",
+		},
+		{
+			name: "empty service name",
+			req: &pb.ServeRequest{
+				Namespace:  "test",
+				Service:    &pb.ServiceTypeRef{ServiceName: ""},
+				MethodName: "Method1",
+				Input:      inputData,
+			},
+			expectedCode: 400,
+			expectedMsg:  "service is required",
+		},
+		{
+			name: "empty method name",
+			req: &pb.ServeRequest{
+				Namespace:  "test",
+				Service:    &pb.ServiceTypeRef{ServiceName: "TestService"},
+				MethodName: "",
+				Input:      inputData,
+			},
+			expectedCode: 400,
+			expectedMsg:  "method_name is required",
+		},
+		{
+			name: "namespace not found",
+			req: &pb.ServeRequest{
+				Namespace:  "nonexistent",
+				Service:    &pb.ServiceTypeRef{ServiceName: "TestService"},
+				MethodName: "Method1",
+				Input:      inputData,
+			},
+			expectedCode: 404,
+			expectedMsg:  "namespace 'nonexistent' not found",
+		},
+		{
+			name: "method not found",
+			req: &pb.ServeRequest{
+				Namespace:  "test",
+				Service:    &pb.ServiceTypeRef{ServiceName: "TestService"},
+				MethodName: "NonexistentMethod",
+				Input:      inputData,
+			},
+			expectedCode: 404,
+			expectedMsg:  "method 'TestService.NonexistentMethod' not found in namespace 'test'",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp, err := client.Serve(ctx, tt.req)
+			if err != nil {
+				t.Fatalf("Serve RPC failed: %v", err)
+			}
+
+			if resp.Status.Code != tt.expectedCode {
+				t.Errorf("expected status %d, got %d: %s", tt.expectedCode, resp.Status.Code, resp.Status.Message)
+			}
+
+			if resp.Status.Message != tt.expectedMsg {
+				t.Errorf("expected message '%s', got '%s'", tt.expectedMsg, resp.Status.Message)
+			}
+		})
+	}
+}
+
+// TestServe_HandlerError tests error handling when handler returns error
+func TestServe_HandlerError(t *testing.T) {
+	ctx := context.Background()
+
+	server := setupTestServer(t, "server1", []string{"test"})
+	defer server.shutdown()
+
+	// Register a handler that returns an error
+	server.dispatcher.RegisterService("test", "TestService", "FailingMethod", func(ctx context.Context, input interface{}) (interface{}, error) {
+		return nil, fmt.Errorf("intentional error")
+	})
+
+	conn, err := server.dialContext(ctx)
+	if err != nil {
+		t.Fatalf("failed to dial: %v", err)
+	}
+	defer conn.Close()
+
+	client := pb.NewCollectiveDispatcherClient(conn)
+	inputData, _ := anypb.New(&pb.Status{Code: 123, Message: "test"})
+
+	req := &pb.ServeRequest{
+		Namespace:  "test",
+		Service:    &pb.ServiceTypeRef{ServiceName: "TestService"},
+		MethodName: "FailingMethod",
+		Input:      inputData,
+	}
+
+	resp, err := client.Serve(ctx, req)
+	if err != nil {
+		t.Fatalf("Serve RPC failed: %v", err)
+	}
+
+	if resp.Status.Code != 500 {
+		t.Errorf("expected status 500, got %d", resp.Status.Code)
+	}
+
+	if !strings.Contains(resp.Status.Message, "intentional error") {
+		t.Errorf("expected error message to contain 'intentional error', got '%s'", resp.Status.Message)
+	}
+}
+
+// TestServe_MultipleServices tests multiple services in same namespace
+func TestServe_MultipleServices(t *testing.T) {
+	ctx := context.Background()
+
+	server := setupTestServer(t, "server1", []string{"test"})
+	defer server.shutdown()
+
+	// Register multiple services
+	server.dispatcher.RegisterService("test", "ServiceA", "Method1", func(ctx context.Context, input interface{}) (interface{}, error) {
+		return anypb.New(&pb.Status{Code: 1, Message: "ServiceA.Method1"})
+	})
+
+	server.dispatcher.RegisterService("test", "ServiceB", "Method1", func(ctx context.Context, input interface{}) (interface{}, error) {
+		return anypb.New(&pb.Status{Code: 2, Message: "ServiceB.Method1"})
+	})
+
+	conn, err := server.dialContext(ctx)
+	if err != nil {
+		t.Fatalf("failed to dial: %v", err)
+	}
+	defer conn.Close()
+
+	client := pb.NewCollectiveDispatcherClient(conn)
+	inputData, _ := anypb.New(&pb.Status{Code: 123, Message: "test"})
+
+	// Call ServiceA
+	resp1, err := client.Serve(ctx, &pb.ServeRequest{
+		Namespace:  "test",
+		Service:    &pb.ServiceTypeRef{ServiceName: "ServiceA"},
+		MethodName: "Method1",
+		Input:      inputData,
+	})
+	if err != nil {
+		t.Fatalf("Serve failed: %v", err)
+	}
+
+	if resp1.Status.Code != 200 {
+		t.Errorf("expected status 200, got %d", resp1.Status.Code)
+	}
+
+	// Call ServiceB
+	resp2, err := client.Serve(ctx, &pb.ServeRequest{
+		Namespace:  "test",
+		Service:    &pb.ServiceTypeRef{ServiceName: "ServiceB"},
+		MethodName: "Method1",
+		Input:      inputData,
+	})
+	if err != nil {
+		t.Fatalf("Serve failed: %v", err)
+	}
+
+	if resp2.Status.Code != 200 {
+		t.Errorf("expected status 200, got %d", resp2.Status.Code)
+	}
+
+	// Verify outputs are different
+	var output1, output2 pb.Status
+	resp1.Output.UnmarshalTo(&output1)
+	resp2.Output.UnmarshalTo(&output2)
+
+	if output1.Message == output2.Message {
+		t.Error("expected different outputs from different services")
+	}
+}
+
+// TestDispatch_ToSpecificTarget tests dispatching to a specific collector
+func TestDispatch_ToSpecificTarget(t *testing.T) {
+	ctx := context.Background()
+
+	// Create two servers
+	server1 := setupRealTestServer(t, "collector1", "localhost:0", []string{"ns1"})
+	defer server1.shutdown()
+
+	server2 := setupRealTestServer(t, "collector2", "localhost:0", []string{"ns1"})
+	defer server2.shutdown()
+
+	// Register service on server2
+	server2.dispatcher.RegisterService("ns1", "TestService", "Method1", func(ctx context.Context, input interface{}) (interface{}, error) {
+		return anypb.New(&pb.Status{Code: 99, Message: "handled by server2"})
+	})
+
+	// Server1 connects to Server2
+	_, err := server1.dispatcher.ConnectTo(ctx, server2.address, []string{"ns1"})
+	if err != nil {
+		t.Fatalf("ConnectTo failed: %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Create client to server1
+	conn, err := grpc.NewClient(server1.address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+	defer conn.Close()
+
+	client := pb.NewCollectiveDispatcherClient(conn)
+	inputData, _ := anypb.New(&pb.Status{Code: 123, Message: "test"})
+
+	// Dispatch to server2
+	req := &pb.DispatchRequest{
+		Namespace:         "ns1",
+		Service:           &pb.ServiceTypeRef{ServiceName: "TestService"},
+		MethodName:        "Method1",
+		Input:             inputData,
+		TargetCollectorId: "collector2",
+	}
+
+	resp, err := client.Dispatch(ctx, req)
+	if err != nil {
+		t.Fatalf("Dispatch failed: %v", err)
+	}
+
+	if resp.Status.Code != 200 {
+		t.Errorf("expected status 200, got %d: %s", resp.Status.Code, resp.Status.Message)
+	}
+
+	if resp.HandledByCollectorId != "collector2" {
+		t.Errorf("expected handler 'collector2', got '%s'", resp.HandledByCollectorId)
+	}
+}
+
+// TestDispatch_AutoRouteLocal tests auto-routing to local handler
+func TestDispatch_AutoRouteLocal(t *testing.T) {
+	ctx := context.Background()
+
+	server := setupTestServer(t, "server1", []string{"test"})
+	defer server.shutdown()
+
+	// Register local service
+	server.dispatcher.RegisterService("test", "LocalService", "Method1", func(ctx context.Context, input interface{}) (interface{}, error) {
+		return anypb.New(&pb.Status{Code: 99, Message: "handled locally"})
+	})
+
+	conn, err := server.dialContext(ctx)
+	if err != nil {
+		t.Fatalf("failed to dial: %v", err)
+	}
+	defer conn.Close()
+
+	client := pb.NewCollectiveDispatcherClient(conn)
+	inputData, _ := anypb.New(&pb.Status{Code: 123, Message: "test"})
+
+	// Dispatch without target (should route locally)
+	req := &pb.DispatchRequest{
+		Namespace:  "test",
+		Service:    &pb.ServiceTypeRef{ServiceName: "LocalService"},
+		MethodName: "Method1",
+		Input:      inputData,
+	}
+
+	resp, err := client.Dispatch(ctx, req)
+	if err != nil {
+		t.Fatalf("Dispatch failed: %v", err)
+	}
+
+	if resp.Status.Code != 200 {
+		t.Errorf("expected status 200, got %d: %s", resp.Status.Code, resp.Status.Message)
+	}
+
+	if resp.HandledByCollectorId != "server1" {
+		t.Errorf("expected handler 'server1', got '%s'", resp.HandledByCollectorId)
+	}
+}
+
+// TestDispatch_AutoRouteRemote tests auto-routing to remote collector
+func TestDispatch_AutoRouteRemote(t *testing.T) {
+	ctx := context.Background()
+
+	// Create two servers
+	server1 := setupRealTestServer(t, "collector1", "localhost:0", []string{"ns1"})
+	defer server1.shutdown()
+
+	server2 := setupRealTestServer(t, "collector2", "localhost:0", []string{"ns1"})
+	defer server2.shutdown()
+
+	// Register service ONLY on server2
+	server2.dispatcher.RegisterService("ns1", "RemoteService", "Method1", func(ctx context.Context, input interface{}) (interface{}, error) {
+		return anypb.New(&pb.Status{Code: 99, Message: "handled by remote"})
+	})
+
+	// Server1 connects to Server2
+	_, err := server1.dispatcher.ConnectTo(ctx, server2.address, []string{"ns1"})
+	if err != nil {
+		t.Fatalf("ConnectTo failed: %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Create client to server1
+	conn, err := grpc.NewClient(server1.address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+	defer conn.Close()
+
+	client := pb.NewCollectiveDispatcherClient(conn)
+	inputData, _ := anypb.New(&pb.Status{Code: 123, Message: "test"})
+
+	// Dispatch without target (should auto-route to server2)
+	req := &pb.DispatchRequest{
+		Namespace:  "ns1",
+		Service:    &pb.ServiceTypeRef{ServiceName: "RemoteService"},
+		MethodName: "Method1",
+		Input:      inputData,
+	}
+
+	resp, err := client.Dispatch(ctx, req)
+	if err != nil {
+		t.Fatalf("Dispatch failed: %v", err)
+	}
+
+	if resp.Status.Code != 200 {
+		t.Errorf("expected status 200, got %d: %s", resp.Status.Code, resp.Status.Message)
+	}
+
+	if resp.HandledByCollectorId != "collector2" {
+		t.Errorf("expected handler 'collector2', got '%s'", resp.HandledByCollectorId)
+	}
+}
+
+// TestDispatch_InvalidRequests tests error handling for Dispatch
+func TestDispatch_InvalidRequests(t *testing.T) {
+	ctx := context.Background()
+
+	server := setupTestServer(t, "server1", []string{"test"})
+	defer server.shutdown()
+
+	conn, err := server.dialContext(ctx)
+	if err != nil {
+		t.Fatalf("failed to dial: %v", err)
+	}
+	defer conn.Close()
+
+	client := pb.NewCollectiveDispatcherClient(conn)
+	inputData, _ := anypb.New(&pb.Status{Code: 123, Message: "test"})
+
+	tests := []struct {
+		name         string
+		req          *pb.DispatchRequest
+		expectedCode pb.Status_Code
+		expectedMsg  string
+	}{
+		{
+			name: "empty namespace",
+			req: &pb.DispatchRequest{
+				Namespace:  "",
+				Service:    &pb.ServiceTypeRef{ServiceName: "TestService"},
+				MethodName: "Method1",
+				Input:      inputData,
+			},
+			expectedCode: 400,
+			expectedMsg:  "namespace is required",
+		},
+		{
+			name: "nil service",
+			req: &pb.DispatchRequest{
+				Namespace:  "test",
+				Service:    nil,
+				MethodName: "Method1",
+				Input:      inputData,
+			},
+			expectedCode: 400,
+			expectedMsg:  "service is required",
+		},
+		{
+			name: "empty method name",
+			req: &pb.DispatchRequest{
+				Namespace:  "test",
+				Service:    &pb.ServiceTypeRef{ServiceName: "TestService"},
+				MethodName: "",
+				Input:      inputData,
+			},
+			expectedCode: 400,
+			expectedMsg:  "method_name is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp, err := client.Dispatch(ctx, tt.req)
+			if err != nil {
+				t.Fatalf("Dispatch RPC failed: %v", err)
+			}
+
+			if resp.Status.Code != tt.expectedCode {
+				t.Errorf("expected status %d, got %d: %s", tt.expectedCode, resp.Status.Code, resp.Status.Message)
+			}
+
+			if resp.Status.Message != tt.expectedMsg {
+				t.Errorf("expected message '%s', got '%s'", tt.expectedMsg, resp.Status.Message)
+			}
+		})
+	}
+}
+
+// TestDispatch_TargetNotFound tests dispatching to non-existent target
+func TestDispatch_TargetNotFound(t *testing.T) {
+	ctx := context.Background()
+
+	server := setupTestServer(t, "server1", []string{"test"})
+	defer server.shutdown()
+
+	conn, err := server.dialContext(ctx)
+	if err != nil {
+		t.Fatalf("failed to dial: %v", err)
+	}
+	defer conn.Close()
+
+	client := pb.NewCollectiveDispatcherClient(conn)
+	inputData, _ := anypb.New(&pb.Status{Code: 123, Message: "test"})
+
+	req := &pb.DispatchRequest{
+		Namespace:         "test",
+		Service:           &pb.ServiceTypeRef{ServiceName: "TestService"},
+		MethodName:        "Method1",
+		Input:             inputData,
+		TargetCollectorId: "nonexistent",
+	}
+
+	resp, err := client.Dispatch(ctx, req)
+	if err != nil {
+		t.Fatalf("Dispatch RPC failed: %v", err)
+	}
+
+	if resp.Status.Code != 404 {
+		t.Errorf("expected status 404, got %d", resp.Status.Code)
+	}
+
+	if !strings.Contains(resp.Status.Message, "no connection to collector") {
+		t.Errorf("expected 'no connection' message, got '%s'", resp.Status.Message)
+	}
+}
+
+// TestDispatch_NoCollectorForNamespace tests when no collector handles the namespace
+func TestDispatch_NoCollectorForNamespace(t *testing.T) {
+	ctx := context.Background()
+
+	server := setupTestServer(t, "server1", []string{"ns1"})
+	defer server.shutdown()
+
+	conn, err := server.dialContext(ctx)
+	if err != nil {
+		t.Fatalf("failed to dial: %v", err)
+	}
+	defer conn.Close()
+
+	client := pb.NewCollectiveDispatcherClient(conn)
+	inputData, _ := anypb.New(&pb.Status{Code: 123, Message: "test"})
+
+	// Try to dispatch to a namespace we don't have
+	req := &pb.DispatchRequest{
+		Namespace:  "nonexistent",
+		Service:    &pb.ServiceTypeRef{ServiceName: "TestService"},
+		MethodName: "Method1",
+		Input:      inputData,
+	}
+
+	resp, err := client.Dispatch(ctx, req)
+	if err != nil {
+		t.Fatalf("Dispatch RPC failed: %v", err)
+	}
+
+	if resp.Status.Code != 404 {
+		t.Errorf("expected status 404, got %d", resp.Status.Code)
+	}
+
+	if !strings.Contains(resp.Status.Message, "no collector found for namespace") {
+		t.Errorf("expected 'no collector found' message, got '%s'", resp.Status.Message)
 	}
 }

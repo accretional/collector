@@ -84,6 +84,7 @@ message ConnectResponse {
   Status status = 1;
   string connection_id = 2;
   repeated string shared_namespaces = 3;
+  string target_collector_id = 4;
 }
 
 message DispatchRequest {
