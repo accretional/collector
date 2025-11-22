@@ -155,44 +155,103 @@ func (s *RegistryServer) LookupProto(ctx context.Context, namespace, fileName st
 }
 
 // LookupService retrieves a registered service by namespace and service name
-func (s *RegistryServer) LookupService(ctx context.Context, namespace, serviceName string) (*collector.RegisteredService, error) {
-        serviceID := fmt.Sprintf("%s/%s", namespace, serviceName)
+func (s *RegistryServer) LookupService(ctx context.Context, req *collector.LookupServiceRequest) (*collector.LookupServiceResponse, error) {
+        serviceID := fmt.Sprintf("%s/%s", req.Namespace, req.ServiceName)
         record, err := s.registeredServices.GetRecord(ctx, serviceID)
         if err != nil {
                 if err == sql.ErrNoRows {
-                        return nil, status.Errorf(codes.NotFound, "service %s not found", serviceID)
+                        return &collector.LookupServiceResponse{
+                                Status: &collector.Status{
+                                        Code:    collector.Status_NOT_FOUND,
+                                        Message: fmt.Sprintf("service %s not found", serviceID),
+                                },
+                        }, nil
                 }
-                return nil, err
+                return &collector.LookupServiceResponse{
+                        Status: &collector.Status{
+                                Code:    collector.Status_INTERNAL,
+                                Message: err.Error(),
+                        },
+                }, nil
         }
 
         registeredService := &collector.RegisteredService{}
         if err := proto.Unmarshal(record.ProtoData, registeredService); err != nil {
-                return nil, err
+                return &collector.LookupServiceResponse{
+                        Status: &collector.Status{
+                                Code:    collector.Status_INTERNAL,
+                                Message: err.Error(),
+                        },
+                }, nil
         }
 
-        return registeredService, nil
+        return &collector.LookupServiceResponse{
+                Status: &collector.Status{
+                        Code:    collector.Status_OK,
+                        Message: "Success",
+                },
+                Service: registeredService,
+        }, nil
 }
 
 // ValidateService checks if a service is registered in the given namespace
 func (s *RegistryServer) ValidateService(ctx context.Context, namespace, serviceName string) error {
-        _, err := s.LookupService(ctx, namespace, serviceName)
-        return err
-}
-
-// ValidateMethod checks if a method exists on a registered service
-func (s *RegistryServer) ValidateMethod(ctx context.Context, namespace, serviceName, methodName string) error {
-        service, err := s.LookupService(ctx, namespace, serviceName)
+        resp, err := s.LookupService(ctx, &collector.LookupServiceRequest{
+                Namespace:   namespace,
+                ServiceName: serviceName,
+        })
         if err != nil {
                 return err
         }
+        if resp.Status.Code != collector.Status_OK {
+                return status.Errorf(codes.NotFound, "%s", resp.Status.Message)
+        }
+        return nil
+}
 
+// ValidateMethod checks if a method exists on a registered service
+func (s *RegistryServer) ValidateMethod(ctx context.Context, req *collector.ValidateMethodRequest) (*collector.ValidateMethodResponse, error) {
+        resp, err := s.LookupService(ctx, &collector.LookupServiceRequest{
+                Namespace:   req.Namespace,
+                ServiceName: req.ServiceName,
+        })
+        if err != nil {
+                return &collector.ValidateMethodResponse{
+                        Status: &collector.Status{
+                                Code:    collector.Status_INTERNAL,
+                                Message: err.Error(),
+                        },
+                        IsValid: false,
+                }, nil
+        }
+
+        if resp.Status.Code != collector.Status_OK {
+                return &collector.ValidateMethodResponse{
+                        Status:  resp.Status,
+                        IsValid: false,
+                }, nil
+        }
+
+        service := resp.Service
         for _, method := range service.MethodNames {
-                if method == methodName {
-                        return nil
+                if method == req.MethodName {
+                        return &collector.ValidateMethodResponse{
+                                Status: &collector.Status{
+                                        Code:    collector.Status_OK,
+                                        Message: "Method is valid",
+                                },
+                                IsValid: true,
+                        }, nil
                 }
         }
 
-        return status.Errorf(codes.NotFound, "method %s not found on service %s/%s", methodName, namespace, serviceName)
+        return &collector.ValidateMethodResponse{
+                Status: &collector.Status{
+                        Code:    collector.Status_NOT_FOUND,
+                        Message: fmt.Sprintf("method %s not found on service %s/%s", req.MethodName, req.Namespace, req.ServiceName),
+                },
+                IsValid: false,
+        }, nil
 }
 
 // ListProtos returns all registered protos, optionally filtered by namespace
@@ -220,25 +279,41 @@ func (s *RegistryServer) ListProtos(ctx context.Context, namespace string) ([]*c
 }
 
 // ListServices returns all registered services, optionally filtered by namespace
-func (s *RegistryServer) ListServices(ctx context.Context, namespace string) ([]*collector.RegisteredService, error) {
+func (s *RegistryServer) ListServices(ctx context.Context, req *collector.ListServicesRequest) (*collector.ListServicesResponse, error) {
         // TODO: Implement filtering when Collection supports prefix queries
         // For now, we'll get all records and filter manually
         records, err := s.registeredServices.ListRecords(ctx, 0, 10000)
         if err != nil {
-                return nil, err
+                return &collector.ListServicesResponse{
+                        Status: &collector.Status{
+                                Code:    collector.Status_INTERNAL,
+                                Message: err.Error(),
+                        },
+                }, nil
         }
 
         var services []*collector.RegisteredService
         for _, record := range records {
                 registeredService := &collector.RegisteredService{}
                 if err := proto.Unmarshal(record.ProtoData, registeredService); err != nil {
-                        return nil, err
+                        return &collector.ListServicesResponse{
+                                Status: &collector.Status{
+                                        Code:    collector.Status_INTERNAL,
+                                        Message: err.Error(),
+                                },
+                        }, nil
                 }
 
-                if namespace == "" || registeredService.Namespace == namespace {
+                if req.Namespace == "" || registeredService.Namespace == req.Namespace {
                         services = append(services, registeredService)
                 }
         }
 
-        return services, nil
+        return &collector.ListServicesResponse{
+                Status: &collector.Status{
+                        Code:    collector.Status_OK,
+                        Message: "Success",
+                },
+                Services: services,
+        }, nil
 }

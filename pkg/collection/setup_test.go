@@ -33,8 +33,10 @@ func setupTestCollection(t *testing.T) (*collection.Collection, func()) {
 	}
 
 	// 3. Initialize the REAL Local Filesystem
-	fs := &collection.LocalFileSystem{
-		Root: filepath.Join(tempDir, "files"),
+	fs, err := collection.NewLocalFileSystem(filepath.Join(tempDir, "files"))
+	if err != nil {
+		os.RemoveAll(tempDir)
+		t.Fatalf("failed to create filesystem: %v", err)
 	}
 
 	// 4. Create the Collection Domain Object

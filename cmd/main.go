@@ -57,7 +57,10 @@ func run() error {
 	// B. Local Filesystem
 	// (We need a concrete implementation of collection.FileSystem)
 	// For this example, we use a simple wrapper around os methods.
-	fs := &collection.LocalFileSystem{Root: filepath.Join(fullPath, "files")}
+	fs, err := collection.NewLocalFileSystem(filepath.Join(fullPath, "files"))
+	if err != nil {
+		log.Fatalf("Failed to create filesystem: %v", err)
+	}
 
 	// 4. Create Domain Object
 	coll, err := collection.NewCollection(proto, store, fs)

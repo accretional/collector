@@ -84,7 +84,10 @@ func (r *DefaultCollectionRepo) GetCollection(ctx context.Context, namespace, na
 	}
 
 	// Use a local filesystem implementation
-	fs := &LocalFileSystem{Root: ""}
+	fs, err := NewLocalFileSystem("./data/files")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create filesystem: %w", err)
+	}
 
 	return NewCollection(meta, r.store, fs)
 }

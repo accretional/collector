@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	collector "github.com/accretional/collector/gen/collector"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -33,11 +34,16 @@ func (s *RegistryServer) ValidationInterceptor(namespace string) grpc.UnaryServe
 		serviceName := serviceParts[len(serviceParts)-1]
 
 		// Validate the method
-		if err := s.ValidateMethod(ctx, namespace, serviceName, methodName); err != nil {
+		resp, err := s.ValidateMethod(ctx, &collector.ValidateMethodRequest{
+			Namespace:   namespace,
+			ServiceName: serviceName,
+			MethodName:  methodName,
+		})
+		if err != nil || !resp.IsValid {
 			// If validation fails, return an error
 			return nil, status.Errorf(codes.Unimplemented,
-				"method %s on service %s is not registered in namespace %s: %v",
-				methodName, serviceName, namespace, err)
+				"method %s on service %s is not registered in namespace %s: %s",
+				methodName, serviceName, namespace, resp.Status.Message)
 		}
 
 		// Validation passed, proceed with the handler
@@ -67,10 +73,15 @@ func (s *RegistryServer) StreamValidationInterceptor(namespace string) grpc.Stre
 		serviceName := serviceParts[len(serviceParts)-1]
 
 		// Validate the method
-		if err := s.ValidateMethod(ss.Context(), namespace, serviceName, methodName); err != nil {
+		resp, err := s.ValidateMethod(ss.Context(), &collector.ValidateMethodRequest{
+			Namespace:   namespace,
+			ServiceName: serviceName,
+			MethodName:  methodName,
+		})
+		if err != nil || !resp.IsValid {
 			return status.Errorf(codes.Unimplemented,
-				"method %s on service %s is not registered in namespace %s: %v",
-				methodName, serviceName, namespace, err)
+				"method %s on service %s is not registered in namespace %s: %s",
+				methodName, serviceName, namespace, resp.Status.Message)
 		}
 
 		// Validation passed, proceed with the handler

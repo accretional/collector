@@ -2,46 +2,42 @@ package collection
 
 import (
 	"context"
-	"os"
-	"path/filepath"
+
+	"github.com/accretional/collector/pkg/fs/local"
 )
 
-// LocalFileSystem implements the FileSystem interface using the os package.
+// LocalFileSystem implements the FileSystem interface.
+// This is a compatibility wrapper around pkg/fs/local.FileSystem.
+// New code should use pkg/fs/local.FileSystem directly.
 type LocalFileSystem struct {
-	Root string
+	fs *local.FileSystem
+}
+
+// NewLocalFileSystem creates a new LocalFileSystem rooted at the given path.
+func NewLocalFileSystem(root string) (*LocalFileSystem, error) {
+	fs, err := local.NewFileSystem(root)
+	if err != nil {
+		return nil, err
+	}
+	return &LocalFileSystem{fs: fs}, nil
 }
 
 func (l *LocalFileSystem) Save(ctx context.Context, path string, content []byte) error {
-	fullPath := filepath.Join(l.Root, path)
-	// Ensure directory exists
-	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
-		return err
-	}
-	return os.WriteFile(fullPath, content, 0644)
+	return l.fs.Save(ctx, path, content)
 }
 
 func (l *LocalFileSystem) Load(ctx context.Context, path string) ([]byte, error) {
-	return os.ReadFile(filepath.Join(l.Root, path))
+	return l.fs.Load(ctx, path)
 }
 
 func (l *LocalFileSystem) Delete(ctx context.Context, path string) error {
-	return os.Remove(filepath.Join(l.Root, path))
+	return l.fs.Delete(ctx, path)
 }
 
 func (l *LocalFileSystem) List(ctx context.Context, prefix string) ([]string, error) {
-	var files []string
-	err := filepath.Walk(l.Root, func(path string, info os.FileInfo, err error) error {
-		if !info.IsDir() {
-			rel, _ := filepath.Rel(l.Root, path)
-			files = append(files, rel)
-		}
-		return nil
-	})
-	return files, err
+	return l.fs.List(ctx, prefix)
 }
 
 func (l *LocalFileSystem) Stat(ctx context.Context, path string) (int64, error) {
-	info, err := os.Stat(filepath.Join(l.Root, path))
-	if err != nil { return 0, err }
-	return info.Size(), nil
+	return l.fs.Stat(ctx, path)
 }

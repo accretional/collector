@@ -13,12 +13,24 @@ import (
 // GrpcServer wraps the gRPC server and implements the CollectionRepoServer.
 type GrpcServer struct {
 	pb.UnimplementedCollectionRepoServer
-	repo CollectionRepo
+	repo         CollectionRepo
+	cloneManager *CloneManager
 }
 
 // NewGrpcServer creates a new instance of our gRPC server.
 func NewGrpcServer(repo CollectionRepo) *GrpcServer {
-	return &GrpcServer{repo: repo}
+	return &GrpcServer{
+		repo:         repo,
+		cloneManager: NewCloneManager(repo, "./data"),
+	}
+}
+
+// NewGrpcServerWithDataDir creates a new instance with a custom data directory.
+func NewGrpcServerWithDataDir(repo CollectionRepo, dataDir string) *GrpcServer {
+	return &GrpcServer{
+		repo:         repo,
+		cloneManager: NewCloneManager(repo, dataDir),
+	}
 }
 
 // CreateCollection forwards the request to the underlying repository.
@@ -39,6 +51,43 @@ func (s *GrpcServer) Route(ctx context.Context, req *pb.RouteRequest) (*pb.Route
 // SearchCollections forwards the request to the underlying repository.
 func (s *GrpcServer) SearchCollections(ctx context.Context, req *pb.SearchCollectionsRequest) (*pb.SearchCollectionsResponse, error) {
 	return s.repo.SearchCollections(ctx, req)
+}
+
+// Clone clones a collection either locally or to a remote collector.
+func (s *GrpcServer) Clone(ctx context.Context, req *pb.CloneRequest) (*pb.CloneResponse, error) {
+	// Validate request
+	if req == nil {
+		return &pb.CloneResponse{
+			Status: &pb.Status{
+				Code:    pb.Status_INVALID_ARGUMENT,
+				Message: "request is required",
+			},
+		}, nil
+	}
+
+	// Route to appropriate implementation
+	if req.DestEndpoint == "" {
+		// Local clone
+		return s.cloneManager.CloneLocal(ctx, req)
+	}
+
+	// Remote clone
+	return s.cloneManager.CloneRemote(ctx, req)
+}
+
+// Fetch fetches a collection from a remote collector.
+func (s *GrpcServer) Fetch(ctx context.Context, req *pb.FetchRequest) (*pb.FetchResponse, error) {
+	// Validate request
+	if req == nil {
+		return &pb.FetchResponse{
+			Status: &pb.Status{
+				Code:    pb.Status_INVALID_ARGUMENT,
+				Message: "request is required",
+			},
+		}, nil
+	}
+
+	return s.cloneManager.FetchRemote(ctx, req)
 }
 
 // Start runs the gRPC server on the given port.

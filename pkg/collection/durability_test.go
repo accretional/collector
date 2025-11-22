@@ -348,7 +348,7 @@ func TestRecovery_AfterAbnormalClose(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fs := &collection.LocalFileSystem{Root: filepath.Join(tempDir, "files")}
+	fs, _ := collection.NewLocalFileSystem(filepath.Join(tempDir, "files"))
 	
 	proto := &pb.Collection{
 		Namespace: "recovery",
@@ -426,7 +426,7 @@ func TestRecovery_FTSIndexConsistency(t *testing.T) {
 	opts := collection.Options{EnableFTS: true, EnableJSON: true}
 	
 	store, _ := sqlite.NewSqliteStore(dbPath, opts)
-	fs := &collection.LocalFileSystem{Root: filepath.Join(tempDir, "files")}
+	fs, _ := collection.NewLocalFileSystem(filepath.Join(tempDir, "files"))
 	proto := &pb.Collection{Namespace: "fts", Name: "test"}
 
 	coll, err := collection.NewCollection(proto, store, fs)
@@ -711,7 +711,7 @@ func TestMetadataConsistency(t *testing.T) {
 
 	dbPath := filepath.Join(tempDir, "meta.db")
 	store, _ := sqlite.NewSqliteStore(dbPath, collection.Options{EnableJSON: true})
-	fs := &collection.LocalFileSystem{Root: filepath.Join(tempDir, "files")}
+	fs, _ := collection.NewLocalFileSystem(filepath.Join(tempDir, "files"))
 	
 	proto := &pb.Collection{
 		Namespace: "meta",

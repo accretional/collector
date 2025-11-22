@@ -65,10 +65,44 @@ message SearchCollectionsResponse {
     repeated google.protobuf.Any items = 2;
     map<string, double> scores = 3;
   }
-  
+
   Status status = 1;
   repeated CollectionResult results = 2;
   int64 total_matches = 3;
+}
+
+// Clone a collection to another collector or location
+message CloneRequest {
+  NamespacedName source_collection = 1;
+  string dest_namespace = 2;
+  string dest_name = 3;
+  string dest_endpoint = 4;  // Optional: remote collector endpoint
+  bool include_files = 5;     // Include filesystem data
+}
+
+message CloneResponse {
+  Status status = 1;
+  string collection_id = 2;
+  int64 records_cloned = 3;
+  int64 files_cloned = 4;
+  int64 bytes_transferred = 5;
+}
+
+// Fetch a collection from a remote collector
+message FetchRequest {
+  string source_endpoint = 1;  // Remote collector endpoint
+  NamespacedName source_collection = 2;
+  string dest_namespace = 3;   // Local namespace to create collection in
+  string dest_name = 4;        // Local name for collection
+  bool include_files = 5;      // Include filesystem data
+}
+
+message FetchResponse {
+  Status status = 1;
+  string collection_id = 2;
+  int64 records_fetched = 3;
+  int64 files_fetched = 4;
+  int64 bytes_transferred = 5;
 }
 
 service CollectionRepo {
@@ -76,4 +110,6 @@ service CollectionRepo {
   rpc Discover(DiscoverRequest) returns (DiscoverResponse);
   rpc Route(RouteRequest) returns (RouteResponse);
   rpc SearchCollections(SearchCollectionsRequest) returns (SearchCollectionsResponse);
+  rpc Clone(CloneRequest) returns (CloneResponse);
+  rpc Fetch(FetchRequest) returns (FetchResponse);
 }
