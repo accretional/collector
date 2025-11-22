@@ -96,9 +96,9 @@ func (cm *ConnectionManager) HandleConnect(ctx context.Context, req *pb.ConnectR
 			Code:    200,
 			Message: fmt.Sprintf("Connected with %d shared namespaces", len(sharedNamespaces)),
 		},
-		ConnectionId:       connectionID,
-		SharedNamespaces:   sharedNamespaces,
-		TargetCollectorId:  cm.collectorID,
+		ConnectionId:      connectionID,
+		SharedNamespaces:  sharedNamespaces,
+		TargetCollectorId: cm.collectorID,
 	}, nil
 }
 

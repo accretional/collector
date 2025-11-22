@@ -20,7 +20,7 @@ func TestRealSqliteIntegration(t *testing.T) {
 		Id:        "rec-1",
 		ProtoData: []byte(`{"key": "value"}`),
 	}
-	
+
 	if err := coll.CreateRecord(ctx, record); err != nil {
 		t.Fatalf("failed to create record: %v", err)
 	}
@@ -51,18 +51,20 @@ func TestRealFTS(t *testing.T) {
 		Id: "doc-1",
 		// In a real app, this would be actual proto bytes that get marshaled to JSON
 		// Our store implementation currently puts "{}" as a placeholder unless we passed it through
-		ProtoData: []byte(`{}`), 
+		ProtoData: []byte(`{}`),
 	})
-	if err != nil { t.Fatal(err) }
-	
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// Perform a search
 	results, err := coll.Search(ctx, &collection.SearchQuery{
-		FullText: "some text", 
+		FullText: "some text",
 	})
 	if err != nil {
 		t.Fatalf("search failed: %v", err)
 	}
-	
+
 	// Just verify it runs without crashing, results depend on how we handle proto->json in the store
 	if len(results) != 0 {
 		t.Logf("Found %d results", len(results))

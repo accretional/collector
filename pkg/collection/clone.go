@@ -121,10 +121,10 @@ func (cm *CloneManager) CloneLocal(ctx context.Context, req *pb.CloneRequest) (*
 			Code:    pb.Status_OK,
 			Message: "Collection cloned successfully",
 		},
-		CollectionId:      fmt.Sprintf("%s/%s", req.DestNamespace, req.DestName),
-		RecordsCloned:     recordCount,
-		FilesCloned:       fileCount,
-		BytesTransferred:  bytesTransferred,
+		CollectionId:     fmt.Sprintf("%s/%s", req.DestNamespace, req.DestName),
+		RecordsCloned:    recordCount,
+		FilesCloned:      fileCount,
+		BytesTransferred: bytesTransferred,
 	}, nil
 }
 

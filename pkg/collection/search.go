@@ -4,7 +4,6 @@ import (
 	pb "github.com/accretional/collector/gen/collector"
 )
 
-
 // SearchQuery is the generic query structure passed to the Store.
 type SearchQuery struct {
 	FullText            string

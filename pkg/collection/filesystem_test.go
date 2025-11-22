@@ -32,7 +32,7 @@ func TestSaveFile_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to retrieve file: %v", err)
 	}
-	
+
 	content := retrieved.Content.(*pb.CollectionData_Data).Data
 	if !bytes.Equal(content, []byte("Hello, World!")) {
 		t.Errorf("file content mismatch: got '%s'", string(content))
@@ -181,10 +181,14 @@ func TestSaveDir_Success(t *testing.T) {
 
 	// Verify files were created via GetFile
 	_, err := coll.GetFile(ctx, "root/root.txt")
-	if err != nil { t.Error("root file not created") }
+	if err != nil {
+		t.Error("root file not created")
+	}
 
 	_, err = coll.GetFile(ctx, "root/subdir1/file1.txt")
-	if err != nil { t.Error("subdir file not created") }
+	if err != nil {
+		t.Error("subdir file not created")
+	}
 }
 
 func TestFileSize_SmallVsLarge(t *testing.T) {
@@ -194,11 +198,13 @@ func TestFileSize_SmallVsLarge(t *testing.T) {
 
 	// Small file (< 1MB) - should be returned inline
 	smallContent := make([]byte, 1024) // 1KB
-	for i := range smallContent { smallContent[i] = 'a' }
+	for i := range smallContent {
+		smallContent[i] = 'a'
+	}
 
 	smallData := &pb.CollectionData{
-		Name: "small.txt",
-		Content: &pb.CollectionData_Data{ Data: smallContent },
+		Name:    "small.txt",
+		Content: &pb.CollectionData_Data{Data: smallContent},
 	}
 	if err := coll.SaveFile(ctx, "small.txt", smallData); err != nil {
 		t.Fatal(err)
@@ -212,18 +218,20 @@ func TestFileSize_SmallVsLarge(t *testing.T) {
 	// Large file (> 1MB) - we simulate this by writing directly to disk
 	// because SaveFile implementation forces inline currently.
 	// The test is for GetFile's logic.
-	
+
 	// Need to access FS root to write manually
 	// Since FS is an interface, we can't assume implementation details here easily
 	// BUT, assuming the GetFile implementation logic:
-	
+
 	// Let's create a large file using SaveFile (it will save to disk)
 	largeContent := make([]byte, 2*1024*1024) // 2MB
-	for i := range largeContent { largeContent[i] = 'b' }
+	for i := range largeContent {
+		largeContent[i] = 'b'
+	}
 
 	largeData := &pb.CollectionData{
-		Name: "large.txt",
-		Content: &pb.CollectionData_Data{ Data: largeContent },
+		Name:    "large.txt",
+		Content: &pb.CollectionData_Data{Data: largeContent},
 	}
 	if err := coll.SaveFile(ctx, "large.txt", largeData); err != nil {
 		t.Fatal(err)
@@ -239,7 +247,7 @@ func TestFileSize_SmallVsLarge(t *testing.T) {
 	if _, ok := largeRetrieved.Content.(*pb.CollectionData_Uri); !ok {
 		t.Error("large file should have URI reference")
 	}
-	
+
 	uri := largeRetrieved.Content.(*pb.CollectionData_Uri).Uri
 	// On Windows/Unix path separators might differ, check suffix
 	if filepath.Base(uri) != "large.txt" {

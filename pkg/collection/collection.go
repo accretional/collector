@@ -40,17 +40,21 @@ func NewCollection(meta *pb.Collection, store Store, fs FileSystem) (*Collection
 // --- Store Delegates ---
 
 func (c *Collection) CreateRecord(ctx context.Context, record *pb.CollectionRecord) error {
-	if record.Id == "" { return fmt.Errorf("record id required") }
+	if record.Id == "" {
+		return fmt.Errorf("record id required")
+	}
 	// Ensure metadata exists
-	if record.Metadata == nil { record.Metadata = &pb.Metadata{} }
-	
+	if record.Metadata == nil {
+		record.Metadata = &pb.Metadata{}
+	}
+
 	// Set timestamps if missing
 	if record.Metadata.CreatedAt == nil {
 		now := timestamppb.Now()
 		record.Metadata.CreatedAt = now
 		record.Metadata.UpdatedAt = now
 	}
-	
+
 	return c.Store.CreateRecord(ctx, record)
 }
 
@@ -59,8 +63,10 @@ func (c *Collection) GetRecord(ctx context.Context, id string) (*pb.CollectionRe
 }
 
 func (c *Collection) UpdateRecord(ctx context.Context, record *pb.CollectionRecord) error {
-	if record.Id == "" { return fmt.Errorf("record id required") }
-	
+	if record.Id == "" {
+		return fmt.Errorf("record id required")
+	}
+
 	// Ensure metadata exists
 	if record.Metadata == nil {
 		record.Metadata = &pb.Metadata{}
@@ -68,7 +74,7 @@ func (c *Collection) UpdateRecord(ctx context.Context, record *pb.CollectionReco
 
 	// Always update the UpdatedAt timestamp
 	record.Metadata.UpdatedAt = timestamppb.Now()
-	
+
 	return c.Store.UpdateRecord(ctx, record)
 }
 
@@ -97,7 +103,7 @@ func (c *Collection) Close() error {
 }
 
 func (c *Collection) GetNamespace() string { return c.Meta.Namespace }
-func (c *Collection) GetName() string { return c.Meta.Name }
+func (c *Collection) GetName() string      { return c.Meta.Name }
 
 // --- Filesystem Logic ---
 
@@ -117,7 +123,7 @@ func (c *Collection) SaveFile(ctx context.Context, path string, data *pb.Collect
 	return c.FS.Save(ctx, path, content)
 }
 
-// GetFile retrieves a file. It automatically handles the logic of 
+// GetFile retrieves a file. It automatically handles the logic of
 // returning raw bytes for small files or a URI for large files (optional optimization).
 func (c *Collection) GetFile(ctx context.Context, path string) (*pb.CollectionData, error) {
 	// 1. Check size

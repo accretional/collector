@@ -127,11 +127,11 @@ func (s *BackupMetadataStore) GetBackup(ctx context.Context, backupID string) (*
 	defer s.mu.RUnlock()
 
 	var (
-		backup       pb.BackupMetadata
-		namespace    string
-		name         string
+		backup        pb.BackupMetadata
+		namespace     string
+		name          string
 		includesFiles int
-		metaStr      string
+		metaStr       string
 	)
 
 	query := `
@@ -236,11 +236,11 @@ func (s *BackupMetadataStore) ListBackups(ctx context.Context, req *pb.ListBacku
 	var backups []*pb.BackupMetadata
 	for rows.Next() {
 		var (
-			backup       pb.BackupMetadata
-			namespace    string
-			name         string
+			backup        pb.BackupMetadata
+			namespace     string
+			name          string
 			includesFiles int
-			metaStr      string
+			metaStr       string
 		)
 
 		if err := rows.Scan(
@@ -488,7 +488,7 @@ func (bm *BackupManager) BackupCollection(ctx context.Context, req *pb.BackupCol
 			Code:    pb.Status_OK,
 			Message: "backup created successfully",
 		},
-		Backup:            backupMeta,
+		Backup:           backupMeta,
 		BytesTransferred: sizeBytes,
 	}, nil
 }

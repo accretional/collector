@@ -15,7 +15,7 @@ type SemanticEngine struct {
 	Embedder   Embedder
 }
 
-// FindSimilar performs a semantic search by embedding the query text 
+// FindSimilar performs a semantic search by embedding the query text
 // and running a vector search against the Store.
 func (s *SemanticEngine) FindSimilar(ctx context.Context, queryText string, limit int) ([]*SearchResult, error) {
 	vector, err := s.Embedder.Embed(ctx, queryText)
@@ -27,6 +27,6 @@ func (s *SemanticEngine) FindSimilar(ctx context.Context, queryText string, limi
 		Vector: vector,
 		Limit:  limit,
 	}
-	
+
 	return s.Collection.Search(ctx, q)
 }

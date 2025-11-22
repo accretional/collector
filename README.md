@@ -504,7 +504,44 @@ Namespaces provide the fundamental isolation boundary:
 
 ## Testing
 
-Comprehensive test coverage across all packages:
+**⚠️ IMPORTANT: Testing Requirements**
+
+**Before making ANY changes, run the comprehensive test suite:**
+
+```bash
+./RUN_ALL_TESTS_BEFORE_SUBMIT.sh
+```
+
+This is **mandatory** for:
+- ✅ All code changes
+- ✅ All pull requests
+- ✅ All AI agent contributions
+- ✅ All manual development
+
+**For AI Agents:** See [AGENTS.md](AGENTS.md) for detailed guidelines. Any test failure is YOUR responsibility to fix.
+
+### Comprehensive Test Suite (REQUIRED)
+
+**Always run the full test suite before submitting changes:**
+
+```bash
+./RUN_ALL_TESTS_BEFORE_SUBMIT.sh
+```
+
+This script runs:
+- ✅ Build verification
+- ✅ Code quality checks (go vet, go fmt)
+- ✅ All unit tests
+- ✅ Integration tests
+- ✅ Backup system validation
+- ✅ Concurrency & race detection
+- ✅ Durability tests
+- ✅ Benchmarks
+- ✅ Coverage report
+
+### Running Individual Test Suites
+
+For development and debugging:
 
 ```bash
 # Run all tests
@@ -515,14 +552,17 @@ go test ./pkg/registry/... -v
 go test ./pkg/dispatch/... -v
 go test ./pkg/collection/... -v
 
-# Run backup tests (NEW)
+# Run backup tests
 go test ./pkg/collection -run "Test.*Backup" -v
 
-# Run SQLite backup/availability tests (NEW)
+# Run SQLite backup/availability tests
 go test ./pkg/db/sqlite -run TestBackup -v
 
 # Run integration tests
 go test ./pkg/integration/... -v
+
+# Race detection
+go test ./pkg/... -race -short
 ```
 
 **Test Statistics:**
@@ -728,8 +768,6 @@ The Dispatcher's `Serve` method is designed as an extension point for adding sec
 
 ### Future
 - [ ] CollectiveWorker workflow system
-- [ ] CollectorConsole UI/analysis tools
-- [ ] GraphQL interface for collections
 - [ ] Cross-collector registry replication
 - [ ] Query optimizer for complex searches
 - [ ] Schema evolution and migrations

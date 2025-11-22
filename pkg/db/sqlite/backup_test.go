@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/accretional/collector/pkg/collection"
 	pb "github.com/accretional/collector/gen/collector"
+	"github.com/accretional/collector/pkg/collection"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -32,7 +32,7 @@ func TestBackupConcurrentReads(t *testing.T) {
 	numRecords := 10000
 	for i := 0; i < numRecords; i++ {
 		record := &pb.CollectionRecord{
-			Id:  fmt.Sprintf("record-%d", i),
+			Id: fmt.Sprintf("record-%d", i),
 			Metadata: &pb.Metadata{
 				Labels:    map[string]string{},
 				CreatedAt: timestamppb.Now(),
@@ -143,7 +143,7 @@ func TestBackupConcurrentWrites(t *testing.T) {
 	initialRecords := 5000
 	for i := 0; i < initialRecords; i++ {
 		record := &pb.CollectionRecord{
-			Id:  fmt.Sprintf("initial-%d", i),
+			Id: fmt.Sprintf("initial-%d", i),
 			Metadata: &pb.Metadata{
 				Labels:    map[string]string{},
 				CreatedAt: timestamppb.Now(),
@@ -175,7 +175,7 @@ func TestBackupConcurrentWrites(t *testing.T) {
 				// Write a new record
 				recordID := fmt.Sprintf("writer-%d-record-%d", writerID, writeCount)
 				record := &pb.CollectionRecord{
-					Id:  recordID,
+					Id: recordID,
 					Metadata: &pb.Metadata{
 						Labels:    map[string]string{},
 						CreatedAt: timestamppb.Now(),
@@ -282,7 +282,7 @@ func TestBackupLockDuration(t *testing.T) {
 			// Insert records
 			for i := 0; i < tc.numRecords; i++ {
 				record := &pb.CollectionRecord{
-					Id:  fmt.Sprintf("record-%d", i),
+					Id: fmt.Sprintf("record-%d", i),
 					Metadata: &pb.Metadata{
 						Labels:    map[string]string{},
 						CreatedAt: timestamppb.Now(),
@@ -309,7 +309,7 @@ func TestBackupLockDuration(t *testing.T) {
 					default:
 						writeStart := time.Now()
 						record := &pb.CollectionRecord{
-							Id:  fmt.Sprintf("probe-%d", time.Now().UnixNano()),
+							Id: fmt.Sprintf("probe-%d", time.Now().UnixNano()),
 							Metadata: &pb.Metadata{
 								Labels:    map[string]string{},
 								CreatedAt: timestamppb.Now(),
@@ -378,7 +378,7 @@ func TestBackupConsistency(t *testing.T) {
 		expectedData[recordID] = data
 
 		record := &pb.CollectionRecord{
-			Id:  recordID,
+			Id: recordID,
 			Metadata: &pb.Metadata{
 				Labels:    map[string]string{},
 				CreatedAt: timestamppb.Now(),
@@ -442,7 +442,7 @@ func TestBackupUnderLoad(t *testing.T) {
 	// Pre-populate database
 	for i := 0; i < 5000; i++ {
 		record := &pb.CollectionRecord{
-			Id:  fmt.Sprintf("record-%d", i),
+			Id: fmt.Sprintf("record-%d", i),
 			Metadata: &pb.Metadata{
 				Labels:    map[string]string{},
 				CreatedAt: timestamppb.Now(),
@@ -455,10 +455,10 @@ func TestBackupUnderLoad(t *testing.T) {
 
 	// Statistics
 	var stats struct {
-		reads        atomic.Int64
-		writes       atomic.Int64
-		readErrors   atomic.Int64
-		writeErrors  atomic.Int64
+		reads       atomic.Int64
+		writes      atomic.Int64
+		readErrors  atomic.Int64
+		writeErrors atomic.Int64
 	}
 
 	// Simulate production load
@@ -501,7 +501,7 @@ func TestBackupUnderLoad(t *testing.T) {
 				default:
 					recordID := fmt.Sprintf("load-writer-%d-%d", id, writeCount)
 					record := &pb.CollectionRecord{
-						Id:  recordID,
+						Id: recordID,
 						Metadata: &pb.Metadata{
 							Labels:    map[string]string{},
 							CreatedAt: timestamppb.Now(),
@@ -598,7 +598,7 @@ func TestBackupOnline(t *testing.T) {
 	numRecords := 5000
 	for i := 0; i < numRecords; i++ {
 		record := &pb.CollectionRecord{
-			Id:  fmt.Sprintf("record-%d", i),
+			Id: fmt.Sprintf("record-%d", i),
 			Metadata: &pb.Metadata{
 				Labels:    map[string]string{},
 				CreatedAt: timestamppb.Now(),
@@ -633,7 +633,7 @@ func TestBackupOnline(t *testing.T) {
 					}
 				} else {
 					record := &pb.CollectionRecord{
-						Id:  fmt.Sprintf("concurrent-%d", time.Now().UnixNano()),
+						Id: fmt.Sprintf("concurrent-%d", time.Now().UnixNano()),
 						Metadata: &pb.Metadata{
 							Labels:    map[string]string{},
 							CreatedAt: timestamppb.Now(),
@@ -716,7 +716,7 @@ func TestBackupFailureRecovery(t *testing.T) {
 
 	// Verify original database still works after failed backup
 	record := &pb.CollectionRecord{
-		Id:  "test-after-failure",
+		Id: "test-after-failure",
 		Metadata: &pb.Metadata{
 			Labels:    map[string]string{},
 			CreatedAt: timestamppb.Now(),
@@ -752,7 +752,7 @@ func BenchmarkBackupWithLoad(b *testing.B) {
 	// Pre-populate
 	for i := 0; i < 10000; i++ {
 		record := &pb.CollectionRecord{
-			Id:  fmt.Sprintf("record-%d", i),
+			Id: fmt.Sprintf("record-%d", i),
 			Metadata: &pb.Metadata{
 				Labels:    map[string]string{},
 				CreatedAt: timestamppb.Now(),

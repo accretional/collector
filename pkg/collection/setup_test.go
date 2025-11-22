@@ -22,10 +22,10 @@ func setupTestCollection(t *testing.T) (*collection.Collection, func()) {
 
 	// 2. Initialize the REAL SQLite Store
 	dbPath := filepath.Join(tempDir, "test.db")
-	
+
 	store, err := sqlite.NewSqliteStore(dbPath, collection.Options{
-		EnableFTS:  true,  // Test FTS tables
-		EnableJSON: true,  // Test JSON columns
+		EnableFTS:  true, // Test FTS tables
+		EnableJSON: true, // Test JSON columns
 	})
 	if err != nil {
 		os.RemoveAll(tempDir)

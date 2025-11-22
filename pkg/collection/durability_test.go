@@ -67,7 +67,7 @@ func TestCreateRecord_AtomicityOnFailure(t *testing.T) {
 	// We expect this might succeed in the raw store unless we enforce proto validation,
 	// but the test structure assumes failure handling.
 	err := coll.CreateRecord(ctx, record)
-	
+
 	// If it failed (as expected for invalid data in some configs)
 	if err != nil {
 		// Verify record was not created
@@ -111,7 +111,7 @@ func TestUpdateRecord_RollbackOnFailure(t *testing.T) {
 		ProtoData: []byte{0xFF, 0xFE}, // Invalid UTF-8
 	}
 
-	_ = coll.UpdateRecord(ctx, invalid) 
+	_ = coll.UpdateRecord(ctx, invalid)
 
 	// Original data should still be retrievable
 	retrieved, err := coll.GetRecord(ctx, "rollback-test")
@@ -349,7 +349,7 @@ func TestRecovery_AfterAbnormalClose(t *testing.T) {
 		t.Fatal(err)
 	}
 	fs, _ := collection.NewLocalFileSystem(filepath.Join(tempDir, "files"))
-	
+
 	proto := &pb.Collection{
 		Namespace: "recovery",
 		Name:      "test",
@@ -375,7 +375,7 @@ func TestRecovery_AfterAbnormalClose(t *testing.T) {
 	// 4. Simulate "Abnormal" Close (or just close) and Re-open
 	// In WAL mode, data is persisted. Even if we don't Close(), it should recover on next Open.
 	// But we should close the underlying handle to prevent file locks in tests.
-	coll.Close() 
+	coll.Close()
 
 	// 5. Reopen (Recovery)
 	newStore, err := sqlite.NewSqliteStore(dbPath, collection.Options{EnableJSON: true})
@@ -424,7 +424,7 @@ func TestRecovery_FTSIndexConsistency(t *testing.T) {
 	// Setup with FTS enabled
 	dbPath := filepath.Join(tempDir, "fts.db")
 	opts := collection.Options{EnableFTS: true, EnableJSON: true}
-	
+
 	store, _ := sqlite.NewSqliteStore(dbPath, opts)
 	fs, _ := collection.NewLocalFileSystem(filepath.Join(tempDir, "files"))
 	proto := &pb.Collection{Namespace: "fts", Name: "test"}
@@ -495,7 +495,7 @@ func TestInvalidJSON_Handling(t *testing.T) {
 
 		// Should not panic, may or may not fail
 		err := coll.CreateRecord(ctx, record)
-		
+
 		// If it succeeds, should be able to retrieve it
 		if err == nil {
 			retrieved, getErr := coll.GetRecord(ctx, record.Id)
@@ -604,7 +604,7 @@ func TestInvalidRecordIDs(t *testing.T) {
 		}
 
 		err := coll.CreateRecord(ctx, record)
-		
+
 		// Empty ID should fail
 		if id == "" && err == nil {
 			t.Error("empty ID should be rejected")
@@ -645,7 +645,7 @@ func TestFilePathTraversal(t *testing.T) {
 
 		// This should fail because of strict path checking in LocalFileSystem or Collection wrapper
 		err := coll.SaveFile(ctx, path, data)
-		
+
 		if err == nil {
 			// Check if the file was actually created OUTSIDE the root
 			// If we are in the test env, we can't easily check /etc/passwd, but we can check if it errored.
@@ -712,10 +712,10 @@ func TestMetadataConsistency(t *testing.T) {
 	dbPath := filepath.Join(tempDir, "meta.db")
 	store, _ := sqlite.NewSqliteStore(dbPath, collection.Options{EnableJSON: true})
 	fs, _ := collection.NewLocalFileSystem(filepath.Join(tempDir, "files"))
-	
+
 	proto := &pb.Collection{
-		Namespace: "meta",
-		Name:      "test",
+		Namespace:     "meta",
+		Name:          "test",
 		IndexedFields: []string{"field1", "field2"},
 	}
 
