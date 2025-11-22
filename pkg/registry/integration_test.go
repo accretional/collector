@@ -85,10 +85,17 @@ func TestDispatcherIntegration(t *testing.T) {
 	}
 
 	// 3. Verify all methods are registered
-	service, err := registry.LookupService(ctx, "test", "CollectiveDispatcher")
+	lookupResp, err := registry.LookupService(ctx, &pb.LookupServiceRequest{
+		Namespace:   "test",
+		ServiceName: "CollectiveDispatcher",
+	})
 	if err != nil {
 		t.Fatalf("failed to lookup service: %v", err)
 	}
+	if lookupResp.Status.Code != pb.Status_OK {
+		t.Fatalf("LookupService failed: %s", lookupResp.Status.Message)
+	}
+	service := lookupResp.Service
 
 	expectedMethods := []string{"Serve", "Connect", "Dispatch"}
 	if len(service.MethodNames) != len(expectedMethods) {
@@ -123,10 +130,17 @@ func TestCollectionRepoIntegration(t *testing.T) {
 	}
 
 	// 3. Verify all methods are registered
-	service, err := registry.LookupService(ctx, "test", "CollectionRepo")
+	lookupResp, err := registry.LookupService(ctx, &pb.LookupServiceRequest{
+		Namespace:   "test",
+		ServiceName: "CollectionRepo",
+	})
 	if err != nil {
 		t.Fatalf("failed to lookup service: %v", err)
 	}
+	if lookupResp.Status.Code != pb.Status_OK {
+		t.Fatalf("LookupService failed: %s", lookupResp.Status.Message)
+	}
+	service := lookupResp.Service
 
 	expectedMethods := []string{"CreateCollection", "Discover", "Route", "SearchCollections"}
 	if len(service.MethodNames) != len(expectedMethods) {
@@ -164,10 +178,19 @@ func TestMultipleNamespaces(t *testing.T) {
 
 	// Verify all are registered independently
 	for _, ns := range namespaces {
-		service, err := registry.LookupService(ctx, ns, "CollectionService")
+		lookupResp, err := registry.LookupService(ctx, &pb.LookupServiceRequest{
+			Namespace:   ns,
+			ServiceName: "CollectionService",
+		})
 		if err != nil {
 			t.Errorf("failed to lookup service in namespace %s: %v", ns, err)
+			continue
 		}
+		if lookupResp.Status.Code != pb.Status_OK {
+			t.Errorf("LookupService failed for namespace %s: %s", ns, lookupResp.Status.Message)
+			continue
+		}
+		service := lookupResp.Service
 		if service.Namespace != ns {
 			t.Errorf("expected namespace %s, got %s", ns, service.Namespace)
 		}
@@ -199,10 +222,14 @@ func TestDynamicServiceLookup(t *testing.T) {
 	}
 
 	// List all services in namespace
-	allServices, err := registry.ListServices(ctx, namespace)
+	listResp, err := registry.ListServices(ctx, &pb.ListServicesRequest{Namespace: namespace})
 	if err != nil {
 		t.Fatalf("failed to list services: %v", err)
 	}
+	if listResp.Status.Code != pb.Status_OK {
+		t.Fatalf("ListServices failed: %s", listResp.Status.Message)
+	}
+	allServices := listResp.Services
 
 	if len(allServices) != len(services) {
 		t.Errorf("expected %d services, got %d", len(services), len(allServices))
@@ -210,11 +237,20 @@ func TestDynamicServiceLookup(t *testing.T) {
 
 	// Verify each service has correct method count
 	for _, svc := range services {
-		registeredSvc, err := registry.LookupService(ctx, namespace, svc.serviceName)
+		lookupResp, err := registry.LookupService(ctx, &pb.LookupServiceRequest{
+			Namespace:   namespace,
+			ServiceName: svc.serviceName,
+		})
 		if err != nil {
 			t.Errorf("failed to lookup %s: %v", svc.serviceName, err)
+			continue
+		}
+		if lookupResp.Status.Code != pb.Status_OK {
+			t.Errorf("LookupService failed for %s: %s", svc.serviceName, lookupResp.Status.Message)
+			continue
 		}
 
+		registeredSvc := lookupResp.Service
 		if len(registeredSvc.MethodNames) != svc.methodCount {
 			t.Errorf("expected %d methods for %s, got %d",
 				svc.methodCount, svc.serviceName, len(registeredSvc.MethodNames))

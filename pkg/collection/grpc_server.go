@@ -13,12 +13,37 @@ import (
 // GrpcServer wraps the gRPC server and implements the CollectionRepoServer.
 type GrpcServer struct {
 	pb.UnimplementedCollectionRepoServer
-	repo CollectionRepo
+	repo          CollectionRepo
+	cloneManager  *CloneManager
+	backupManager *BackupManager
 }
 
 // NewGrpcServer creates a new instance of our gRPC server.
 func NewGrpcServer(repo CollectionRepo) *GrpcServer {
-	return &GrpcServer{repo: repo}
+	backupManager, err := NewBackupManager(repo, &SqliteTransport{}, "./data/backups/metadata.db")
+	if err != nil {
+		log.Printf("Warning: failed to initialize backup manager: %v", err)
+	}
+
+	return &GrpcServer{
+		repo:          repo,
+		cloneManager:  NewCloneManager(repo, "./data"),
+		backupManager: backupManager,
+	}
+}
+
+// NewGrpcServerWithDataDir creates a new instance with a custom data directory.
+func NewGrpcServerWithDataDir(repo CollectionRepo, dataDir string) *GrpcServer {
+	backupManager, err := NewBackupManager(repo, &SqliteTransport{}, dataDir+"/backups/metadata.db")
+	if err != nil {
+		log.Printf("Warning: failed to initialize backup manager: %v", err)
+	}
+
+	return &GrpcServer{
+		repo:          repo,
+		cloneManager:  NewCloneManager(repo, dataDir),
+		backupManager: backupManager,
+	}
 }
 
 // CreateCollection forwards the request to the underlying repository.
@@ -39,6 +64,123 @@ func (s *GrpcServer) Route(ctx context.Context, req *pb.RouteRequest) (*pb.Route
 // SearchCollections forwards the request to the underlying repository.
 func (s *GrpcServer) SearchCollections(ctx context.Context, req *pb.SearchCollectionsRequest) (*pb.SearchCollectionsResponse, error) {
 	return s.repo.SearchCollections(ctx, req)
+}
+
+// Clone clones a collection either locally or to a remote collector.
+func (s *GrpcServer) Clone(ctx context.Context, req *pb.CloneRequest) (*pb.CloneResponse, error) {
+	// Validate request
+	if req == nil {
+		return &pb.CloneResponse{
+			Status: &pb.Status{
+				Code:    pb.Status_INVALID_ARGUMENT,
+				Message: "request is required",
+			},
+		}, nil
+	}
+
+	// Route to appropriate implementation
+	if req.DestEndpoint == "" {
+		// Local clone
+		return s.cloneManager.CloneLocal(ctx, req)
+	}
+
+	// Remote clone
+	return s.cloneManager.CloneRemote(ctx, req)
+}
+
+// Fetch fetches a collection from a remote collector.
+func (s *GrpcServer) Fetch(ctx context.Context, req *pb.FetchRequest) (*pb.FetchResponse, error) {
+	// Validate request
+	if req == nil {
+		return &pb.FetchResponse{
+			Status: &pb.Status{
+				Code:    pb.Status_INVALID_ARGUMENT,
+				Message: "request is required",
+			},
+		}, nil
+	}
+
+	return s.cloneManager.FetchRemote(ctx, req)
+}
+
+// PushCollection receives a streamed collection from a client and creates it locally.
+func (s *GrpcServer) PushCollection(stream pb.CollectionRepo_PushCollectionServer) error {
+	return s.cloneManager.ReceivePushedCollection(stream)
+}
+
+// PullCollection streams a collection to a client.
+func (s *GrpcServer) PullCollection(req *pb.PullCollectionRequest, stream pb.CollectionRepo_PullCollectionServer) error {
+	return s.cloneManager.StreamCollectionToPuller(req, stream)
+}
+
+// BackupCollection creates a backup of a collection.
+func (s *GrpcServer) BackupCollection(ctx context.Context, req *pb.BackupCollectionRequest) (*pb.BackupCollectionResponse, error) {
+	if s.backupManager == nil {
+		return &pb.BackupCollectionResponse{
+			Status: &pb.Status{
+				Code:    pb.Status_INTERNAL,
+				Message: "backup manager not initialized",
+			},
+		}, nil
+	}
+
+	return s.backupManager.BackupCollection(ctx, req)
+}
+
+// ListBackups lists available backups.
+func (s *GrpcServer) ListBackups(ctx context.Context, req *pb.ListBackupsRequest) (*pb.ListBackupsResponse, error) {
+	if s.backupManager == nil {
+		return &pb.ListBackupsResponse{
+			Status: &pb.Status{
+				Code:    pb.Status_INTERNAL,
+				Message: "backup manager not initialized",
+			},
+		}, nil
+	}
+
+	return s.backupManager.ListBackups(ctx, req)
+}
+
+// RestoreBackup restores a collection from a backup.
+func (s *GrpcServer) RestoreBackup(ctx context.Context, req *pb.RestoreBackupRequest) (*pb.RestoreBackupResponse, error) {
+	if s.backupManager == nil {
+		return &pb.RestoreBackupResponse{
+			Status: &pb.Status{
+				Code:    pb.Status_INTERNAL,
+				Message: "backup manager not initialized",
+			},
+		}, nil
+	}
+
+	return s.backupManager.RestoreBackup(ctx, req)
+}
+
+// DeleteBackup deletes a backup.
+func (s *GrpcServer) DeleteBackup(ctx context.Context, req *pb.DeleteBackupRequest) (*pb.DeleteBackupResponse, error) {
+	if s.backupManager == nil {
+		return &pb.DeleteBackupResponse{
+			Status: &pb.Status{
+				Code:    pb.Status_INTERNAL,
+				Message: "backup manager not initialized",
+			},
+		}, nil
+	}
+
+	return s.backupManager.DeleteBackup(ctx, req)
+}
+
+// VerifyBackup verifies a backup's integrity.
+func (s *GrpcServer) VerifyBackup(ctx context.Context, req *pb.VerifyBackupRequest) (*pb.VerifyBackupResponse, error) {
+	if s.backupManager == nil {
+		return &pb.VerifyBackupResponse{
+			Status: &pb.Status{
+				Code:    pb.Status_INTERNAL,
+				Message: "backup manager not initialized",
+			},
+		}, nil
+	}
+
+	return s.backupManager.VerifyBackup(ctx, req)
 }
 
 // Start runs the gRPC server on the given port.

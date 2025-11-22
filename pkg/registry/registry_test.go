@@ -825,11 +825,18 @@ func TestLookupService(t *testing.T) {
         }
 
         // Lookup the service
-        registeredService, err := server.LookupService(context.Background(), "test", "LookupService")
+        lookupResp, err := server.LookupService(context.Background(), &collector.LookupServiceRequest{
+                Namespace:   "test",
+                ServiceName: "LookupService",
+        })
         if err != nil {
                 t.Fatalf("LookupService failed: %v", err)
         }
+        if lookupResp.Status.Code != collector.Status_OK {
+                t.Fatalf("LookupService returned error: %s", lookupResp.Status.Message)
+        }
 
+        registeredService := lookupResp.Service
         if registeredService.Namespace != "test" {
                 t.Errorf("expected namespace 'test', got '%s'", registeredService.Namespace)
         }
@@ -843,9 +850,15 @@ func TestLookupService(t *testing.T) {
 func TestLookupService_NotFound(t *testing.T) {
         server, _, _ := setupTestServer(t)
 
-        _, err := server.LookupService(context.Background(), "test", "NonexistentService")
-        if status.Code(err) != codes.NotFound {
-                t.Errorf("expected status code %v, got %v", codes.NotFound, status.Code(err))
+        lookupResp, err := server.LookupService(context.Background(), &collector.LookupServiceRequest{
+                Namespace:   "test",
+                ServiceName: "NonexistentService",
+        })
+        if err != nil {
+                t.Fatalf("LookupService returned unexpected error: %v", err)
+        }
+        if lookupResp.Status.Code != collector.Status_NOT_FOUND {
+                t.Errorf("expected status code NOT_FOUND, got %v", lookupResp.Status.Code)
         }
 }
 
@@ -904,26 +917,54 @@ func TestValidateMethod(t *testing.T) {
         }
 
         // Validate existing methods
-        err = server.ValidateMethod(context.Background(), "test", "MethodService", "Method1")
+        resp, err := server.ValidateMethod(context.Background(), &collector.ValidateMethodRequest{
+                Namespace:   "test",
+                ServiceName: "MethodService",
+                MethodName:  "Method1",
+        })
         if err != nil {
                 t.Errorf("ValidateMethod failed for Method1: %v", err)
         }
+        if !resp.IsValid {
+                t.Errorf("ValidateMethod returned invalid for Method1: %s", resp.Status.Message)
+        }
 
-        err = server.ValidateMethod(context.Background(), "test", "MethodService", "Method2")
+        resp, err = server.ValidateMethod(context.Background(), &collector.ValidateMethodRequest{
+                Namespace:   "test",
+                ServiceName: "MethodService",
+                MethodName:  "Method2",
+        })
         if err != nil {
                 t.Errorf("ValidateMethod failed for Method2: %v", err)
         }
+        if !resp.IsValid {
+                t.Errorf("ValidateMethod returned invalid for Method2: %s", resp.Status.Message)
+        }
 
         // Validate non-existent method
-        err = server.ValidateMethod(context.Background(), "test", "MethodService", "Method3")
-        if err == nil {
-                t.Error("ValidateMethod should fail for non-existent method")
+        resp, err = server.ValidateMethod(context.Background(), &collector.ValidateMethodRequest{
+                Namespace:   "test",
+                ServiceName: "MethodService",
+                MethodName:  "Method3",
+        })
+        if err != nil {
+                t.Errorf("ValidateMethod returned error: %v", err)
+        }
+        if resp.IsValid {
+                t.Error("ValidateMethod should return invalid for non-existent method")
         }
 
         // Validate method on non-existent service
-        err = server.ValidateMethod(context.Background(), "test", "NonexistentService", "Method1")
-        if err == nil {
-                t.Error("ValidateMethod should fail for non-existent service")
+        resp, err = server.ValidateMethod(context.Background(), &collector.ValidateMethodRequest{
+                Namespace:   "test",
+                ServiceName: "NonexistentService",
+                MethodName:  "Method1",
+        })
+        if err != nil {
+                t.Errorf("ValidateMethod returned error: %v", err)
+        }
+        if resp.IsValid {
+                t.Error("ValidateMethod should return invalid for non-existent service")
         }
 }
 
@@ -1015,20 +1056,28 @@ func TestListServices(t *testing.T) {
         }
 
         // List all services
-        allServices, err := server.ListServices(context.Background(), "")
+        allResp, err := server.ListServices(context.Background(), &collector.ListServicesRequest{Namespace: ""})
         if err != nil {
                 t.Fatalf("ListServices failed: %v", err)
         }
+        if allResp.Status.Code != collector.Status_OK {
+                t.Fatalf("ListServices failed: %s", allResp.Status.Message)
+        }
+        allServices := allResp.Services
 
         if len(allServices) != 3 {
                 t.Errorf("expected 3 services, got %d", len(allServices))
         }
 
         // List services filtered by namespace
-        namespace1Services, err := server.ListServices(context.Background(), "namespace1")
+        ns1Resp, err := server.ListServices(context.Background(), &collector.ListServicesRequest{Namespace: "namespace1"})
         if err != nil {
                 t.Fatalf("ListServices failed: %v", err)
         }
+        if ns1Resp.Status.Code != collector.Status_OK {
+                t.Fatalf("ListServices failed: %s", ns1Resp.Status.Message)
+        }
+        namespace1Services := ns1Resp.Services
 
         if len(namespace1Services) != 2 {
                 t.Errorf("expected 2 services in namespace1, got %d", len(namespace1Services))

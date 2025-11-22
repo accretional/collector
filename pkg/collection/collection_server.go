@@ -3,6 +3,7 @@ package collection
 import (
 	"context"
 	"encoding/base64"
+	"os"
 	"strconv"
 
 	pb "github.com/accretional/collector/gen/collector"
@@ -305,9 +306,15 @@ func (s *CollectionServer) Describe(ctx context.Context, req *pb.DescribeRequest
 		return nil, status.Errorf(codes.Internal, "failed to count records: %v", err)
 	}
 
-	size, err := collection.FS.Stat(ctx, collection.Store.Path())
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to get storage size: %v", err)
+	// Get database file size directly from filesystem
+	var size int64
+	dbPath := collection.Store.Path()
+	if dbPath != "" {
+		info, err := os.Stat(dbPath)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to get storage size: %v", err)
+		}
+		size = info.Size()
 	}
 
 	return &pb.DescribeResponse{

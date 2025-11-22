@@ -284,18 +284,20 @@ func TestEndToEndIntegration(t *testing.T) {
 	// ========================================================================
 
 	t.Run("Registry_ListServices", func(t *testing.T) {
-		services, err := registryServer.ListServices(ctx, namespace)
+		resp, err := registryServer.ListServices(ctx, &pb.ListServicesRequest{
+			Namespace: namespace,
+		})
 		if err != nil {
 			t.Fatalf("failed to list services: %v", err)
 		}
 
 		// Should have 4 services: CollectionService, Dispatcher, CollectionRepo, TestService
-		if len(services) != 4 {
-			t.Errorf("expected 4 services, got %d", len(services))
+		if len(resp.Services) != 4 {
+			t.Errorf("expected 4 services, got %d", len(resp.Services))
 		}
 
 		serviceNames := make(map[string]bool)
-		for _, svc := range services {
+		for _, svc := range resp.Services {
 			serviceNames[svc.ServiceName] = true
 		}
 
@@ -309,14 +311,28 @@ func TestEndToEndIntegration(t *testing.T) {
 
 	t.Run("Registry_ValidateMethod", func(t *testing.T) {
 		// Valid method
-		err := registryServer.ValidateMethod(ctx, namespace, "CollectionService", "Create")
+		resp, err := registryServer.ValidateMethod(ctx, &pb.ValidateMethodRequest{
+			Namespace:   namespace,
+			ServiceName: "CollectionService",
+			MethodName:  "Create",
+		})
 		if err != nil {
-			t.Errorf("Create method should be valid: %v", err)
+			t.Errorf("ValidateMethod failed: %v", err)
+		}
+		if !resp.IsValid {
+			t.Errorf("Create method should be valid: %s", resp.Message)
 		}
 
 		// Invalid method
-		err = registryServer.ValidateMethod(ctx, namespace, "CollectionService", "NonexistentMethod")
-		if err == nil {
+		resp, err = registryServer.ValidateMethod(ctx, &pb.ValidateMethodRequest{
+			Namespace:   namespace,
+			ServiceName: "CollectionService",
+			MethodName:  "NonexistentMethod",
+		})
+		if err != nil {
+			t.Errorf("ValidateMethod failed: %v", err)
+		}
+		if resp.IsValid {
 			t.Error("NonexistentMethod should be invalid")
 		}
 	})
