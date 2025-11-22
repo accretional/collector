@@ -2,9 +2,7 @@ package collection
 
 import (
 	"context"
-	"fmt"
 	"sync"
-	"github.com/accretional/collector/pkg/db/sqlite"
 	pb "github.com/accretional/collector/gen/collector"
 )
 
@@ -38,57 +36,63 @@ type Store interface {
 }
 
 
-// CollectionRepo is a facade that provides a simple interface for managing collections.
-// It uses a CollectionRepoService and a SqliteStore to do the heavy lifting.
-type CollectionRepo struct {
+// DefaultCollectionRepo is a facade that provides a simple interface for managing collections.
+// It uses a CollectionRepoService and a Store to do the heavy lifting.
+type DefaultCollectionRepo struct {
 	service *CollectionRepoService
-	store   *sqlite.SqliteStore
+	store   Store
 	mu      sync.RWMutex
 }
 
-// NewCollectionRepo creates a new CollectionRepo.
-func NewCollectionRepo(dbPath string) (*CollectionRepo, error) {
-	opts := Options{
-		EnableFTS:  true,
-		EnableJSON: true,
-	}
-	store, err := sqlite.NewSqliteStore(dbPath, opts)
-	if err != nil {
-		return nil, fmt.Errorf("could not create sqlite store: %w", err)
-	}
-
+// NewCollectionRepo creates a new DefaultCollectionRepo with the given Store.
+func NewCollectionRepo(store Store) *DefaultCollectionRepo {
 	service := NewCollectionRepoService(store)
 
-	return &CollectionRepo{
+	return &DefaultCollectionRepo{
 		service: service,
 		store:   store,
-	}, nil
+	}
 }
 
 // CreateCollection creates a new collection.
-func (r *CollectionRepo) CreateCollection(ctx context.Context, collection *pb.Collection) (*pb.CreateCollectionResponse, error) {
+func (r *DefaultCollectionRepo) CreateCollection(ctx context.Context, collection *pb.Collection) (*pb.CreateCollectionResponse, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.service.CreateCollection(ctx, collection)
 }
 
 // Discover finds collections based on the provided criteria.
-func (r *CollectionRepo) Discover(ctx context.Context, req *pb.DiscoverRequest) (*pb.DiscoverResponse, error) {
+func (r *DefaultCollectionRepo) Discover(ctx context.Context, req *pb.DiscoverRequest) (*pb.DiscoverResponse, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.service.Discover(ctx, req)
 }
 
 // Route directs a request to the appropriate collection server.
-func (r *CollectionRepo) Route(ctx context.Context, req *pb.RouteRequest) (*pb.RouteResponse, error) {
+func (r *DefaultCollectionRepo) Route(ctx context.Context, req *pb.RouteRequest) (*pb.RouteResponse, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.service.Route(ctx, req)
 }
 
 // SearchCollections searches across multiple collections.
-func (r *CollectionRepo) SearchCollections(ctx context.Context, req *pb.SearchCollectionsRequest) (*pb.SearchCollectionsResponse, error) {
+func (r *DefaultCollectionRepo) SearchCollections(ctx context.Context, req *pb.SearchCollectionsRequest) (*pb.SearchCollectionsResponse, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.service.SearchCollections(ctx, req)
+}
+
+// GetCollection retrieves a Collection instance by namespace and name.
+func (r *DefaultCollectionRepo) GetCollection(ctx context.Context, namespace, name string) (*Collection, error) {
+	// For now, return a new Collection instance.
+	// In a real implementation, this would look up the collection metadata from the store.
+	meta := &pb.Collection{
+		Namespace: namespace,
+		Name:      name,
+	}
+
+	// Use a local filesystem implementation
+	fs := &LocalFileSystem{Root: ""}
+
+	return NewCollection(meta, r.store, fs)
 }
