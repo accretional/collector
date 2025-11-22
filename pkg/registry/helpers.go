@@ -2,7 +2,9 @@ package registry
 
 import (
 	"context"
+	"fmt"
 
+	pb "github.com/accretional/collector/gen/collector"
 	"google.golang.org/grpc"
 )
 
@@ -28,6 +30,32 @@ func NewGRPCRegistryValidator(validator ServiceMethodValidator) *GRPCRegistryVal
 // ValidateServiceMethod validates by delegating to the underlying validator
 func (v *GRPCRegistryValidator) ValidateServiceMethod(ctx context.Context, namespace, serviceName, methodName string) error {
 	return v.validator.ValidateServiceMethod(ctx, namespace, serviceName, methodName)
+}
+
+// RegistryServerValidator wraps a RegistryServer to provide validation
+type RegistryServerValidator struct {
+	server *RegistryServer
+}
+
+// NewRegistryValidator creates a validator from a RegistryServer
+func NewRegistryValidator(server *RegistryServer) *RegistryServerValidator {
+	return &RegistryServerValidator{server: server}
+}
+
+// ValidateServiceMethod implements the ServiceMethodValidator interface
+func (v *RegistryServerValidator) ValidateServiceMethod(ctx context.Context, namespace, serviceName, methodName string) error {
+	resp, err := v.server.ValidateMethod(ctx, &pb.ValidateMethodRequest{
+		Namespace:   namespace,
+		ServiceName: serviceName,
+		MethodName:  methodName,
+	})
+	if err != nil {
+		return err
+	}
+	if !resp.IsValid {
+		return fmt.Errorf("method %s.%s not registered in namespace %s: %s", serviceName, methodName, namespace, resp.Message)
+	}
+	return nil
 }
 
 // WithValidation returns gRPC server options that add registry validation interceptors
