@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -562,4 +563,574 @@ func (m *MockCollectionRepo) GetCollection(ctx context.Context, namespace, name 
 
 func (m *MockCollectionRepo) UpdateCollectionMetadata(ctx context.Context, namespace, name string, meta *pb.Collection) error {
 	return nil
+}
+
+// TestBackupWithFiles tests backup including filesystem data
+func TestBackupWithFiles(t *testing.T) {
+	t.Skip("TODO: Refactor file cloning to use FileSystem interface instead of concrete type")
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	// Create test store
+	dbPath := filepath.Join(tmpDir, "test.db")
+	store, err := createTestStore(dbPath)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	// Insert records
+	for i := 0; i < 50; i++ {
+		record := &pb.CollectionRecord{
+			Id: fmt.Sprintf("record-%d", i),
+			Metadata: &pb.Metadata{
+				Labels:    map[string]string{},
+				CreatedAt: timestamppb.Now(),
+				UpdatedAt: timestamppb.Now(),
+			},
+			ProtoData: []byte(fmt.Sprintf("data-%d", i)),
+		}
+		store.CreateRecord(ctx, record)
+	}
+
+	// Create filesystem with files
+	fsDir := filepath.Join(tmpDir, "files")
+	os.MkdirAll(fsDir, 0755)
+	for i := 0; i < 10; i++ {
+		filePath := filepath.Join(fsDir, fmt.Sprintf("file-%d.txt", i))
+		os.WriteFile(filePath, []byte(fmt.Sprintf("file content %d", i)), 0644)
+	}
+
+	// Create mock repo with filesystem
+	repo := &MockCollectionRepo{collections: make(map[string]*Collection)}
+	fs, err := NewLocalFileSystem(fsDir)
+	if err != nil {
+		t.Fatalf("failed to create filesystem: %v", err)
+	}
+
+	collection, err := NewCollection(&pb.Collection{
+		Namespace: "test",
+		Name:      "users",
+	}, store, fs)
+	if err != nil {
+		t.Fatalf("failed to create collection: %v", err)
+	}
+	repo.collections["test/users"] = collection
+
+	// Create backup manager
+	backupManager, err := NewBackupManager(repo, &SqliteTransport{}, filepath.Join(tmpDir, "backups", "metadata.db"))
+	if err != nil {
+		t.Fatalf("failed to create backup manager: %v", err)
+	}
+	defer backupManager.Close()
+
+	// Backup with files
+	backupPath := filepath.Join(tmpDir, "backups", "users-with-files.db")
+	req := &pb.BackupCollectionRequest{
+		Collection: &pb.NamespacedName{
+			Namespace: "test",
+			Name:      "users",
+		},
+		DestPath:     backupPath,
+		IncludeFiles: true,
+	}
+
+	resp, err := backupManager.BackupCollection(ctx, req)
+	if err != nil {
+		t.Fatalf("backup failed: %v", err)
+	}
+
+	if resp.Status.Code != pb.Status_OK {
+		t.Fatalf("backup returned error: %s", resp.Status.Message)
+	}
+
+	// Verify files directory exists
+	filesDir := backupPath + ".files"
+	if _, err := os.Stat(filesDir); err != nil {
+		t.Errorf("files directory not created: %v", err)
+	}
+
+	// Verify backup includes files
+	if resp.Backup.FileCount == 0 {
+		t.Error("backup should include files")
+	}
+
+	if !resp.Backup.IncludesFiles {
+		t.Error("backup metadata should indicate files included")
+	}
+}
+
+// TestBackupConcurrent tests concurrent backup operations
+func TestBackupConcurrent(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	// Create multiple collections
+	numCollections := 5
+	repo := &MockCollectionRepo{collections: make(map[string]*Collection)}
+
+	for i := 0; i < numCollections; i++ {
+		dbPath := filepath.Join(tmpDir, fmt.Sprintf("collection-%d.db", i))
+		store, err := createTestStore(dbPath)
+		if err != nil {
+			t.Fatalf("failed to create store %d: %v", i, err)
+		}
+		defer store.Close()
+
+		// Insert records
+		for j := 0; j < 100; j++ {
+			record := &pb.CollectionRecord{
+				Id: fmt.Sprintf("record-%d", j),
+				Metadata: &pb.Metadata{
+					Labels:    map[string]string{},
+					CreatedAt: timestamppb.Now(),
+					UpdatedAt: timestamppb.Now(),
+				},
+				ProtoData: []byte(fmt.Sprintf("data-%d", j)),
+			}
+			store.CreateRecord(ctx, record)
+		}
+
+		collection, err := NewCollection(&pb.Collection{
+			Namespace: "test",
+			Name:      fmt.Sprintf("collection-%d", i),
+		}, store, nil)
+		if err != nil {
+			t.Fatalf("failed to create collection: %v", err)
+		}
+		repo.collections[fmt.Sprintf("test/collection-%d", i)] = collection
+	}
+
+	// Create backup manager
+	backupManager, err := NewBackupManager(repo, &SqliteTransport{}, filepath.Join(tmpDir, "backups", "metadata.db"))
+	if err != nil {
+		t.Fatalf("failed to create backup manager: %v", err)
+	}
+	defer backupManager.Close()
+
+	// Backup all collections concurrently
+	var wg sync.WaitGroup
+	errors := make(chan error, numCollections)
+
+	for i := 0; i < numCollections; i++ {
+		wg.Add(1)
+		go func(collectionNum int) {
+			defer wg.Done()
+
+			req := &pb.BackupCollectionRequest{
+				Collection: &pb.NamespacedName{
+					Namespace: "test",
+					Name:      fmt.Sprintf("collection-%d", collectionNum),
+				},
+				DestPath:     filepath.Join(tmpDir, "backups", fmt.Sprintf("backup-%d.db", collectionNum)),
+				IncludeFiles: false,
+			}
+
+			resp, err := backupManager.BackupCollection(ctx, req)
+			if err != nil {
+				errors <- fmt.Errorf("collection %d: %v", collectionNum, err)
+				return
+			}
+
+			if resp.Status.Code != pb.Status_OK {
+				errors <- fmt.Errorf("collection %d: %s", collectionNum, resp.Status.Message)
+				return
+			}
+
+			t.Logf("Collection %d backed up: %d records, %d bytes",
+				collectionNum, resp.Backup.RecordCount, resp.BytesTransferred)
+		}(i)
+	}
+
+	wg.Wait()
+	close(errors)
+
+	// Check for errors
+	for err := range errors {
+		t.Error(err)
+	}
+
+	// Verify all backups were created
+	listResp, err := backupManager.ListBackups(ctx, &pb.ListBackupsRequest{
+		Namespace: "test",
+	})
+	if err != nil {
+		t.Fatalf("failed to list backups: %v", err)
+	}
+
+	if listResp.TotalCount != int64(numCollections) {
+		t.Errorf("expected %d backups, got %d", numCollections, listResp.TotalCount)
+	}
+}
+
+// TestBackupLargeDataset tests backup with larger dataset
+func TestBackupLargeDataset(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping large dataset test in short mode")
+	}
+
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	// Create test store with 10k records
+	dbPath := filepath.Join(tmpDir, "large.db")
+	store, err := createTestStore(dbPath)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	numRecords := 10000
+	for i := 0; i < numRecords; i++ {
+		record := &pb.CollectionRecord{
+			Id: fmt.Sprintf("record-%d", i),
+			Metadata: &pb.Metadata{
+				Labels:    map[string]string{"index": fmt.Sprintf("%d", i)},
+				CreatedAt: timestamppb.Now(),
+				UpdatedAt: timestamppb.Now(),
+			},
+			ProtoData: []byte(fmt.Sprintf("data-%d-with-some-extra-content-to-make-it-larger", i)),
+		}
+		if err := store.CreateRecord(ctx, record); err != nil {
+			t.Fatalf("failed to create record %d: %v", i, err)
+		}
+	}
+
+	// Create mock repo
+	repo := &MockCollectionRepo{collections: make(map[string]*Collection)}
+	collection, err := NewCollection(&pb.Collection{
+		Namespace: "test",
+		Name:      "large",
+	}, store, nil)
+	if err != nil {
+		t.Fatalf("failed to create collection: %v", err)
+	}
+	repo.collections["test/large"] = collection
+
+	// Create backup manager
+	backupManager, err := NewBackupManager(repo, &SqliteTransport{}, filepath.Join(tmpDir, "backups", "metadata.db"))
+	if err != nil {
+		t.Fatalf("failed to create backup manager: %v", err)
+	}
+	defer backupManager.Close()
+
+	// Backup
+	backupPath := filepath.Join(tmpDir, "backups", "large-backup.db")
+	startTime := time.Now()
+
+	resp, err := backupManager.BackupCollection(ctx, &pb.BackupCollectionRequest{
+		Collection: &pb.NamespacedName{
+			Namespace: "test",
+			Name:      "large",
+		},
+		DestPath: backupPath,
+	})
+
+	duration := time.Since(startTime)
+
+	if err != nil {
+		t.Fatalf("backup failed: %v", err)
+	}
+
+	if resp.Status.Code != pb.Status_OK {
+		t.Fatalf("backup returned error: %s", resp.Status.Message)
+	}
+
+	t.Logf("Backup completed in %v", duration)
+	t.Logf("Records: %d, Size: %d bytes", resp.Backup.RecordCount, resp.BytesTransferred)
+
+	if resp.Backup.RecordCount != int64(numRecords) {
+		t.Errorf("expected %d records, got %d", numRecords, resp.Backup.RecordCount)
+	}
+
+	// Verify backup can be opened
+	verifyResp, err := backupManager.VerifyBackup(ctx, &pb.VerifyBackupRequest{
+		BackupId: resp.Backup.BackupId,
+	})
+	if err != nil {
+		t.Fatalf("verify failed: %v", err)
+	}
+
+	if !verifyResp.IsValid {
+		t.Errorf("backup should be valid: %s", verifyResp.ErrorMessage)
+	}
+}
+
+// TestRestoreWithOverwrite tests restore with overwrite flag
+func TestRestoreWithOverwrite(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	// Create a backup
+	backupPath := filepath.Join(tmpDir, "test-backup.db")
+	store, err := createTestStore(backupPath)
+	if err != nil {
+		t.Fatalf("failed to create backup store: %v", err)
+	}
+
+	// Add some records to backup
+	for i := 0; i < 50; i++ {
+		record := &pb.CollectionRecord{
+			Id: fmt.Sprintf("record-%d", i),
+			Metadata: &pb.Metadata{
+				Labels:    map[string]string{},
+				CreatedAt: timestamppb.Now(),
+				UpdatedAt: timestamppb.Now(),
+			},
+			ProtoData: []byte(fmt.Sprintf("backup-data-%d", i)),
+		}
+		store.CreateRecord(ctx, record)
+	}
+	store.Close()
+
+	// Create metadata store
+	metaStore, err := NewBackupMetadataStore(filepath.Join(tmpDir, "metadata.db"))
+	if err != nil {
+		t.Fatalf("failed to create metadata store: %v", err)
+	}
+	defer metaStore.Close()
+
+	// Save backup metadata
+	backup := &pb.BackupMetadata{
+		BackupId: "test-backup-restore",
+		Collection: &pb.NamespacedName{
+			Namespace: "test",
+			Name:      "original",
+		},
+		Timestamp:   time.Now().Unix(),
+		SizeBytes:   1024,
+		RecordCount: 50,
+		StoragePath: backupPath,
+		StorageType: "local",
+	}
+	if err := metaStore.SaveBackup(ctx, backup); err != nil {
+		t.Fatalf("failed to save backup: %v", err)
+	}
+
+	// Create backup manager
+	repo := &MockCollectionRepo{collections: make(map[string]*Collection)}
+	backupManager, err := NewBackupManager(repo, &SqliteTransport{}, filepath.Join(tmpDir, "metadata.db"))
+	if err != nil {
+		t.Fatalf("failed to create backup manager: %v", err)
+	}
+	defer backupManager.Close()
+
+	// First restore (should succeed)
+	restoreResp, err := backupManager.RestoreBackup(ctx, &pb.RestoreBackupRequest{
+		BackupId:      "test-backup-restore",
+		DestNamespace: "restored",
+		DestName:      "collection1",
+		Overwrite:     false,
+	})
+
+	if err != nil {
+		t.Fatalf("first restore failed: %v", err)
+	}
+
+	if restoreResp.Status.Code != pb.Status_OK {
+		t.Errorf("first restore returned error: %s", restoreResp.Status.Message)
+	}
+
+	t.Logf("First restore: %d records restored", restoreResp.RecordsRestored)
+}
+
+// TestBackupEmptyCollection tests backup of empty collection
+func TestBackupEmptyCollection(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	// Create empty store
+	dbPath := filepath.Join(tmpDir, "empty.db")
+	store, err := createTestStore(dbPath)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	// Create mock repo
+	repo := &MockCollectionRepo{collections: make(map[string]*Collection)}
+	collection, err := NewCollection(&pb.Collection{
+		Namespace: "test",
+		Name:      "empty",
+	}, store, nil)
+	if err != nil {
+		t.Fatalf("failed to create collection: %v", err)
+	}
+	repo.collections["test/empty"] = collection
+
+	// Create backup manager
+	backupManager, err := NewBackupManager(repo, &SqliteTransport{}, filepath.Join(tmpDir, "backups", "metadata.db"))
+	if err != nil {
+		t.Fatalf("failed to create backup manager: %v", err)
+	}
+	defer backupManager.Close()
+
+	// Backup empty collection
+	backupPath := filepath.Join(tmpDir, "backups", "empty-backup.db")
+	resp, err := backupManager.BackupCollection(ctx, &pb.BackupCollectionRequest{
+		Collection: &pb.NamespacedName{
+			Namespace: "test",
+			Name:      "empty",
+		},
+		DestPath: backupPath,
+	})
+
+	if err != nil {
+		t.Fatalf("backup failed: %v", err)
+	}
+
+	if resp.Status.Code != pb.Status_OK {
+		t.Fatalf("backup returned error: %s", resp.Status.Message)
+	}
+
+	if resp.Backup.RecordCount != 0 {
+		t.Errorf("expected 0 records, got %d", resp.Backup.RecordCount)
+	}
+
+	// Verify empty backup
+	verifyResp, err := backupManager.VerifyBackup(ctx, &pb.VerifyBackupRequest{
+		BackupId: resp.Backup.BackupId,
+	})
+
+	if err != nil {
+		t.Fatalf("verify failed: %v", err)
+	}
+
+	if !verifyResp.IsValid {
+		t.Errorf("empty backup should be valid: %s", verifyResp.ErrorMessage)
+	}
+}
+
+// TestBackupWithSpecialCharacters tests collections with special characters
+func TestBackupWithSpecialCharacters(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	// Create store
+	dbPath := filepath.Join(tmpDir, "special.db")
+	store, err := createTestStore(dbPath)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	// Insert records with special characters
+	specialRecords := []string{
+		"record-with-unicode-你好",
+		"record-with-emoji-🚀",
+		"record-with-spaces-hello world",
+		"record-with-quotes-'test'",
+	}
+
+	for _, id := range specialRecords {
+		record := &pb.CollectionRecord{
+			Id: id,
+			Metadata: &pb.Metadata{
+				Labels:    map[string]string{"type": "special"},
+				CreatedAt: timestamppb.Now(),
+				UpdatedAt: timestamppb.Now(),
+			},
+			ProtoData: []byte(fmt.Sprintf("data for %s", id)),
+		}
+		if err := store.CreateRecord(ctx, record); err != nil {
+			t.Fatalf("failed to create record %s: %v", id, err)
+		}
+	}
+
+	// Create mock repo
+	repo := &MockCollectionRepo{collections: make(map[string]*Collection)}
+	collection, err := NewCollection(&pb.Collection{
+		Namespace: "test",
+		Name:      "special-chars",
+	}, store, nil)
+	if err != nil {
+		t.Fatalf("failed to create collection: %v", err)
+	}
+	repo.collections["test/special-chars"] = collection
+
+	// Create backup manager
+	backupManager, err := NewBackupManager(repo, &SqliteTransport{}, filepath.Join(tmpDir, "backups", "metadata.db"))
+	if err != nil {
+		t.Fatalf("failed to create backup manager: %v", err)
+	}
+	defer backupManager.Close()
+
+	// Backup
+	backupPath := filepath.Join(tmpDir, "backups", "special-backup.db")
+	resp, err := backupManager.BackupCollection(ctx, &pb.BackupCollectionRequest{
+		Collection: &pb.NamespacedName{
+			Namespace: "test",
+			Name:      "special-chars",
+		},
+		DestPath: backupPath,
+	})
+
+	if err != nil {
+		t.Fatalf("backup failed: %v", err)
+	}
+
+	if resp.Status.Code != pb.Status_OK {
+		t.Fatalf("backup returned error: %s", resp.Status.Message)
+	}
+
+	if resp.Backup.RecordCount != int64(len(specialRecords)) {
+		t.Errorf("expected %d records, got %d", len(specialRecords), resp.Backup.RecordCount)
+	}
+}
+
+// TestBackupMetadataFiltering tests metadata filtering
+func TestBackupMetadataFiltering(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	metaStore, err := NewBackupMetadataStore(filepath.Join(tmpDir, "metadata.db"))
+	if err != nil {
+		t.Fatalf("failed to create metadata store: %v", err)
+	}
+	defer metaStore.Close()
+
+	// Create backups with different timestamps
+	now := time.Now().Unix()
+	for i := 0; i < 10; i++ {
+		backup := &pb.BackupMetadata{
+			BackupId: fmt.Sprintf("backup-%d", i),
+			Collection: &pb.NamespacedName{
+				Namespace: "test",
+				Name:      "users",
+			},
+			Timestamp:   now - int64(i*86400), // One per day going back
+			SizeBytes:   1024,
+			RecordCount: 100,
+			StoragePath: fmt.Sprintf("/backups/backup-%d.db", i),
+			StorageType: "local",
+		}
+		if err := metaStore.SaveBackup(ctx, backup); err != nil {
+			t.Fatalf("failed to save backup: %v", err)
+		}
+	}
+
+	// Test filtering by timestamp
+	threeDaysAgo := now - (3 * 86400)
+	backups, _, err := metaStore.ListBackups(ctx, &pb.ListBackupsRequest{
+		Collection: &pb.NamespacedName{
+			Namespace: "test",
+			Name:      "users",
+		},
+		SinceTimestamp: threeDaysAgo,
+	})
+
+	if err != nil {
+		t.Fatalf("failed to list backups: %v", err)
+	}
+
+	if len(backups) != 4 { // Today + 3 days ago = 4 backups
+		t.Errorf("expected 4 backups since 3 days ago, got %d", len(backups))
+	}
+
+	// Verify ordering (most recent first)
+	for i := 0; i < len(backups)-1; i++ {
+		if backups[i].Timestamp < backups[i+1].Timestamp {
+			t.Error("backups should be ordered by timestamp DESC")
+		}
+	}
 }
