@@ -83,6 +83,7 @@ message ConnectRequest {
 message ConnectResponse {
   Status status = 1;
   string connection_id = 2;
+  repeated string shared_namespaces = 3;
 }
 
 message DispatchRequest {
