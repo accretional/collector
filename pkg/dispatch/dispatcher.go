@@ -14,6 +14,11 @@ import (
 // ServiceHandler is a function that handles a service method invocation
 type ServiceHandler func(ctx context.Context, input interface{}) (interface{}, error)
 
+// RegistryValidator is an interface for validating services against a registry
+type RegistryValidator interface {
+	ValidateServiceMethod(ctx context.Context, namespace, serviceName, methodName string) error
+}
+
 // Dispatcher implements the CollectiveDispatcher service
 type Dispatcher struct {
 	pb.UnimplementedCollectiveDispatcherServer
@@ -23,6 +28,9 @@ type Dispatcher struct {
 	// Service registry for handling Serve requests
 	services      map[string]map[string]ServiceHandler // namespace -> method -> handler
 	servicesMutex sync.RWMutex
+
+	// Optional registry validator for checking if services are registered
+	registryValidator RegistryValidator
 }
 
 // NewDispatcher creates a new dispatcher instance
@@ -31,6 +39,20 @@ func NewDispatcher(collectorID, address string, namespaces []string) *Dispatcher
 		connManager: NewConnectionManager(collectorID, address, namespaces),
 		services:    make(map[string]map[string]ServiceHandler),
 	}
+}
+
+// NewDispatcherWithRegistry creates a new dispatcher instance with registry validation
+func NewDispatcherWithRegistry(collectorID, address string, namespaces []string, validator RegistryValidator) *Dispatcher {
+	return &Dispatcher{
+		connManager:       NewConnectionManager(collectorID, address, namespaces),
+		services:          make(map[string]map[string]ServiceHandler),
+		registryValidator: validator,
+	}
+}
+
+// SetRegistryValidator sets the registry validator for this dispatcher
+func (d *Dispatcher) SetRegistryValidator(validator RegistryValidator) {
+	d.registryValidator = validator
 }
 
 // Connect handles incoming connection requests
@@ -57,6 +79,18 @@ func (d *Dispatcher) Serve(ctx context.Context, req *pb.ServeRequest) (*pb.Serve
 		return &pb.ServeResponse{
 			Status: &pb.Status{Code: 400, Message: "method_name is required"},
 		}, nil
+	}
+
+	// Validate against registry if validator is configured
+	if d.registryValidator != nil {
+		if err := d.registryValidator.ValidateServiceMethod(ctx, req.Namespace, req.Service.ServiceName, req.MethodName); err != nil {
+			return &pb.ServeResponse{
+				Status: &pb.Status{
+					Code:    404,
+					Message: fmt.Sprintf("service not registered in registry: %v", err),
+				},
+			}, nil
+		}
 	}
 
 	// Look up the handler
