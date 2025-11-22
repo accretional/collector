@@ -59,3 +59,37 @@ func setupTestCollection(t *testing.T) (*collection.Collection, func()) {
 
 	return coll, cleanup
 }
+
+// setupTestRepo creates a REAL CollectionRepo for integration testing.
+func setupTestRepo(t *testing.T) (collection.CollectionRepo, func()) {
+	t.Helper()
+
+	// 1. Create a temporary directory for this test run
+	tempDir, err := os.MkdirTemp("", "repo-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+
+	// 2. Initialize the REAL SQLite Store
+	dbPath := filepath.Join(tempDir, "repo.db")
+
+	store, err := sqlite.NewSqliteStore(dbPath, collection.Options{
+		EnableFTS:  true,
+		EnableJSON: true,
+	})
+	if err != nil {
+		os.RemoveAll(tempDir)
+		t.Fatalf("failed to create sqlite store: %v", err)
+	}
+
+	// 3. Create the DefaultCollectionRepo
+	repo := collection.NewCollectionRepo(store)
+
+	// Cleanup function
+	cleanup := func() {
+		store.Close()
+		os.RemoveAll(tempDir)
+	}
+
+	return repo, cleanup
+}

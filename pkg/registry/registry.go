@@ -2,6 +2,7 @@ package registry
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 
 	"github.com/accretional/collector/gen/collector"
@@ -25,6 +26,9 @@ func NewRegistryServer(registeredProtos, registeredServices *collection.Collecti
 }
 
 func (s *RegistryServer) RegisterProto(ctx context.Context, req *collector.RegisterProtoRequest) (*collector.RegisterProtoResponse, error) {
+	if req.Namespace == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "namespace is required")
+	}
 	if req.FileDescriptor == nil {
 		return nil, status.Errorf(codes.InvalidArgument, "file descriptor is required")
 	}
@@ -43,7 +47,8 @@ func (s *RegistryServer) RegisterProto(ctx context.Context, req *collector.Regis
 	_, err := s.registeredProtos.GetRecord(ctx, protoID)
 	if err == nil {
 		return nil, status.Errorf(codes.AlreadyExists, "proto already exists")
-	} else if status.Code(err) != codes.NotFound {
+	} else if err != sql.ErrNoRows {
+		// If it's not a "not found" error, return the error
 		return nil, err
 	}
 
@@ -76,6 +81,9 @@ func (s *RegistryServer) RegisterProto(ctx context.Context, req *collector.Regis
 }
 
 func (s *RegistryServer) RegisterService(ctx context.Context, req *collector.RegisterServiceRequest) (*collector.RegisterServiceResponse, error) {
+	if req.Namespace == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "namespace is required")
+	}
 	if req.ServiceDescriptor == nil {
 		return nil, status.Errorf(codes.InvalidArgument, "service descriptor is required")
 	}
@@ -94,7 +102,8 @@ func (s *RegistryServer) RegisterService(ctx context.Context, req *collector.Reg
 	_, err := s.registeredServices.GetRecord(ctx, serviceID)
 	if err == nil {
 		return nil, status.Errorf(codes.AlreadyExists, "service already exists")
-	} else if status.Code(err) != codes.NotFound {
+	} else if err != sql.ErrNoRows {
+		// If it's not a "not found" error, return the error
 		return nil, err
 	}
 
