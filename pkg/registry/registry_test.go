@@ -758,3 +758,285 @@ func TestRegisterProto_RecursiveTypes(t *testing.T) {
                 t.Errorf("expected parent to reference .test.TreeNode, got %s", parentField.GetTypeName())
         }
 }
+
+// TestLookupProto tests proto lookup by namespace and file name
+func TestLookupProto(t *testing.T) {
+        server, _, _ := setupTestServer(t)
+
+        // Register a proto first
+        req := &collector.RegisterProtoRequest{
+                Namespace: "test",
+                FileDescriptor: &descriptorpb.FileDescriptorProto{
+                        Name: proto.String("lookup.proto"),
+                        MessageType: []*descriptorpb.DescriptorProto{
+                                {Name: proto.String("LookupMessage")},
+                        },
+                },
+        }
+
+        _, err := server.RegisterProto(context.Background(), req)
+        if err != nil {
+                t.Fatalf("RegisterProto failed: %v", err)
+        }
+
+        // Lookup the proto
+        registeredProto, err := server.LookupProto(context.Background(), "test", "lookup.proto")
+        if err != nil {
+                t.Fatalf("LookupProto failed: %v", err)
+        }
+
+        if registeredProto.Namespace != "test" {
+                t.Errorf("expected namespace 'test', got '%s'", registeredProto.Namespace)
+        }
+
+        if registeredProto.FileDescriptor.GetName() != "lookup.proto" {
+                t.Errorf("expected file name 'lookup.proto', got '%s'", registeredProto.FileDescriptor.GetName())
+        }
+}
+
+// TestLookupProto_NotFound tests proto lookup when proto doesn't exist
+func TestLookupProto_NotFound(t *testing.T) {
+        server, _, _ := setupTestServer(t)
+
+        _, err := server.LookupProto(context.Background(), "test", "nonexistent.proto")
+        if status.Code(err) != codes.NotFound {
+                t.Errorf("expected status code %v, got %v", codes.NotFound, status.Code(err))
+        }
+}
+
+// TestLookupService tests service lookup by namespace and service name
+func TestLookupService(t *testing.T) {
+        server, _, _ := setupTestServer(t)
+
+        // Register a service first
+        req := &collector.RegisterServiceRequest{
+                Namespace: "test",
+                ServiceDescriptor: &descriptorpb.ServiceDescriptorProto{
+                        Name: proto.String("LookupService"),
+                        Method: []*descriptorpb.MethodDescriptorProto{
+                                {Name: proto.String("LookupMethod")},
+                        },
+                },
+        }
+
+        _, err := server.RegisterService(context.Background(), req)
+        if err != nil {
+                t.Fatalf("RegisterService failed: %v", err)
+        }
+
+        // Lookup the service
+        registeredService, err := server.LookupService(context.Background(), "test", "LookupService")
+        if err != nil {
+                t.Fatalf("LookupService failed: %v", err)
+        }
+
+        if registeredService.Namespace != "test" {
+                t.Errorf("expected namespace 'test', got '%s'", registeredService.Namespace)
+        }
+
+        if registeredService.ServiceName != "LookupService" {
+                t.Errorf("expected service name 'LookupService', got '%s'", registeredService.ServiceName)
+        }
+}
+
+// TestLookupService_NotFound tests service lookup when service doesn't exist
+func TestLookupService_NotFound(t *testing.T) {
+        server, _, _ := setupTestServer(t)
+
+        _, err := server.LookupService(context.Background(), "test", "NonexistentService")
+        if status.Code(err) != codes.NotFound {
+                t.Errorf("expected status code %v, got %v", codes.NotFound, status.Code(err))
+        }
+}
+
+// TestValidateService tests service validation
+func TestValidateService(t *testing.T) {
+        server, _, _ := setupTestServer(t)
+
+        // Register a service
+        req := &collector.RegisterServiceRequest{
+                Namespace: "test",
+                ServiceDescriptor: &descriptorpb.ServiceDescriptorProto{
+                        Name: proto.String("ValidateService"),
+                        Method: []*descriptorpb.MethodDescriptorProto{
+                                {Name: proto.String("ValidateMethod")},
+                        },
+                },
+        }
+
+        _, err := server.RegisterService(context.Background(), req)
+        if err != nil {
+                t.Fatalf("RegisterService failed: %v", err)
+        }
+
+        // Validate existing service
+        err = server.ValidateService(context.Background(), "test", "ValidateService")
+        if err != nil {
+                t.Errorf("ValidateService failed for existing service: %v", err)
+        }
+
+        // Validate non-existent service
+        err = server.ValidateService(context.Background(), "test", "NonexistentService")
+        if err == nil {
+                t.Error("ValidateService should fail for non-existent service")
+        }
+}
+
+// TestValidateMethod tests method validation
+func TestValidateMethod(t *testing.T) {
+        server, _, _ := setupTestServer(t)
+
+        // Register a service with methods
+        req := &collector.RegisterServiceRequest{
+                Namespace: "test",
+                ServiceDescriptor: &descriptorpb.ServiceDescriptorProto{
+                        Name: proto.String("MethodService"),
+                        Method: []*descriptorpb.MethodDescriptorProto{
+                                {Name: proto.String("Method1")},
+                                {Name: proto.String("Method2")},
+                        },
+                },
+        }
+
+        _, err := server.RegisterService(context.Background(), req)
+        if err != nil {
+                t.Fatalf("RegisterService failed: %v", err)
+        }
+
+        // Validate existing methods
+        err = server.ValidateMethod(context.Background(), "test", "MethodService", "Method1")
+        if err != nil {
+                t.Errorf("ValidateMethod failed for Method1: %v", err)
+        }
+
+        err = server.ValidateMethod(context.Background(), "test", "MethodService", "Method2")
+        if err != nil {
+                t.Errorf("ValidateMethod failed for Method2: %v", err)
+        }
+
+        // Validate non-existent method
+        err = server.ValidateMethod(context.Background(), "test", "MethodService", "Method3")
+        if err == nil {
+                t.Error("ValidateMethod should fail for non-existent method")
+        }
+
+        // Validate method on non-existent service
+        err = server.ValidateMethod(context.Background(), "test", "NonexistentService", "Method1")
+        if err == nil {
+                t.Error("ValidateMethod should fail for non-existent service")
+        }
+}
+
+// TestListProtos tests listing all registered protos
+func TestListProtos(t *testing.T) {
+        server, _, _ := setupTestServer(t)
+
+        // Register multiple protos in different namespaces
+        protos := []struct {
+                namespace string
+                fileName  string
+        }{
+                {"namespace1", "file1.proto"},
+                {"namespace1", "file2.proto"},
+                {"namespace2", "file1.proto"},
+        }
+
+        for _, p := range protos {
+                req := &collector.RegisterProtoRequest{
+                        Namespace: p.namespace,
+                        FileDescriptor: &descriptorpb.FileDescriptorProto{
+                                Name: proto.String(p.fileName),
+                                MessageType: []*descriptorpb.DescriptorProto{
+                                        {Name: proto.String("Message")},
+                                },
+                        },
+                }
+                _, err := server.RegisterProto(context.Background(), req)
+                if err != nil {
+                        t.Fatalf("RegisterProto failed: %v", err)
+                }
+        }
+
+        // List all protos
+        allProtos, err := server.ListProtos(context.Background(), "")
+        if err != nil {
+                t.Fatalf("ListProtos failed: %v", err)
+        }
+
+        if len(allProtos) != 3 {
+                t.Errorf("expected 3 protos, got %d", len(allProtos))
+        }
+
+        // List protos filtered by namespace
+        namespace1Protos, err := server.ListProtos(context.Background(), "namespace1")
+        if err != nil {
+                t.Fatalf("ListProtos failed: %v", err)
+        }
+
+        if len(namespace1Protos) != 2 {
+                t.Errorf("expected 2 protos in namespace1, got %d", len(namespace1Protos))
+        }
+
+        for _, p := range namespace1Protos {
+                if p.Namespace != "namespace1" {
+                        t.Errorf("expected namespace 'namespace1', got '%s'", p.Namespace)
+                }
+        }
+}
+
+// TestListServices tests listing all registered services
+func TestListServices(t *testing.T) {
+        server, _, _ := setupTestServer(t)
+
+        // Register multiple services in different namespaces
+        services := []struct {
+                namespace   string
+                serviceName string
+        }{
+                {"namespace1", "Service1"},
+                {"namespace1", "Service2"},
+                {"namespace2", "Service1"},
+        }
+
+        for _, s := range services {
+                req := &collector.RegisterServiceRequest{
+                        Namespace: s.namespace,
+                        ServiceDescriptor: &descriptorpb.ServiceDescriptorProto{
+                                Name: proto.String(s.serviceName),
+                                Method: []*descriptorpb.MethodDescriptorProto{
+                                        {Name: proto.String("Method")},
+                                },
+                        },
+                }
+                _, err := server.RegisterService(context.Background(), req)
+                if err != nil {
+                        t.Fatalf("RegisterService failed: %v", err)
+                }
+        }
+
+        // List all services
+        allServices, err := server.ListServices(context.Background(), "")
+        if err != nil {
+                t.Fatalf("ListServices failed: %v", err)
+        }
+
+        if len(allServices) != 3 {
+                t.Errorf("expected 3 services, got %d", len(allServices))
+        }
+
+        // List services filtered by namespace
+        namespace1Services, err := server.ListServices(context.Background(), "namespace1")
+        if err != nil {
+                t.Fatalf("ListServices failed: %v", err)
+        }
+
+        if len(namespace1Services) != 2 {
+                t.Errorf("expected 2 services in namespace1, got %d", len(namespace1Services))
+        }
+
+        for _, s := range namespace1Services {
+                if s.Namespace != "namespace1" {
+                        t.Errorf("expected namespace 'namespace1', got '%s'", s.Namespace)
+                }
+        }
+}
