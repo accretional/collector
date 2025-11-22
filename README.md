@@ -2,22 +2,6 @@
 
 A gRPC + Protocol Buffers framework for building distributed, dynamic RPC systems with built-in service discovery, type safety, and a powerful ORM for protobuf messages.
 
-## ⚠️ IMPORTANT: Testing Requirements
-
-**Before making ANY changes, run the comprehensive test suite:**
-
-```bash
-./RUN_ALL_TESTS_BEFORE_SUBMIT.sh
-```
-
-This is **mandatory** for:
-- ✅ All code changes
-- ✅ All pull requests
-- ✅ All AI agent contributions
-- ✅ All manual development
-
-**For AI Agents:** See [AGENTS.md](AGENTS.md) for detailed guidelines. Any test failure is YOUR responsibility to fix.
-
 ## What is Collector?
 
 Collector is a distributed programming platform that combines:
@@ -520,6 +504,22 @@ Namespaces provide the fundamental isolation boundary:
 
 ## Testing
 
+**⚠️ IMPORTANT: Testing Requirements**
+
+**Before making ANY changes, run the comprehensive test suite:**
+
+```bash
+./RUN_ALL_TESTS_BEFORE_SUBMIT.sh
+```
+
+This is **mandatory** for:
+- ✅ All code changes
+- ✅ All pull requests
+- ✅ All AI agent contributions
+- ✅ All manual development
+
+**For AI Agents:** See [AGENTS.md](AGENTS.md) for detailed guidelines. Any test failure is YOUR responsibility to fix.
+
 ### Comprehensive Test Suite (REQUIRED)
 
 **Always run the full test suite before submitting changes:**
@@ -768,8 +768,6 @@ The Dispatcher's `Serve` method is designed as an extension point for adding sec
 
 ### Future
 - [ ] CollectiveWorker workflow system
-- [ ] CollectorConsole UI/analysis tools
-- [ ] GraphQL interface for collections
 - [ ] Cross-collector registry replication
 - [ ] Query optimizer for complex searches
 - [ ] Schema evolution and migrations
