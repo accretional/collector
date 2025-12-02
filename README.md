@@ -2,6 +2,14 @@
 
 A gRPC + Protocol Buffers framework for building distributed, dynamic RPC systems with built-in service discovery, type safety, and a powerful ORM for protobuf messages.
 
+### NOTE
+
+If you're visiting here from HN or just checking out Accretional's repos, hit me up at fred@accretional.com or https://www.linkedin.com/in/fred-weitendorf-40b505b6/ if you're interested in using this! Or smash that star button to get updates on the project as we take it toward general availability late December 2025/early January 2026. Didn't expect my HN comment to get such a lift this early in the project!
+
+We're going to pair this with our container-based IDE Brilliant (~working, dev env at https://brilliant.mplode.dev), container-based LLM coding agent Clown (in progress), Static site generator Statue (working, see https://statue.dev or https://github.com/accretional/statue), and our nascent cloud platform Splendor (~working and currently hosts Brilliant, DM for access/info) to let you launch entire AI products and agent platforms in one shot, and then register them on our cloud platform for other people to use them (and get you paid).
+
+TL;DR: Collector is essentially a generalized control plane for Splendor's (a cloud platform we're building) upcoming multi-tenant, agent-friendly service mesh. But it's also a library or service you can use yourself to implement a generic CRUD server for protobufs and grpc with powerful, dynamic distributed programming/reflection.
+
 ## What is Collector?
 
 Collector is a distributed programming platform that combines:
