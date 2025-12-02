@@ -787,7 +787,7 @@ This is an experimental framework exploring new patterns in distributed systems.
 
 ## License
 
-[Add your license here]
+MIT
 
 ## For LLMs, Agents, and Developers
 
