@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -36,6 +37,13 @@ func run() error {
 	namespace := "production"
 	collectorID := "collector-001"
 	collectorPort := 50051
+
+	// Use PORT env variable if set
+	if portStr := os.Getenv("PORT"); portStr != "" {
+		if p, err := strconv.Atoi(portStr); err == nil {
+			collectorPort = p
+		}
+	}
 
 	log.Printf("Starting Collector (ID: %s, Namespace: %s)", collectorID, namespace)
 
@@ -148,7 +156,7 @@ func run() error {
 	// 4. Start Server and Create Loopback Connection
 	// ========================================================================
 
-	lis, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", collectorPort))
+	lis, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", collectorPort))
 	if err != nil {
 		return fmt.Errorf("failed to listen: %w", err)
 	}
@@ -192,7 +200,7 @@ func run() error {
 	log.Println("✓ Registered CollectiveDispatcher service")
 
 	log.Println("\n========================================")
-	log.Printf("Collector %s running on localhost:%d", collectorID, collectorPort)
+	log.Printf("Collector %s running on 0.0.0.0:%d", collectorID, collectorPort)
 	log.Println("All services available:")
 	log.Println("  - CollectorRegistry")
 	log.Println("  - CollectionService")
