@@ -25,3 +25,8 @@ CREATE VIRTUAL TABLE IF NOT EXISTS records_fts USING fts5(
     tokenize = "porter unicode61"
 );
 `
+
+// VectorSchema adds a vector column for storing embeddings.
+const VectorSchema = `
+ALTER TABLE records ADD COLUMN vector BLOB;
+`

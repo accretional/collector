@@ -1,10 +1,14 @@
 package sqlite
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"math"
+	"sort"
 	"strings"
 	"sync"
 
@@ -16,14 +20,19 @@ import (
 )
 
 type SqliteStore struct {
-	db      *sql.DB
-	path    string
-	options collection.Options
-	mu      sync.RWMutex
+	db       *sql.DB
+	path     string
+	options  collection.Options
+	embedder collection.Embedder // Optional embedder for vectors
+	mu       sync.RWMutex
 }
 
 // NewSqliteStore initializes the database and applies schemas.
-func NewSqliteStore(path string, opts collection.Options) (*SqliteStore, error) {
+func NewSqliteStore(path string, opts collection.Options, embedder ...collection.Embedder) (*SqliteStore, error) {
+	var emb collection.Embedder
+	if len(embedder) > 0 {
+		emb = embedder[0]
+	}
 	// WAL mode + busy_timeout are critical for concurrent access.
 	dsn := fmt.Sprintf("file:%s?_journal_mode=WAL&_busy_timeout=10000", path)
 	db, err := sql.Open("sqlite", dsn)
@@ -51,6 +60,16 @@ func NewSqliteStore(path string, opts collection.Options) (*SqliteStore, error) 
 
 	if opts.EnableJSON {
 		if _, err := db.Exec(collection.JSONSchema); err != nil {
+			// Ignore error if column already exists, or handle strictly
+		}
+	}
+
+	if opts.EnableVector {
+		if opts.VectorDimensions <= 0 {
+			db.Close()
+			return nil, fmt.Errorf("VectorDimensions must be > 0 when EnableVector is true")
+		}
+		if _, err := db.Exec(collection.VectorSchema); err != nil {
 			// Ignore error if column already exists, or handle strictly
 		}
 	}
@@ -92,7 +111,7 @@ func NewSqliteStore(path string, opts collection.Options) (*SqliteStore, error) 
 		}
 	}
 
-	return &SqliteStore{db: db, path: path, options: opts}, nil
+	return &SqliteStore{db: db, path: path, options: opts, embedder: emb}, nil
 }
 
 func (s *SqliteStore) Close() error { return s.db.Close() }
@@ -101,9 +120,6 @@ func (s *SqliteStore) Path() string { return s.path }
 func (s *SqliteStore) CreateRecord(ctx context.Context, r *pb.CollectionRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	query := `INSERT INTO records (id, proto_data, data_uri, created_at, updated_at, labels, jsontext) 
-              VALUES (?, ?, ?, ?, ?, ?, ?)`
 
 	labelsJSON, _ := json.Marshal(r.Metadata.Labels)
 
@@ -115,15 +131,55 @@ func (s *SqliteStore) CreateRecord(ctx context.Context, r *pb.CollectionRecord) 
 		jsonText = "{}"
 	}
 
-	_, err := s.db.ExecContext(ctx, query,
-		r.Id,
-		r.ProtoData,
-		r.DataUri,
-		r.Metadata.CreatedAt.Seconds,
-		r.Metadata.UpdatedAt.Seconds,
-		string(labelsJSON),
-		jsonText,
-	)
+	// Generate and serialize vector if enabled and embedder is available
+	var vectorBlob interface{} = nil
+	if s.options.EnableVector && s.embedder != nil {
+		text := extractTextFromJSON(jsonText)
+		if text != "" {
+			vector, err := s.embedder.Embed(ctx, text)
+			if err != nil {
+				return fmt.Errorf("failed to generate vector: %w", err)
+			}
+
+			blob, err := serializeVector(vector)
+			if err != nil {
+				return fmt.Errorf("failed to serialize vector: %w", err)
+			}
+			vectorBlob = blob
+		}
+	}
+
+	// Build query based on whether vector column exists
+	var query string
+	var args []interface{}
+	if s.options.EnableVector {
+		query = `INSERT INTO records (id, proto_data, data_uri, created_at, updated_at, labels, jsontext, vector) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+		args = []interface{}{
+			r.Id,
+			r.ProtoData,
+			r.DataUri,
+			r.Metadata.CreatedAt.Seconds,
+			r.Metadata.UpdatedAt.Seconds,
+			string(labelsJSON),
+			jsonText,
+			vectorBlob,
+		}
+	} else {
+		query = `INSERT INTO records (id, proto_data, data_uri, created_at, updated_at, labels, jsontext) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?)`
+		args = []interface{}{
+			r.Id,
+			r.ProtoData,
+			r.DataUri,
+			r.Metadata.CreatedAt.Seconds,
+			r.Metadata.UpdatedAt.Seconds,
+			string(labelsJSON),
+			jsonText,
+		}
+	}
+
+	_, err := s.db.ExecContext(ctx, query, args...)
 	return err
 }
 
@@ -174,7 +230,6 @@ func (s *SqliteStore) UpdateRecord(ctx context.Context, r *pb.CollectionRecord) 
 	}
 	defer tx.Rollback()
 
-	query := `UPDATE records SET proto_data=?, updated_at=?, labels=?, jsontext=? WHERE id=?`
 	labelsJSON, _ := json.Marshal(r.Metadata.Labels)
 
 	var jsonText string
@@ -184,13 +239,47 @@ func (s *SqliteStore) UpdateRecord(ctx context.Context, r *pb.CollectionRecord) 
 		return fmt.Errorf("invalid JSON")
 	}
 
-	res, err := tx.ExecContext(ctx, query,
-		r.ProtoData,
-		r.Metadata.UpdatedAt.Seconds,
-		string(labelsJSON),
-		jsonText,
-		r.Id,
-	)
+	var vectorBlob interface{} = nil
+	if s.options.EnableVector && s.embedder != nil {
+		text := extractTextFromJSON(jsonText)
+		if text != "" {
+			vector, err := s.embedder.Embed(ctx, text)
+			if err != nil {
+				return fmt.Errorf("failed to generate vector: %w", err)
+			}
+
+			blob, err := serializeVector(vector)
+			if err != nil {
+				return fmt.Errorf("failed to serialize vector: %w", err)
+			}
+			vectorBlob = blob
+		}
+	}
+
+	var query string
+	var args []interface{}
+	if s.options.EnableVector {
+		query = `UPDATE records SET proto_data=?, updated_at=?, labels=?, jsontext=?, vector=? WHERE id=?`
+		args = []interface{}{
+			r.ProtoData,
+			r.Metadata.UpdatedAt.Seconds,
+			string(labelsJSON),
+			jsonText,
+			vectorBlob,
+			r.Id,
+		}
+	} else {
+		query = `UPDATE records SET proto_data=?, updated_at=?, labels=?, jsontext=? WHERE id=?`
+		args = []interface{}{
+			r.ProtoData,
+			r.Metadata.UpdatedAt.Seconds,
+			string(labelsJSON),
+			jsonText,
+			r.Id,
+		}
+	}
+
+	res, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
 		return err
 	}
@@ -254,7 +343,153 @@ func (s *SqliteStore) CountRecords(ctx context.Context) (int64, error) {
 	return c, err
 }
 
+func (s *SqliteStore) searchWithVector(ctx context.Context, q *collection.SearchQuery) ([]*collection.SearchResult, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	// Step 1: Build query to get candidate records
+	var query strings.Builder
+	var args []interface{}
+	var whereClauses []string
+
+	query.WriteString(`SELECT r.id, r.proto_data, r.vector `)
+	if q.FullText != "" {
+		query.WriteString(`, bm25(records_fts) as score `)
+	}
+	query.WriteString(`FROM records r `)
+	if q.FullText != "" {
+		query.WriteString(`JOIN records_fts fts ON r.rowid = fts.rowid `)
+	}
+
+	whereClauses = append(whereClauses, `r.vector IS NOT NULL`)
+
+	if q.FullText != "" {
+		whereClauses = append(whereClauses, `records_fts MATCH ?`)
+		args = append(args, q.FullText)
+	}
+
+	for key, filter := range q.Filters {
+		path := `$.` + key
+		switch filter.Operator {
+		case collection.OpExists:
+			whereClauses = append(whereClauses, `json_extract(r.jsontext, ?) IS NOT NULL`)
+			args = append(args, path)
+		case collection.OpNotExists:
+			whereClauses = append(whereClauses, `json_extract(r.jsontext, ?) IS NULL`)
+			args = append(args, path)
+		case collection.OpContains:
+			whereClauses = append(whereClauses, `json_extract(r.jsontext, ?) LIKE ?`)
+			args = append(args, path, "%"+fmt.Sprintf("%v", filter.Value)+"%")
+		default:
+			whereClauses = append(whereClauses, fmt.Sprintf(`json_extract(r.jsontext, ?) %s ?`, filter.Operator))
+			args = append(args, path, filter.Value)
+		}
+	}
+
+	if len(whereClauses) > 0 {
+		query.WriteString("WHERE " + strings.Join(whereClauses, " AND "))
+	}
+
+	// Step 2: Load all candidate records with vectors
+	rows, err := s.db.QueryContext(ctx, query.String(), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	type candidateRecord struct {
+		record   *pb.CollectionRecord
+		vector   []float32
+		ftsScore float64
+	}
+
+	var candidates []candidateRecord
+	for rows.Next() {
+		var r pb.CollectionRecord
+		var vectorBlob []byte
+		var score sql.NullFloat64
+
+		scanArgs := []any{&r.Id, &r.ProtoData, &vectorBlob}
+		if q.FullText != "" {
+			scanArgs = append(scanArgs, &score)
+		}
+
+		if err := rows.Scan(scanArgs...); err != nil {
+			return nil, err
+		}
+
+		if len(vectorBlob) == 0 {
+			continue
+		}
+
+		vector, err := deserializeVector(vectorBlob)
+		if err != nil {
+			continue
+		}
+
+		cand := candidateRecord{
+			record: &r,
+			vector: vector,
+		}
+		if score.Valid {
+			cand.ftsScore = score.Float64
+		}
+		candidates = append(candidates, cand)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Step 3: Compute similarities
+	queryVector := q.Vector
+	results := make([]*collection.SearchResult, 0, len(candidates))
+
+	for _, cand := range candidates {
+		similarity, err := cosineSimilarity(queryVector, cand.vector)
+		if err != nil {
+			continue
+		}
+
+		if q.SimilarityThreshold > 0 && similarity < float64(q.SimilarityThreshold) {
+			continue
+		}
+
+		result := &collection.SearchResult{
+			Record:   cand.record,
+			Distance: similarity,
+			Score:    cand.ftsScore,
+		}
+		results = append(results, result)
+	}
+
+	// Step 4: Sort by similarity
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Distance > results[j].Distance
+	})
+
+	// Step 5: Apply pagination
+	start := 0
+	if q.Offset > 0 {
+		start = q.Offset
+	}
+	end := len(results)
+	if q.Limit > 0 && start+q.Limit < end {
+		end = start + q.Limit
+	}
+
+	if start >= len(results) {
+		return []*collection.SearchResult{}, nil
+	}
+
+	return results[start:end], nil
+}
+
 func (s *SqliteStore) Search(ctx context.Context, q *collection.SearchQuery) ([]*collection.SearchResult, error) {
+	if len(q.Vector) > 0 && s.options.EnableVector {
+		return s.searchWithVector(ctx, q)
+	}
+
 	var query strings.Builder
 	var args []interface{}
 	var whereClauses []string
@@ -504,5 +739,164 @@ func (s *SqliteStore) ReIndex(ctx context.Context) error {
 		return err
 	}
 
+	if s.options.EnableVector && s.embedder != nil {
+		rows, err := tx.QueryContext(ctx, "SELECT id, jsontext FROM records WHERE jsontext IS NOT NULL")
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+
+		updateStmt, err := tx.PrepareContext(ctx, "UPDATE records SET vector = ? WHERE id = ?")
+		if err != nil {
+			return err
+		}
+		defer updateStmt.Close()
+
+		for rows.Next() {
+			var id string
+			var jsonText string
+			if err := rows.Scan(&id, &jsonText); err != nil {
+				return err
+			}
+
+			var vectorBlob interface{} = nil
+			text := extractTextFromJSON(jsonText)
+			if text != "" {
+				vector, err := s.embedder.Embed(ctx, text)
+				if err != nil {
+					if _, err := updateStmt.ExecContext(ctx, nil, id); err != nil {
+						return err
+					}
+					continue
+				}
+
+				blob, err := serializeVector(vector)
+				if err != nil {
+					if _, err := updateStmt.ExecContext(ctx, nil, id); err != nil {
+						return err
+					}
+					continue
+				}
+				vectorBlob = blob
+			}
+
+			if _, err := updateStmt.ExecContext(ctx, vectorBlob, id); err != nil {
+				return err
+			}
+		}
+
+		if err := rows.Err(); err != nil {
+			return err
+		}
+	}
+
 	return tx.Commit()
+}
+
+func serializeVector(v []float32) ([]byte, error) {
+	if len(v) == 0 {
+		return nil, fmt.Errorf("vector cannot be empty")
+	}
+
+	buf := new(bytes.Buffer)
+	if err := binary.Write(buf, binary.LittleEndian, int32(len(v))); err != nil {
+		return nil, fmt.Errorf("failed to write dimension count: %w", err)
+	}
+
+	// Write float32 array
+	if err := binary.Write(buf, binary.LittleEndian, v); err != nil {
+		return nil, fmt.Errorf("failed to write vector data: %w", err)
+	}
+
+	return buf.Bytes(), nil
+}
+
+func deserializeVector(blob []byte) ([]float32, error) {
+	if len(blob) < 4 {
+		return nil, fmt.Errorf("invalid vector blob: too short")
+	}
+
+	buf := bytes.NewReader(blob)
+
+	var dimCount int32
+	if err := binary.Read(buf, binary.LittleEndian, &dimCount); err != nil {
+		return nil, fmt.Errorf("failed to read dimension count: %w", err)
+	}
+
+	if dimCount <= 0 {
+		return nil, fmt.Errorf("invalid dimension count: %d", dimCount)
+	}
+
+	expectedSize := 4 + int(dimCount)*4
+	if len(blob) != expectedSize {
+		return nil, fmt.Errorf("invalid vector blob: size mismatch, expected %d bytes, got %d", expectedSize, len(blob))
+	}
+
+	vector := make([]float32, dimCount)
+	if err := binary.Read(buf, binary.LittleEndian, &vector); err != nil {
+		return nil, fmt.Errorf("failed to read vector data: %w", err)
+	}
+
+	return vector, nil
+}
+
+func extractTextFromJSON(jsonText string) string {
+	if jsonText == "" {
+		return ""
+	}
+
+	var data map[string]interface{}
+	if err := json.Unmarshal([]byte(jsonText), &data); err != nil {
+		return ""
+	}
+
+	var parts []string
+	var extractStrings func(interface{})
+	extractStrings = func(v interface{}) {
+		switch val := v.(type) {
+		case string:
+			if val != "" {
+				parts = append(parts, val)
+			}
+		case map[string]interface{}:
+			for _, item := range val {
+				extractStrings(item)
+			}
+		case []interface{}:
+			for _, item := range val {
+				extractStrings(item)
+			}
+		}
+	}
+
+	extractStrings(data)
+	return strings.Join(parts, " ")
+}
+
+func cosineSimilarity(a, b []float32) (float64, error) {
+	if len(a) != len(b) {
+		return 0, fmt.Errorf("vector dimension mismatch: %d != %d", len(a), len(b))
+	}
+	if len(a) == 0 {
+		return 0, fmt.Errorf("vectors cannot be empty")
+	}
+
+	var dotProduct float64
+	for i := range a {
+		dotProduct += float64(a[i] * b[i])
+	}
+
+	var normA, normB float64
+	for i := range a {
+		normA += float64(a[i] * a[i])
+		normB += float64(b[i] * b[i])
+	}
+	normA = math.Sqrt(normA)
+	normB = math.Sqrt(normB)
+
+	if normA == 0 || normB == 0 {
+		return 0, nil
+	}
+
+	return dotProduct / (normA * normB), nil
 }
