@@ -33,6 +33,9 @@ func NewSqliteStore(path string, opts collection.Options, embedder ...collection
 	if len(embedder) > 0 {
 		emb = embedder[0]
 	}
+	if opts.EnableVector && emb == nil {
+		return nil, fmt.Errorf("embedder required when EnableVector is true")
+	}
 	// WAL mode + busy_timeout are critical for concurrent access.
 	dsn := fmt.Sprintf("file:%s?_journal_mode=WAL&_busy_timeout=10000", path)
 	db, err := sql.Open("sqlite", dsn)
@@ -58,10 +61,10 @@ func NewSqliteStore(path string, opts collection.Options, embedder ...collection
 		return nil, fmt.Errorf("default schema failed: %w", err)
 	}
 
-	if opts.EnableJSON {
-		if _, err := db.Exec(collection.JSONSchema); err != nil {
-			// Ignore error if column already exists, or handle strictly
-		}
+	// jsontext column is always referenced by the store (filters, FTS, vector extraction),
+	// so ensure it exists even if EnableJSON is false.
+	if _, err := db.Exec(collection.JSONSchema); err != nil {
+		// Ignore error if column already exists, or handle strictly
 	}
 
 	if opts.EnableVector {
@@ -139,6 +142,9 @@ func (s *SqliteStore) CreateRecord(ctx context.Context, r *pb.CollectionRecord) 
 			vector, err := s.embedder.Embed(ctx, text)
 			if err != nil {
 				return fmt.Errorf("failed to generate vector: %w", err)
+			}
+			if len(vector) != s.options.VectorDimensions {
+				return fmt.Errorf("embedder produced %d dims, expected %d", len(vector), s.options.VectorDimensions)
 			}
 
 			blob, err := serializeVector(vector)
@@ -247,6 +253,9 @@ func (s *SqliteStore) UpdateRecord(ctx context.Context, r *pb.CollectionRecord) 
 			if err != nil {
 				return fmt.Errorf("failed to generate vector: %w", err)
 			}
+			if len(vector) != s.options.VectorDimensions {
+				return fmt.Errorf("embedder produced %d dims, expected %d", len(vector), s.options.VectorDimensions)
+			}
 
 			blob, err := serializeVector(vector)
 			if err != nil {
@@ -347,12 +356,16 @@ func (s *SqliteStore) searchWithVector(ctx context.Context, q *collection.Search
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
+	if len(q.Vector) != s.options.VectorDimensions {
+		return nil, fmt.Errorf("query vector dimension mismatch: got %d, expected %d", len(q.Vector), s.options.VectorDimensions)
+	}
+
 	// Step 1: Build query to get candidate records
 	var query strings.Builder
 	var args []interface{}
 	var whereClauses []string
 
-	query.WriteString(`SELECT r.id, r.proto_data, r.vector `)
+	query.WriteString(`SELECT r.id, r.proto_data, r.data_uri, r.created_at, r.updated_at, r.labels, r.vector `)
 	if q.FullText != "" {
 		query.WriteString(`, bm25(records_fts) as score `)
 	}
@@ -407,9 +420,12 @@ func (s *SqliteStore) searchWithVector(ctx context.Context, q *collection.Search
 	for rows.Next() {
 		var r pb.CollectionRecord
 		var vectorBlob []byte
+		var dataURI sql.NullString
+		var createdAt, updatedAt int64
+		var labelsJSON string
 		var score sql.NullFloat64
 
-		scanArgs := []any{&r.Id, &r.ProtoData, &vectorBlob}
+		scanArgs := []any{&r.Id, &r.ProtoData, &dataURI, &createdAt, &updatedAt, &labelsJSON, &vectorBlob}
 		if q.FullText != "" {
 			scanArgs = append(scanArgs, &score)
 		}
@@ -425,6 +441,17 @@ func (s *SqliteStore) searchWithVector(ctx context.Context, q *collection.Search
 		vector, err := deserializeVector(vectorBlob)
 		if err != nil {
 			continue
+		}
+
+		r.Metadata = &pb.Metadata{
+			CreatedAt: &timestamppb.Timestamp{Seconds: createdAt},
+			UpdatedAt: &timestamppb.Timestamp{Seconds: updatedAt},
+		}
+		if dataURI.Valid {
+			r.DataUri = dataURI.String
+		}
+		if labelsJSON != "" {
+			_ = json.Unmarshal([]byte(labelsJSON), &r.Metadata.Labels)
 		}
 
 		cand := candidateRecord{
@@ -495,7 +522,7 @@ func (s *SqliteStore) Search(ctx context.Context, q *collection.SearchQuery) ([]
 	var whereClauses []string
 
 	// Base query
-	query.WriteString(`SELECT r.id, r.proto_data `)
+	query.WriteString(`SELECT r.id, r.proto_data, r.data_uri, r.created_at, r.updated_at, r.labels `)
 	if q.FullText != "" {
 		query.WriteString(`, bm25(records_fts) as score `)
 	}
@@ -567,15 +594,29 @@ func (s *SqliteStore) Search(ctx context.Context, q *collection.SearchQuery) ([]
 	var results []*collection.SearchResult
 	for rows.Next() {
 		var r pb.CollectionRecord
+		var dataURI sql.NullString
+		var createdAt, updatedAt int64
+		var labelsJSON string
 		var score sql.NullFloat64
 
-		var scanArgs = []any{&r.Id, &r.ProtoData}
+		var scanArgs = []any{&r.Id, &r.ProtoData, &dataURI, &createdAt, &updatedAt, &labelsJSON}
 		if q.FullText != "" {
 			scanArgs = append(scanArgs, &score)
 		}
 
 		if err := rows.Scan(scanArgs...); err != nil {
 			return nil, err
+		}
+
+		r.Metadata = &pb.Metadata{
+			CreatedAt: &timestamppb.Timestamp{Seconds: createdAt},
+			UpdatedAt: &timestamppb.Timestamp{Seconds: updatedAt},
+		}
+		if dataURI.Valid {
+			r.DataUri = dataURI.String
+		}
+		if labelsJSON != "" {
+			_ = json.Unmarshal([]byte(labelsJSON), &r.Metadata.Labels)
 		}
 
 		searchResult := &collection.SearchResult{Record: &r}
@@ -764,6 +805,12 @@ func (s *SqliteStore) ReIndex(ctx context.Context) error {
 			if text != "" {
 				vector, err := s.embedder.Embed(ctx, text)
 				if err != nil {
+					if _, err := updateStmt.ExecContext(ctx, nil, id); err != nil {
+						return err
+					}
+					continue
+				}
+				if len(vector) != s.options.VectorDimensions {
 					if _, err := updateStmt.ExecContext(ctx, nil, id); err != nil {
 						return err
 					}

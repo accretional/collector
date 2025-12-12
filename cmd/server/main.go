@@ -156,7 +156,7 @@ func run() error {
 	// 4. Start Server and Create Loopback Connection
 	// ========================================================================
 
-	lis, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", collectorPort))
+	lis, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", collectorPort))
 	if err != nil {
 		return fmt.Errorf("failed to listen: %w", err)
 	}
@@ -200,7 +200,7 @@ func run() error {
 	log.Println("✓ Registered CollectiveDispatcher service")
 
 	log.Println("\n========================================")
-	log.Printf("Collector %s running on 0.0.0.0:%d", collectorID, collectorPort)
+	log.Printf("Collector %s running on localhost:%d", collectorID, collectorPort)
 	log.Println("All services available:")
 	log.Println("  - CollectorRegistry")
 	log.Println("  - CollectionService")

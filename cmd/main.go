@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	pb "github.com/accretional/collector/gen/collector"
 	"github.com/accretional/collector/pkg/collection"
@@ -42,13 +43,34 @@ func run() error {
 
 	// 3. Initialize Dependencies (The "Glue")
 
+	// Determine whether to enable vector support via env toggle.
+	vectorEnabled := os.Getenv("ENABLE_VECTOR") != ""
+	vectorDims := 128
+	if v := os.Getenv("VECTOR_DIMENSIONS"); v != "" {
+		if d, err := strconv.Atoi(v); err == nil {
+			vectorDims = d
+		} else {
+			return fmt.Errorf("invalid VECTOR_DIMENSIONS: %w", err)
+		}
+	}
+
 	// A. SQLite Store
 	dbPath := filepath.Join(fullPath, "data.db")
 	storeOpts := collection.Options{
-		EnableFTS:  true,
-		EnableJSON: true,
+		EnableFTS:        true,
+		EnableJSON:       true,
+		EnableVector:     vectorEnabled,
+		VectorDimensions: vectorDims,
 	}
-	store, err := sqlite.NewSqliteStore(dbPath, storeOpts)
+	var store *sqlite.SqliteStore
+	var err error
+
+	if vectorEnabled {
+		embedder := collection.NewDeterministicEmbedder(vectorDims, 1)
+		store, err = sqlite.NewSqliteStore(dbPath, storeOpts, embedder)
+	} else {
+		store, err = sqlite.NewSqliteStore(dbPath, storeOpts)
+	}
 	if err != nil {
 		return fmt.Errorf("init sqlite: %w", err)
 	}
