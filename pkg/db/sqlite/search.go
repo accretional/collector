@@ -15,6 +15,10 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+type execContext interface {
+	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
+}
+
 // Search routes queries to either the vector-backed path or the scalar/FTS path.
 func (s *SqliteStore) Search(ctx context.Context, q *collection.SearchQuery) ([]*collection.SearchResult, error) {
 	if len(q.Vector) > 0 && s.options.EnableVector {
@@ -149,13 +153,7 @@ func (s *SqliteStore) searchWithVectorIndex(ctx context.Context, q *collection.S
 	var whereClauses []string
 
 	query.WriteString(`SELECT r.id, r.proto_data, r.data_uri, r.created_at, r.updated_at, r.labels, v.distance `)
-	if q.FullText != "" {
-		query.WriteString(`, bm25(records_fts) as score `)
-	}
-	query.WriteString(`FROM records_vss v JOIN records r ON r.rowid = v.rowid `)
-	if q.FullText != "" {
-		query.WriteString(`JOIN records_fts fts ON r.rowid = fts.rowid `)
-	}
+	query.WriteString(`FROM records_vec v JOIN records r ON r.rowid = v.rowid `)
 
 	whereClauses = append(whereClauses, `v.vector MATCH ?`)
 	args = append(args, vectorLiteral)
@@ -163,6 +161,12 @@ func (s *SqliteStore) searchWithVectorIndex(ctx context.Context, q *collection.S
 	if q.FullText != "" {
 		whereClauses = append(whereClauses, `records_fts MATCH ?`)
 		args = append(args, q.FullText)
+	}
+
+	if q.SimilarityThreshold > 0 {
+		maxDistance := (1 / float64(q.SimilarityThreshold)) - 1
+		whereClauses = append(whereClauses, `v.distance <= ?`)
+		args = append(args, maxDistance)
 	}
 
 	for key, filter := range q.Filters {
@@ -227,12 +231,8 @@ func (s *SqliteStore) searchWithVectorIndex(ctx context.Context, q *collection.S
 		var createdAt, updatedAt int64
 		var labelsJSON string
 		var distance float64
-		var score sql.NullFloat64
 
 		scanArgs := []any{&r.Id, &r.ProtoData, &dataURI, &createdAt, &updatedAt, &labelsJSON, &distance}
-		if q.FullText != "" {
-			scanArgs = append(scanArgs, &score)
-		}
 
 		if err := rows.Scan(scanArgs...); err != nil {
 			return nil, err
@@ -253,17 +253,6 @@ func (s *SqliteStore) searchWithVectorIndex(ctx context.Context, q *collection.S
 			Record:   &r,
 			Distance: distance,
 		}
-
-		if q.SimilarityThreshold > 0 {
-			maxDistance := (1 / float64(q.SimilarityThreshold)) - 1
-			if distance > maxDistance {
-				continue
-			}
-		}
-
-		if score.Valid {
-			result.Score = score.Float64
-		}
 		results = append(results, result)
 	}
 
@@ -274,24 +263,6 @@ func (s *SqliteStore) searchWithVectorIndex(ctx context.Context, q *collection.S
 	return results, nil
 }
 
-func enableVectorIndex(db *sql.DB, dims int) error {
-	if _, err := db.Exec("SELECT vss_version()"); err != nil {
-		return fmt.Errorf("sqlite vector extension unavailable: %w", err)
-	}
-
-	stmt := fmt.Sprintf(`CREATE VIRTUAL TABLE IF NOT EXISTS records_vss USING vss0(vector FLOAT[%d]);`, dims)
-	if _, err := db.Exec(stmt); err != nil {
-		return fmt.Errorf("create vss table: %w", err)
-	}
-
-	// Use HNSW index for efficient search.
-	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS records_vss_hnsw ON records_vss(vss_hnsw(vector));`); err != nil {
-		return fmt.Errorf("create hnsw index: %w", err)
-	}
-
-	return nil
-}
-
 func formatVectorLiteral(v []float32) string {
 	parts := make([]string, len(v))
 	for i, f := range v {
@@ -300,25 +271,62 @@ func formatVectorLiteral(v []float32) string {
 	return "[" + strings.Join(parts, ",") + "]"
 }
 
-func (s *SqliteStore) upsertVectorIndex(ctx context.Context, exec execContext, id string, vector []float32) error {
+func (s *SqliteStore) upsertVecTable(ctx context.Context, exec execContext, id string, vector []float32) error {
 	if len(vector) != s.options.VectorDimensions {
 		return fmt.Errorf("vector dimension mismatch: got %d, expected %d", len(vector), s.options.VectorDimensions)
 	}
 
 	literal := formatVectorLiteral(vector)
-
-	if _, err := exec.ExecContext(ctx, `DELETE FROM records_vss WHERE rowid IN (SELECT rowid FROM records WHERE id = ?)`, id); err != nil {
-		return err
-	}
-
-	query := fmt.Sprintf(`INSERT INTO records_vss(rowid, vector) SELECT rowid, %s FROM records WHERE id = ?`, literal)
-	_, err := exec.ExecContext(ctx, query, id)
+	_, err := exec.ExecContext(ctx, `INSERT OR REPLACE INTO records_vec(rowid, vector) SELECT rowid, ? FROM records WHERE id = ?`, literal, id)
 	return err
 }
 
-func (s *SqliteStore) deleteVectorIndex(ctx context.Context, exec execContext, id string) error {
-	_, err := exec.ExecContext(ctx, `DELETE FROM records_vss WHERE rowid IN (SELECT rowid FROM records WHERE id = ?)`, id)
+func (s *SqliteStore) deleteVecEntry(ctx context.Context, exec execContext, id string) error {
+	_, err := exec.ExecContext(ctx, `DELETE FROM records_vec WHERE rowid IN (SELECT rowid FROM records WHERE id = ?)`, id)
 	return err
+}
+
+func (s *SqliteStore) reuseOrGenerateVector(ctx context.Context, id string, jsonText string) ([]float32, interface{}, error) {
+	if !s.options.EnableVector {
+		return nil, nil, nil
+	}
+
+	var existingJSON sql.NullString
+	var existingVector []byte
+	err := s.db.QueryRowContext(ctx, "SELECT jsontext, vector FROM records WHERE id = ?", id).Scan(&existingJSON, &existingVector)
+	if err == nil && existingJSON.Valid && existingJSON.String == jsonText && len(existingVector) > 0 {
+		if v, err := deserializeVector(existingVector); err == nil && len(v) == s.options.VectorDimensions {
+			return v, existingVector, nil
+		}
+	}
+
+	return s.generateVector(ctx, jsonText)
+}
+
+func (s *SqliteStore) generateVector(ctx context.Context, jsonText string) ([]float32, interface{}, error) {
+	if !s.options.EnableVector || s.embedder == nil {
+		return nil, nil, nil
+	}
+
+	text := extractTextFromJSON(jsonText)
+	if text == "" {
+		return nil, nil, nil
+	}
+
+	vector, err := s.embedder.Embed(ctx, text)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to generate vector: %w", err)
+	}
+	if len(vector) != s.options.VectorDimensions {
+		return nil, nil, fmt.Errorf("embedder produced %d dims, expected %d", len(vector), s.options.VectorDimensions)
+	}
+
+	blob, err := serializeVector(vector)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to serialize vector: %w", err)
+	}
+
+	return vector, blob, nil
 }
 
 func serializeVector(v []float32) ([]byte, error) {
@@ -366,6 +374,61 @@ func deserializeVector(blob []byte) ([]float32, error) {
 	}
 
 	return vector, nil
+}
+
+func (s *SqliteStore) rebuildVectorIndex(ctx context.Context, tx *sql.Tx) error {
+	// sqlite-vec (vec0) does not build a separate ANN structure yet; this simply
+	// refreshes stored vectors and keeps the vec0 table in sync with records.
+	rows, err := tx.QueryContext(ctx, "SELECT id, jsontext FROM records WHERE jsontext IS NOT NULL")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	if _, err := tx.ExecContext(ctx, "DELETE FROM records_vec"); err != nil {
+		return fmt.Errorf("reset vector index: %w", err)
+	}
+
+	updateStmt, err := tx.PrepareContext(ctx, "UPDATE records SET vector = ? WHERE id = ?")
+	if err != nil {
+		return err
+	}
+	defer updateStmt.Close()
+
+	for rows.Next() {
+		var id string
+		var jsonText string
+		if err := rows.Scan(&id, &jsonText); err != nil {
+			return err
+		}
+		vector, vectorBlob, err := s.reuseOrGenerateVector(ctx, id, jsonText)
+		if err != nil {
+			if _, err := updateStmt.ExecContext(ctx, nil, id); err != nil {
+				return err
+			}
+			continue
+		}
+
+		if _, err := updateStmt.ExecContext(ctx, vectorBlob, id); err != nil {
+			return err
+		}
+
+		if len(vector) > 0 {
+			if err := s.upsertVecTable(ctx, tx, id, vector); err != nil {
+				return fmt.Errorf("reindex vector entry: %w", err)
+			}
+		} else {
+			if err := s.deleteVecEntry(ctx, tx, id); err != nil {
+				return fmt.Errorf("clear vector entry: %w", err)
+			}
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func extractTextFromJSON(jsonText string) string {

@@ -2,8 +2,10 @@ package collection_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -11,6 +13,8 @@ import (
 	"github.com/accretional/collector/pkg/collection"
 	"github.com/accretional/collector/pkg/db/sqlite"
 	"google.golang.org/protobuf/types/known/timestamppb"
+
+	_ "modernc.org/sqlite"
 )
 
 // setupTestCollectionWithVector creates a REAL SQLite-backed collection with vector support.
@@ -19,6 +23,10 @@ func setupTestCollectionWithVector(t *testing.T) (*collection.Collection, collec
 
 	// Create a temporary directory for this test run
 	tempDir := t.TempDir()
+
+	if !vectorExtensionAvailable(t) {
+		t.Skip("SQLite vector extension (vec0) not available; skipping vector index tests")
+	}
 
 	// Initialize the REAL SQLite Store with vector support
 	dbPath := tempDir + "/test.db"
@@ -126,9 +134,9 @@ func TestSemanticEngine_FindSimilar_Basic(t *testing.T) {
 	for _, result := range results {
 		if result.Record.Id == "doc-1" {
 			foundDoc1 = true
-			// Verify similarity distance is set
-			if result.Distance <= 0 {
-				t.Errorf("expected positive similarity distance, got %f", result.Distance)
+			// Verify distance is non-negative
+			if result.Distance < 0 {
+				t.Errorf("expected non-negative distance, got %f", result.Distance)
 			}
 		}
 	}
@@ -157,8 +165,8 @@ func TestSemanticEngine_FindSimilar_Basic(t *testing.T) {
 				doc3Distance = result.Distance
 			}
 		}
-		if doc3Distance >= doc1Distance {
-			t.Errorf("doc-3 should have lower similarity than doc-1: doc1=%f, doc3=%f", doc1Distance, doc3Distance)
+		if doc3Distance <= doc1Distance {
+			t.Errorf("doc-3 should have higher distance than doc-1: doc1=%f, doc3=%f", doc1Distance, doc3Distance)
 		}
 	}
 }
@@ -218,10 +226,10 @@ func TestSemanticEngine_FindSimilar_Ordering(t *testing.T) {
 		t.Fatalf("expected at least 2 results, got %d", len(results))
 	}
 
-	// Results should be ordered by similarity (descending)
+	// Results should be ordered by distance (ascending)
 	for i := 1; i < len(results); i++ {
-		if results[i].Distance > results[i-1].Distance {
-			t.Errorf("results not properly ordered: result[%d].Distance=%f > result[%d].Distance=%f",
+		if results[i].Distance < results[i-1].Distance {
+			t.Errorf("results not properly ordered: result[%d].Distance=%f < result[%d].Distance=%f",
 				i, results[i].Distance, i-1, results[i-1].Distance)
 		}
 	}
@@ -461,16 +469,20 @@ func TestSemanticEngine_FindSimilar_SimilarityThreshold(t *testing.T) {
 		t.Fatalf("Search failed: %v", err)
 	}
 
-	// Find minimum similarity
+	// Find minimum similarity using 1/(1+distance)
 	minSimilarity := 1.0
 	for _, result := range allResults {
-		if result.Distance < minSimilarity {
-			minSimilarity = result.Distance
+		sim := 1 / (1 + result.Distance)
+		if sim < minSimilarity {
+			minSimilarity = sim
 		}
 	}
 
-	// Search with threshold above minimum
+	// Search with a threshold above minimum but capped below 1.0 to avoid inverting to a negative max distance.
 	threshold := float32(minSimilarity + 0.1)
+	if threshold >= 1 {
+		threshold = 0.99
+	}
 	thresholdResults, err := coll.Search(ctx, &collection.SearchQuery{
 		Vector:              queryVec,
 		SimilarityThreshold: threshold,
@@ -488,8 +500,8 @@ func TestSemanticEngine_FindSimilar_SimilarityThreshold(t *testing.T) {
 
 	// All results should meet threshold
 	for _, result := range thresholdResults {
-		if result.Distance < float64(threshold) {
-			t.Errorf("result distance %f below threshold %f", result.Distance, threshold)
+		if 1/(1+result.Distance) < float64(threshold) {
+			t.Errorf("result similarity %f below threshold %f", 1/(1+result.Distance), threshold)
 		}
 	}
 }
@@ -571,7 +583,7 @@ func TestSemanticEngine_FindSimilar_UpdateMaintainsVectors(t *testing.T) {
 	// The record should either not appear or have lower similarity
 	stillHighSimilarity := false
 	for _, result := range originalResults {
-		if result.Record.Id == "doc-1" && result.Distance > 0.5 {
+		if result.Record.Id == "doc-1" && result.Distance < 0.5 {
 			stillHighSimilarity = true
 		}
 	}
@@ -579,4 +591,101 @@ func TestSemanticEngine_FindSimilar_UpdateMaintainsVectors(t *testing.T) {
 	if stillHighSimilarity {
 		t.Log("Note: updated record still has high similarity to old query - this may be expected with deterministic embedder")
 	}
+}
+
+func TestSemanticEngine_VectorIndexPopulated(t *testing.T) {
+	coll, embedder, cleanup := setupTestCollectionWithVector(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	store, ok := coll.Store.(*sqlite.SqliteStore)
+	if !ok {
+		t.Fatalf("expected sqlite store, got %T", coll.Store)
+	}
+
+	db := mustOpenDB(t, store.Path())
+	defer db.Close()
+
+	now := timestamppb.New(time.Now())
+	records := []*pb.CollectionRecord{
+		{
+			Id:        "vss-1",
+			ProtoData: []byte(`{"text": "alpha beta gamma"}`),
+			Metadata: &pb.Metadata{
+				CreatedAt: now,
+				UpdatedAt: now,
+			},
+		},
+		{
+			Id:        "vss-2",
+			ProtoData: []byte(`{"text": "delta epsilon zeta"}`),
+			Metadata: &pb.Metadata{
+				CreatedAt: now,
+				UpdatedAt: now,
+			},
+		},
+	}
+
+	for _, r := range records {
+		if err := coll.CreateRecord(ctx, r); err != nil {
+			t.Fatalf("create record: %v", err)
+		}
+	}
+
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM records_vec").Scan(&count); err != nil {
+		t.Fatalf("count vec entries: %v", err)
+	}
+	if count != len(records) {
+		t.Fatalf("expected %d vectors indexed, got %d", len(records), count)
+	}
+
+	// Sanity: vector search returns the indexed records
+	results, err := coll.Search(ctx, &collection.SearchQuery{
+		Vector: func() []float32 {
+			v, _ := embedder.Embed(ctx, "alpha gamma")
+			return v
+		}(),
+		Limit: 5,
+	})
+	if err != nil {
+		t.Fatalf("vector search: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatalf("expected results from vector index search")
+	}
+}
+
+func vectorExtensionAvailable(t *testing.T) bool {
+	t.Helper()
+	db, err := sql.Open("sqlite", "file::memory:?cache=shared")
+	if err != nil {
+		t.Logf("open sqlite: %v", err)
+		return false
+	}
+	defer db.Close()
+
+	// Load vec0 if provided; sqlite-vec does not create a separate ANN index,
+	// but we still need the extension for the vec0 virtual table.
+	if path := os.Getenv("SQLITE_VECTOR0_EXTENSION"); path != "" {
+		if _, err := db.Exec(`SELECT load_extension(?)`, path); err != nil {
+			t.Logf("load_extension(%s) failed: %v", path, err)
+			return false
+		}
+	}
+
+	if _, err := db.Exec("SELECT vector_version()"); err != nil {
+		t.Logf("vector_version check failed: %v", err)
+		return false
+	}
+	return true
+}
+
+func mustOpenDB(t *testing.T, path string) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("sqlite", fmt.Sprintf("file:%s", path))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	return db
 }

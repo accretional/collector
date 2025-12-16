@@ -31,6 +31,9 @@ func NewSqliteStore(path string, opts collection.Options, embedder ...collection
 	if opts.EnableVector && emb == nil {
 		return nil, fmt.Errorf("embedder required when EnableVector is true")
 	}
+	if opts.EnableVector && opts.VectorDimensions <= 0 {
+		return nil, fmt.Errorf("VectorDimensions must be > 0 when EnableVector is true")
+	}
 	// WAL mode + busy_timeout are critical for concurrent access.
 	dsn := fmt.Sprintf("file:%s?_journal_mode=WAL&_busy_timeout=10000", path)
 	db, err := sql.Open("sqlite", dsn)
@@ -70,9 +73,11 @@ func NewSqliteStore(path string, opts collection.Options, embedder ...collection
 		if _, err := db.Exec(collection.VectorSchema); err != nil {
 			// Ignore error if column already exists, or handle strictly
 		}
-		if err := enableVectorIndex(db, opts.VectorDimensions); err != nil {
+		// Create vec0 virtual table for vector search
+		stmt := fmt.Sprintf(`CREATE VIRTUAL TABLE IF NOT EXISTS records_vec USING vec0(vector FLOAT[%d]);`, opts.VectorDimensions)
+		if _, err := db.Exec(stmt); err != nil {
 			db.Close()
-			return nil, fmt.Errorf("enable sqlite vector index: %w", err)
+			return nil, fmt.Errorf("create vec0 table: %w", err)
 		}
 	}
 
@@ -125,15 +130,6 @@ func (s *SqliteStore) Close() error { return s.db.Close() }
 func (s *SqliteStore) Path() string { return s.path }
 
 func (s *SqliteStore) CreateRecord(ctx context.Context, r *pb.CollectionRecord) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
 	labelsJSON, _ := json.Marshal(r.Metadata.Labels)
 
 	// If proto_data is valid JSON, use it for jsontext. Otherwise, use a default.
@@ -146,10 +142,19 @@ func (s *SqliteStore) CreateRecord(ctx context.Context, r *pb.CollectionRecord) 
 
 	// Generate and serialize vector if enabled and embedder is available
 	var vectorBlob interface{}
-	rawVector, vectorBlob, err := s.generateVector(ctx, jsonText)
+	rawVector, vectorBlob, err := s.reuseOrGenerateVector(ctx, r.Id, jsonText)
 	if err != nil {
 		return err
 	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 
 	// Build query based on whether vector column exists
 	var query string
@@ -186,7 +191,7 @@ func (s *SqliteStore) CreateRecord(ctx context.Context, r *pb.CollectionRecord) 
 	}
 
 	if s.options.EnableVector && len(rawVector) > 0 {
-		if err := s.upsertVectorIndex(ctx, tx, r.Id, rawVector); err != nil {
+		if err := s.upsertVecTable(ctx, tx, r.Id, rawVector); err != nil {
 			return fmt.Errorf("update vector index: %w", err)
 		}
 	}
@@ -232,15 +237,6 @@ func (s *SqliteStore) GetRecord(ctx context.Context, id string) (*pb.CollectionR
 }
 
 func (s *SqliteStore) UpdateRecord(ctx context.Context, r *pb.CollectionRecord) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
 	labelsJSON, _ := json.Marshal(r.Metadata.Labels)
 
 	var jsonText string
@@ -251,10 +247,19 @@ func (s *SqliteStore) UpdateRecord(ctx context.Context, r *pb.CollectionRecord) 
 	}
 
 	var vectorBlob interface{}
-	rawVector, vectorBlob, err := s.generateVector(ctx, jsonText)
+	rawVector, vectorBlob, err := s.reuseOrGenerateVector(ctx, r.Id, jsonText)
 	if err != nil {
 		return err
 	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 
 	var query string
 	var args []interface{}
@@ -290,11 +295,11 @@ func (s *SqliteStore) UpdateRecord(ctx context.Context, r *pb.CollectionRecord) 
 	}
 
 	if len(rawVector) > 0 {
-		if err := s.upsertVectorIndex(ctx, tx, r.Id, rawVector); err != nil {
+		if err := s.upsertVecTable(ctx, tx, r.Id, rawVector); err != nil {
 			return fmt.Errorf("update vector index: %w", err)
 		}
 	} else {
-		if err := s.deleteVectorIndex(ctx, tx, r.Id); err != nil {
+		if err := s.deleteVecEntry(ctx, tx, r.Id); err != nil {
 			return fmt.Errorf("clear vector index: %w", err)
 		}
 	}
@@ -313,7 +318,7 @@ func (s *SqliteStore) DeleteRecord(ctx context.Context, id string) error {
 	defer tx.Rollback()
 
 	if s.options.EnableVector {
-		if err := s.deleteVectorIndex(ctx, tx, id); err != nil {
+		if err := s.deleteVecEntry(ctx, tx, id); err != nil {
 			return fmt.Errorf("delete vector index entry: %w", err)
 		}
 	}
@@ -520,87 +525,11 @@ func (s *SqliteStore) ReIndex(ctx context.Context) error {
 		return err
 	}
 
-	if s.options.EnableVector && s.embedder != nil {
-		rows, err := tx.QueryContext(ctx, "SELECT id, jsontext FROM records WHERE jsontext IS NOT NULL")
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-
-		if _, err := tx.ExecContext(ctx, "DELETE FROM records_vss"); err != nil {
-			return fmt.Errorf("reset vector index: %w", err)
-		}
-
-		updateStmt, err := tx.PrepareContext(ctx, "UPDATE records SET vector = ? WHERE id = ?")
-		if err != nil {
-			return err
-		}
-		defer updateStmt.Close()
-
-		for rows.Next() {
-			var id string
-			var jsonText string
-			if err := rows.Scan(&id, &jsonText); err != nil {
-				return err
-			}
-
-			vector, vectorBlob, err := s.generateVector(ctx, jsonText)
-			if err != nil {
-				if _, err := updateStmt.ExecContext(ctx, nil, id); err != nil {
-					return err
-				}
-				continue
-			}
-
-			if _, err := updateStmt.ExecContext(ctx, vectorBlob, id); err != nil {
-				return err
-			}
-
-			if len(vector) > 0 {
-				if err := s.upsertVectorIndex(ctx, tx, id, vector); err != nil {
-					return fmt.Errorf("reindex vector entry: %w", err)
-				}
-			} else {
-				if err := s.deleteVectorIndex(ctx, tx, id); err != nil {
-					return fmt.Errorf("clear vector entry: %w", err)
-				}
-			}
-		}
-
-		if err := rows.Err(); err != nil {
+	if s.options.EnableVector {
+		if err := s.rebuildVectorIndex(ctx, tx); err != nil {
 			return err
 		}
 	}
 
 	return tx.Commit()
-}
-
-type execContext interface {
-	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
-}
-
-func (s *SqliteStore) generateVector(ctx context.Context, jsonText string) ([]float32, interface{}, error) {
-	if !s.options.EnableVector || s.embedder == nil {
-		return nil, nil, nil
-	}
-
-	text := extractTextFromJSON(jsonText)
-	if text == "" {
-		return nil, nil, nil
-	}
-
-	vector, err := s.embedder.Embed(ctx, text)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to generate vector: %w", err)
-	}
-	if len(vector) != s.options.VectorDimensions {
-		return nil, nil, fmt.Errorf("embedder produced %d dims, expected %d", len(vector), s.options.VectorDimensions)
-	}
-
-	blob, err := serializeVector(vector)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to serialize vector: %w", err)
-	}
-
-	return vector, blob, nil
 }
