@@ -30,12 +30,31 @@ type SqliteStore struct {
 
 func getVecExtensionPath() string {
 	vectorPath := os.Getenv("SQLITE_VEC_EXTENSION")
-	if vectorPath == "" {
-		if cwd, err := os.Getwd(); err == nil {
-			vectorPath = filepath.Join(cwd, "sqlite-vec", "vec0.so")
-		}
+	if vectorPath != "" {
+		return vectorPath
 	}
-	return vectorPath
+
+	// Search for sqlite-vec/vec0.so from cwd to root.
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+
+	dir := cwd
+	for {
+		candidate := filepath.Join(dir, "sqlite-vec", "vec0.so")
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+
+	return ""
 }
 
 // Vector operations are best-effort; if all retries fail, it logs and continues

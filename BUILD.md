@@ -54,9 +54,11 @@ curl -L https://github.com/asg017/sqlite-vec/releases/download/v0.1.6/sqlite-vec
 
 The extension file will be at `sqlite-vec/vec0.so` (Linux) or `sqlite-vec/vec0.dylib` (macOS).
 
-### 2. Configure Extension Path
+### 2. Configure Extension Path (Optional)
 
-Set the environment variable to point to the extension using an **absolute path** (relative paths can cause issues):
+The extension is auto-discovered by searching for `sqlite-vec/vec0.so` starting from the current directory and walking up to the root. This works automatically if you place the extension in your project root.
+
+Alternatively, set the environment variable explicitly using an **absolute path**:
 
 ```bash
 # Linux
@@ -65,8 +67,6 @@ export SQLITE_VEC_EXTENSION=$(pwd)/sqlite-vec/vec0.so
 # macOS
 export SQLITE_VEC_EXTENSION=$(pwd)/sqlite-vec/vec0.dylib
 ```
-
-If the environment variable is not set, the default path is `{cwd}/sqlite-vec/vec0.so`.
 
 ### 3. Build with CGo
 

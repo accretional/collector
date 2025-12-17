@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -659,10 +660,26 @@ func vectorExtensionAvailable(t *testing.T) bool {
 	// Get the extension path
 	path := os.Getenv("SQLITE_VEC_EXTENSION")
 	if path == "" {
-		path = os.Getenv("SQLITE_VECTOR0_EXTENSION")
-	}
-	if path == "" {
-		path = "./sqlite-vec/vec0.so"
+		if _, err := os.Getwd(); err == nil {
+				cwd, err := os.Getwd()
+		if err != nil {
+			path = ""
+		}
+
+		dir := cwd
+		for {
+			candidate := filepath.Join(dir, "sqlite-vec", "vec0.so")
+			if _, err := os.Stat(candidate); err == nil {
+				path = candidate
+			}
+
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
+		}
 	}
 
 	// Check if the extension file exists
