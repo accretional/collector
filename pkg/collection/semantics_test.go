@@ -2,7 +2,6 @@ package collection_test
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -12,6 +11,7 @@ import (
 	pb "github.com/accretional/collector/gen/collector"
 	"github.com/accretional/collector/pkg/collection"
 	"github.com/accretional/collector/pkg/db/sqlite"
+	"github.com/accretional/collector/pkg/db/sqliteext"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	_ "modernc.org/sqlite"
@@ -25,7 +25,7 @@ func setupTestCollectionWithVector(t *testing.T) (*collection.Collection, collec
 	tempDir := t.TempDir()
 
 	if !vectorExtensionAvailable(t) {
-		t.Skip("SQLite vector extension (vec0) not available; skipping vector index tests")
+		t.Errorf("SQLite vector extension (vec0) not available; skipping vector index tests")
 	}
 
 	// Initialize the REAL SQLite Store with vector support
@@ -598,14 +598,6 @@ func TestSemanticEngine_VectorIndexPopulated(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	store, ok := coll.Store.(*sqlite.SqliteStore)
-	if !ok {
-		t.Fatalf("expected sqlite store, got %T", coll.Store)
-	}
-
-	db := mustOpenDB(t, store.Path())
-	defer db.Close()
-
 	now := timestamppb.New(time.Now())
 	records := []*pb.CollectionRecord{
 		{
@@ -632,60 +624,70 @@ func TestSemanticEngine_VectorIndexPopulated(t *testing.T) {
 		}
 	}
 
-	var count int
-	if err := db.QueryRow("SELECT COUNT(*) FROM records_vec").Scan(&count); err != nil {
-		t.Fatalf("count vec entries: %v", err)
-	}
-	if count != len(records) {
-		t.Fatalf("expected %d vectors indexed, got %d", len(records), count)
-	}
-
-	// Sanity: vector search returns the indexed records
+	// Verify vector index is populated by performing a vector search
+	// With the hybrid driver approach, we can't directly query vec0 table
+	// from modernc.org/sqlite, so we verify through search results
 	results, err := coll.Search(ctx, &collection.SearchQuery{
 		Vector: func() []float32 {
 			v, _ := embedder.Embed(ctx, "alpha gamma")
 			return v
 		}(),
-		Limit: 5,
+		Limit: 10,
 	})
 	if err != nil {
 		t.Fatalf("vector search: %v", err)
 	}
-	if len(results) == 0 {
-		t.Fatalf("expected results from vector index search")
+	if len(results) != len(records) {
+		t.Fatalf("expected %d results from vector index search, got %d", len(records), len(results))
+	}
+
+	// Verify both records are returned
+	foundIDs := make(map[string]bool)
+	for _, r := range results {
+		foundIDs[r.Record.Id] = true
+	}
+	for _, r := range records {
+		if !foundIDs[r.Id] {
+			t.Errorf("expected to find record %s in vector search results", r.Id)
+		}
 	}
 }
 
 func vectorExtensionAvailable(t *testing.T) bool {
 	t.Helper()
-	db, err := sql.Open("sqlite", "file::memory:?cache=shared")
+
+	// Get the extension path
+	path := os.Getenv("SQLITE_VEC_EXTENSION")
+	if path == "" {
+		path = os.Getenv("SQLITE_VECTOR0_EXTENSION")
+	}
+	if path == "" {
+		path = "./sqlite-vec/vec0.so"
+	}
+
+	// Check if the extension file exists
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		t.Logf("sqlite-vec extension not found at %s", path)
+		return false
+	}
+
+	// Try to open with our CGo driver
+	ctx := context.Background()
+	tempFile := t.TempDir() + "/vec_test.db"
+	vecDB, err := sqliteext.Open(ctx, tempFile, path, "sqlite3_vec_init")
 	if err != nil {
-		t.Logf("open sqlite: %v", err)
+		t.Logf("failed to open vec db: %v", err)
 		return false
 	}
-	defer db.Close()
+	defer vecDB.Close()
 
-	// Load vec0 if provided; sqlite-vec does not create a separate ANN index,
-	// but we still need the extension for the vec0 virtual table.
-	if path := os.Getenv("SQLITE_VECTOR0_EXTENSION"); path != "" {
-		if _, err := db.Exec(`SELECT load_extension(?)`, path); err != nil {
-			t.Logf("load_extension(%s) failed: %v", path, err)
-			return false
-		}
-	}
-
-	if _, err := db.Exec("SELECT vector_version()"); err != nil {
-		t.Logf("vector_version check failed: %v", err)
+	// Verify the extension is loaded by checking vector_version()
+	rows, err := vecDB.QueryContext(ctx, "SELECT vec_version()")
+	if err != nil {
+		t.Logf("vec_version check failed: %v", err)
 		return false
 	}
+	defer rows.Close()
+
 	return true
-}
-
-func mustOpenDB(t *testing.T, path string) *sql.DB {
-	t.Helper()
-	db, err := sql.Open("sqlite", fmt.Sprintf("file:%s", path))
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	return db
 }

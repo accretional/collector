@@ -5,24 +5,63 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
+	"os"
+	"path/filepath"
 	"sync"
+	"time"
 
 	pb "github.com/accretional/collector/gen/collector"
 	"github.com/accretional/collector/pkg/collection"
+	"github.com/accretional/collector/pkg/db/sqliteext"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	_ "modernc.org/sqlite" // Using modernc.org/sqlite (cgo-free)
+	_ "modernc.org/sqlite"
 )
 
 type SqliteStore struct {
 	db       *sql.DB
+	vecDB    *sqliteext.DB // CGo-based connection for vector operations (nil if vectors disabled)
 	path     string
 	options  collection.Options
-	embedder collection.Embedder // Optional embedder for vectors
+	embedder collection.Embedder
 	mu       sync.RWMutex
 }
 
+func getVecExtensionPath() string {
+	vectorPath := os.Getenv("SQLITE_VEC_EXTENSION")
+	if vectorPath == "" {
+		if cwd, err := os.Getwd(); err == nil {
+			vectorPath = filepath.Join(cwd, "sqlite-vec", "vec0.so")
+		}
+	}
+	return vectorPath
+}
+
+// Vector operations are best-effort; if all retries fail, it logs and continues
+// since the main record is already committed and vector search is a secondary feature.
+func retryVecOperation(ctx context.Context, maxRetries int, op func() error) error {
+	var lastErr error
+	for i := 0; i < maxRetries; i++ {
+		if err := op(); err != nil {
+			lastErr = err
+			// Exponential backoff: 10ms, 20ms, 40ms
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Duration(10<<i) * time.Millisecond):
+			}
+			continue
+		}
+		return nil
+	}
+	return lastErr
+}
+
 // NewSqliteStore initializes the database and applies schemas.
+// When EnableVector is true, it uses a hybrid approach:
+// - modernc.org/sqlite (pure Go) for regular CRUD operations
+// - Custom CGo driver for vector operations (requires sqlite-vec extension)
 func NewSqliteStore(path string, opts collection.Options, embedder ...collection.Embedder) (*SqliteStore, error) {
 	var emb collection.Embedder
 	if len(embedder) > 0 {
@@ -34,6 +73,7 @@ func NewSqliteStore(path string, opts collection.Options, embedder ...collection
 	if opts.EnableVector && opts.VectorDimensions <= 0 {
 		return nil, fmt.Errorf("VectorDimensions must be > 0 when EnableVector is true")
 	}
+
 	// WAL mode + busy_timeout are critical for concurrent access.
 	dsn := fmt.Sprintf("file:%s?_journal_mode=WAL&_busy_timeout=10000", path)
 	db, err := sql.Open("sqlite", dsn)
@@ -66,16 +106,23 @@ func NewSqliteStore(path string, opts collection.Options, embedder ...collection
 	}
 
 	if opts.EnableVector {
-		if opts.VectorDimensions <= 0 {
-			db.Close()
-			return nil, fmt.Errorf("VectorDimensions must be > 0 when EnableVector is true")
-		}
 		if _, err := db.Exec(collection.VectorSchema); err != nil {
-			// Ignore error if column already exists, or handle strictly
+			// Ignore error if column already exists
 		}
-		// Create vec0 virtual table for vector search
+	}
+
+	var vecDB *sqliteext.DB
+	if opts.EnableVector {
+		extPath := getVecExtensionPath()
+		vecDB, err = sqliteext.Open(context.Background(), path, extPath, "sqlite3_vec_init")
+		if err != nil {
+			db.Close()
+			return nil, fmt.Errorf("open vec db: %w", err)
+		}
+
 		stmt := fmt.Sprintf(`CREATE VIRTUAL TABLE IF NOT EXISTS records_vec USING vec0(vector FLOAT[%d]);`, opts.VectorDimensions)
-		if _, err := db.Exec(stmt); err != nil {
+		if _, err := vecDB.ExecContext(context.Background(), stmt); err != nil {
+			vecDB.Close()
 			db.Close()
 			return nil, fmt.Errorf("create vec0 table: %w", err)
 		}
@@ -120,19 +167,24 @@ func NewSqliteStore(path string, opts collection.Options, embedder ...collection
 
 	return &SqliteStore{
 		db:       db,
+		vecDB:    vecDB,
 		path:     path,
 		options:  opts,
 		embedder: emb,
 	}, nil
 }
 
-func (s *SqliteStore) Close() error { return s.db.Close() }
+func (s *SqliteStore) Close() error {
+	if s.vecDB != nil {
+		s.vecDB.Close()
+	}
+	return s.db.Close()
+}
 func (s *SqliteStore) Path() string { return s.path }
 
 func (s *SqliteStore) CreateRecord(ctx context.Context, r *pb.CollectionRecord) error {
 	labelsJSON, _ := json.Marshal(r.Metadata.Labels)
 
-	// If proto_data is valid JSON, use it for jsontext. Otherwise, use a default.
 	var jsonText string
 	if json.Valid(r.ProtoData) {
 		jsonText = string(r.ProtoData)
@@ -140,7 +192,6 @@ func (s *SqliteStore) CreateRecord(ctx context.Context, r *pb.CollectionRecord) 
 		jsonText = "{}"
 	}
 
-	// Generate and serialize vector if enabled and embedder is available
 	var vectorBlob interface{}
 	rawVector, vectorBlob, err := s.reuseOrGenerateVector(ctx, r.Id, jsonText)
 	if err != nil {
@@ -156,11 +207,10 @@ func (s *SqliteStore) CreateRecord(ctx context.Context, r *pb.CollectionRecord) 
 	}
 	defer tx.Rollback()
 
-	// Build query based on whether vector column exists
 	var query string
 	var args []interface{}
 	if s.options.EnableVector {
-		query = `INSERT INTO records (id, proto_data, data_uri, created_at, updated_at, labels, jsontext, vector) 
+		query = `INSERT INTO records (id, proto_data, data_uri, created_at, updated_at, labels, jsontext, vector)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
 		args = []interface{}{
 			r.Id,
@@ -173,7 +223,7 @@ func (s *SqliteStore) CreateRecord(ctx context.Context, r *pb.CollectionRecord) 
 			vectorBlob,
 		}
 	} else {
-		query = `INSERT INTO records (id, proto_data, data_uri, created_at, updated_at, labels, jsontext) 
+		query = `INSERT INTO records (id, proto_data, data_uri, created_at, updated_at, labels, jsontext)
                  VALUES (?, ?, ?, ?, ?, ?, ?)`
 		args = []interface{}{
 			r.Id,
@@ -190,13 +240,25 @@ func (s *SqliteStore) CreateRecord(ctx context.Context, r *pb.CollectionRecord) 
 		return err
 	}
 
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	// Now insert into vec0 table via the CGo connection.
+	// This needs to happen after commit so vecDB can see the rowid.
 	if s.options.EnableVector && len(rawVector) > 0 {
-		if err := s.upsertVecTable(ctx, tx, r.Id, rawVector); err != nil {
-			return fmt.Errorf("update vector index: %w", err)
+		id := r.Id
+		vec := rawVector
+		err := retryVecOperation(ctx, 3, func() error {
+			return s.upsertVecTable(ctx, nil, id, vec)
+		})
+		if err != nil {
+			// The record will work for non-vector queries; vector can be rebuilt via ReIndex
+			log.Printf("Warning: failed to index vector for record %s after retries: %v", id, err)
 		}
 	}
 
-	return tx.Commit()
+	return nil
 }
 
 func (s *SqliteStore) GetRecord(ctx context.Context, id string) (*pb.CollectionRecord, error) {
@@ -294,40 +356,52 @@ func (s *SqliteStore) UpdateRecord(ctx context.Context, r *pb.CollectionRecord) 
 		return fmt.Errorf("record not found")
 	}
 
-	if len(rawVector) > 0 {
-		if err := s.upsertVecTable(ctx, tx, r.Id, rawVector); err != nil {
-			return fmt.Errorf("update vector index: %w", err)
-		}
-	} else {
-		if err := s.deleteVecEntry(ctx, tx, r.Id); err != nil {
-			return fmt.Errorf("clear vector index: %w", err)
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	if s.options.EnableVector {
+		id := r.Id
+		if len(rawVector) > 0 {
+			vec := rawVector
+			err := retryVecOperation(ctx, 3, func() error {
+				return s.upsertVecTable(ctx, nil, id, vec)
+			})
+			if err != nil {
+				// The record will work for non-vector queries; vector can be rebuilt via ReIndex
+				log.Printf("Warning: failed to update vector index for record %s after retries: %v", id, err)
+			}
+		} else {
+			err := retryVecOperation(ctx, 3, func() error {
+				return s.deleteVecEntry(ctx, nil, id)
+			})
+			if err != nil {
+				// Log but don't fail - orphaned vector entries are harmless
+				log.Printf("Warning: failed to clear vector index for record %s after retries: %v", id, err)
+			}
 		}
 	}
 
-	return tx.Commit()
+	return nil
 }
 
 func (s *SqliteStore) DeleteRecord(ctx context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
+	// Delete from vec0 first
 	if s.options.EnableVector {
-		if err := s.deleteVecEntry(ctx, tx, id); err != nil {
+		if err := s.deleteVecEntry(ctx, nil, id); err != nil {
 			return fmt.Errorf("delete vector index entry: %w", err)
 		}
 	}
 
-	if _, err := tx.ExecContext(ctx, "DELETE FROM records WHERE id=?", id); err != nil {
+	// Now delete from main records table
+	if _, err := s.db.ExecContext(ctx, "DELETE FROM records WHERE id=?", id); err != nil {
 		return err
 	}
 
-	return tx.Commit()
+	return nil
 }
 
 func (s *SqliteStore) ListRecords(ctx context.Context, offset, limit int) ([]*pb.CollectionRecord, error) {
@@ -429,28 +503,27 @@ func (s *SqliteStore) BackupOnline(ctx context.Context, destPath string, pagesBa
 		pagesBatchSize = 100 // Default: copy 100 pages at a time
 	}
 
-	// Open destination database
-	destDSN := fmt.Sprintf("file:%s?_journal_mode=WAL", destPath)
-	destDB, err := sql.Open("sqlite", destDSN)
+	// 1. Create a new SqliteStore at destPath to ensure proper schema initialization
+	backupStore, err := NewSqliteStore(destPath, s.options, s.embedder)
 	if err != nil {
-		return fmt.Errorf("failed to open destination db: %w", err)
+		return fmt.Errorf("failed to create backup store: %w", err)
 	}
-	defer destDB.Close()
+	defer backupStore.Close()
 
-	// Attach the destination database
-	attachQuery := fmt.Sprintf("ATTACH DATABASE '%s' AS backup", destPath)
-	if _, err := s.db.ExecContext(ctx, attachQuery); err != nil {
-		return fmt.Errorf("failed to attach backup db: %w", err)
+	// 2. Attach the source (original) database to the backupStore connection using a distinct alias
+	attachQuery := fmt.Sprintf("ATTACH DATABASE '%s' AS source", s.path)
+	if _, err := backupStore.db.ExecContext(ctx, attachQuery); err != nil {
+		return fmt.Errorf("failed to attach source db to backup store: %w", err)
 	}
-	defer s.db.Exec("DETACH DATABASE backup")
+	defer backupStore.db.Exec("DETACH DATABASE source")
 
-	// Get list of tables from main database
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT name FROM sqlite_master
-		WHERE type='table' AND name NOT LIKE 'sqlite_%'
+	// 3. Get list of tables from the source database
+	rows, err := backupStore.db.QueryContext(ctx, `
+		SELECT name FROM source.sqlite_master
+		WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'records_fts'
 	`)
 	if err != nil {
-		return fmt.Errorf("failed to list tables: %w", err)
+		return fmt.Errorf("failed to list tables from source db: %w", err)
 	}
 	defer rows.Close()
 
@@ -463,45 +536,20 @@ func (s *SqliteStore) BackupOnline(ctx context.Context, destPath string, pagesBa
 		tables = append(tables, name)
 	}
 
-	// Copy each table
+	// 4. Copy data from each table from source to backupStore's main database
 	for _, table := range tables {
-		// Get table schema
-		var sql string
-		err := s.db.QueryRowContext(ctx,
-			"SELECT sql FROM sqlite_master WHERE type='table' AND name=?",
-			table).Scan(&sql)
-		if err != nil {
-			return fmt.Errorf("failed to get schema for %s: %w", table, err)
-		}
-
-		// Create table in backup
-		if _, err := destDB.ExecContext(ctx, sql); err != nil {
-			// Table might already exist, continue
-		}
-
-		// Copy data in batches (for large tables)
-		copyQuery := fmt.Sprintf("INSERT INTO backup.%s SELECT * FROM main.%s", table, table)
-		if _, err := s.db.ExecContext(ctx, copyQuery); err != nil {
+		copyQuery := fmt.Sprintf("INSERT INTO %s SELECT * FROM source.%s", table, table)
+		if _, err := backupStore.db.ExecContext(ctx, copyQuery); err != nil {
 			return fmt.Errorf("failed to copy table %s: %w", table, err)
 		}
 	}
 
-	// Copy indices
-	idxRows, err := s.db.QueryContext(ctx, `
-		SELECT sql FROM sqlite_master
-		WHERE type='index' AND sql IS NOT NULL AND name NOT LIKE 'sqlite_%'
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to list indices: %w", err)
-	}
-	defer idxRows.Close()
-
-	for idxRows.Next() {
-		var sql string
-		if err := idxRows.Scan(&sql); err != nil {
-			continue
+	// 5. Explicitly copy FTS data if enabled
+	if s.options.EnableFTS {
+		ftsCopyQuery := "INSERT INTO records_fts(rowid, content) SELECT rowid, content FROM source.records_fts"
+		if _, err := backupStore.db.ExecContext(ctx, ftsCopyQuery); err != nil {
+			return fmt.Errorf("failed to copy FTS data: %w", err)
 		}
-		destDB.ExecContext(ctx, sql) // Ignore errors, index might exist
 	}
 
 	return nil

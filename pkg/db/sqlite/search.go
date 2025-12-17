@@ -19,7 +19,6 @@ type execContext interface {
 	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
 }
 
-// Search routes queries to either the vector-backed path or the scalar/FTS path.
 func (s *SqliteStore) Search(ctx context.Context, q *collection.SearchQuery) ([]*collection.SearchResult, error) {
 	if len(q.Vector) > 0 && s.options.EnableVector {
 		return s.searchWithVectorIndex(ctx, q)
@@ -143,6 +142,9 @@ func (s *SqliteStore) Search(ctx context.Context, q *collection.SearchQuery) ([]
 }
 
 func (s *SqliteStore) searchWithVectorIndex(ctx context.Context, q *collection.SearchQuery) ([]*collection.SearchResult, error) {
+	if s.vecDB == nil {
+		return nil, fmt.Errorf("vector search not available: vecDB not initialized")
+	}
 	if len(q.Vector) != s.options.VectorDimensions {
 		return nil, fmt.Errorf("query vector dimension mismatch: got %d, expected %d", len(q.Vector), s.options.VectorDimensions)
 	}
@@ -152,11 +154,18 @@ func (s *SqliteStore) searchWithVectorIndex(ctx context.Context, q *collection.S
 	var args []interface{}
 	var whereClauses []string
 
+	limit := q.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+
 	query.WriteString(`SELECT r.id, r.proto_data, r.data_uri, r.created_at, r.updated_at, r.labels, v.distance `)
 	query.WriteString(`FROM records_vec v JOIN records r ON r.rowid = v.rowid `)
 
 	whereClauses = append(whereClauses, `v.vector MATCH ?`)
 	args = append(args, vectorLiteral)
+	whereClauses = append(whereClauses, `k = ?`)
+	args = append(args, limit)
 
 	if q.FullText != "" {
 		whereClauses = append(whereClauses, `records_fts MATCH ?`)
@@ -206,19 +215,12 @@ func (s *SqliteStore) searchWithVectorIndex(ctx context.Context, q *collection.S
 		query.WriteString(" ORDER BY v.distance")
 	}
 
-	limit := q.Limit
-	if limit <= 0 {
-		limit = 50
-	}
-	query.WriteString(" LIMIT ?")
-	args = append(args, limit)
-
 	if q.Offset > 0 {
 		query.WriteString(" OFFSET ?")
 		args = append(args, q.Offset)
 	}
 
-	rows, err := s.db.QueryContext(ctx, query.String(), args...)
+	rows, err := s.vecDB.QueryContext(ctx, query.String(), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -271,18 +273,26 @@ func formatVectorLiteral(v []float32) string {
 	return "[" + strings.Join(parts, ",") + "]"
 }
 
-func (s *SqliteStore) upsertVecTable(ctx context.Context, exec execContext, id string, vector []float32) error {
+func (s *SqliteStore) upsertVecTable(ctx context.Context, _ execContext, id string, vector []float32) error {
+	if s.vecDB == nil {
+		return fmt.Errorf("vector operations not available: vecDB not initialized")
+	}
 	if len(vector) != s.options.VectorDimensions {
 		return fmt.Errorf("vector dimension mismatch: got %d, expected %d", len(vector), s.options.VectorDimensions)
 	}
 
 	literal := formatVectorLiteral(vector)
-	_, err := exec.ExecContext(ctx, `INSERT OR REPLACE INTO records_vec(rowid, vector) SELECT rowid, ? FROM records WHERE id = ?`, literal, id)
+
+	_, _ = s.vecDB.ExecContext(ctx, `DELETE FROM records_vec WHERE rowid IN (SELECT rowid FROM records WHERE id = ?)`, id)
+	_, err := s.vecDB.ExecContext(ctx, `INSERT INTO records_vec(rowid, vector) SELECT rowid, ? FROM records WHERE id = ?`, literal, id)
 	return err
 }
 
-func (s *SqliteStore) deleteVecEntry(ctx context.Context, exec execContext, id string) error {
-	_, err := exec.ExecContext(ctx, `DELETE FROM records_vec WHERE rowid IN (SELECT rowid FROM records WHERE id = ?)`, id)
+func (s *SqliteStore) deleteVecEntry(ctx context.Context, _ execContext, id string) error {
+	if s.vecDB == nil {
+		return fmt.Errorf("vector operations not available: vecDB not initialized")
+	}
+	_, err := s.vecDB.ExecContext(ctx, `DELETE FROM records_vec WHERE rowid IN (SELECT rowid FROM records WHERE id = ?)`, id)
 	return err
 }
 
@@ -339,7 +349,6 @@ func serializeVector(v []float32) ([]byte, error) {
 		return nil, fmt.Errorf("failed to write dimension count: %w", err)
 	}
 
-	// Write float32 array
 	if err := binary.Write(buf, binary.LittleEndian, v); err != nil {
 		return nil, fmt.Errorf("failed to write vector data: %w", err)
 	}
@@ -377,6 +386,10 @@ func deserializeVector(blob []byte) ([]float32, error) {
 }
 
 func (s *SqliteStore) rebuildVectorIndex(ctx context.Context, tx *sql.Tx) error {
+	if s.vecDB == nil {
+		return fmt.Errorf("vector operations not available: vecDB not initialized")
+	}
+
 	// sqlite-vec (vec0) does not build a separate ANN structure yet; this simply
 	// refreshes stored vectors and keeps the vec0 table in sync with records.
 	rows, err := tx.QueryContext(ctx, "SELECT id, jsontext FROM records WHERE jsontext IS NOT NULL")
@@ -385,7 +398,7 @@ func (s *SqliteStore) rebuildVectorIndex(ctx context.Context, tx *sql.Tx) error 
 	}
 	defer rows.Close()
 
-	if _, err := tx.ExecContext(ctx, "DELETE FROM records_vec"); err != nil {
+	if _, err := s.vecDB.ExecContext(ctx, "DELETE FROM records_vec"); err != nil {
 		return fmt.Errorf("reset vector index: %w", err)
 	}
 
