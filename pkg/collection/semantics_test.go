@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,8 +26,11 @@ func setupTestCollectionWithVector(t *testing.T) (*collection.Collection, collec
 	// Create a temporary directory for this test run
 	tempDir := t.TempDir()
 
-	if !vectorExtensionAvailable(t) {
-		t.Errorf("SQLite vector extension (vec0) not available; skipping vector index tests")
+	if available, reason := checkVectorExtension(t); !available {
+		if reason == "skip" {
+			t.Skip("CGo not enabled; skipping vector search tests")
+		}
+		t.Fatalf("Vector extension check failed: %s", reason)
 	}
 
 	// Initialize the REAL SQLite Store with vector support
@@ -654,38 +658,28 @@ func TestSemanticEngine_VectorIndexPopulated(t *testing.T) {
 	}
 }
 
-func vectorExtensionAvailable(t *testing.T) bool {
+func checkVectorExtension(t *testing.T) (available bool, reason string) {
 	t.Helper()
 
 	// Get the extension path
 	path := os.Getenv("SQLITE_VEC_EXTENSION")
 	if path == "" {
-		if _, err := os.Getwd(); err == nil {
-				cwd, err := os.Getwd()
-		if err != nil {
-			path = ""
-		}
-
-		dir := cwd
-		for {
-			candidate := filepath.Join(dir, "sqlite-vec", "vec0.so")
-			if _, err := os.Stat(candidate); err == nil {
-				path = candidate
+		cwd, err := os.Getwd()
+		if err == nil {
+			dir := cwd
+			for {
+				candidate := filepath.Join(dir, "sqlite-vec", "vec0.so")
+				if _, err := os.Stat(candidate); err == nil {
+					path = candidate
+					break
+				}
+				parent := filepath.Dir(dir)
+				if parent == dir {
+					break
+				}
+				dir = parent
 			}
-
-			parent := filepath.Dir(dir)
-			if parent == dir {
-				break
-			}
-			dir = parent
 		}
-		}
-	}
-
-	// Check if the extension file exists
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		t.Logf("sqlite-vec extension not found at %s", path)
-		return false
 	}
 
 	// Try to open with our CGo driver
@@ -693,18 +687,18 @@ func vectorExtensionAvailable(t *testing.T) bool {
 	tempFile := t.TempDir() + "/vec_test.db"
 	vecDB, err := sqliteext.Open(ctx, tempFile, path, "sqlite3_vec_init")
 	if err != nil {
-		t.Logf("failed to open vec db: %v", err)
-		return false
+		if strings.Contains(err.Error(), "CGo") {
+			return false, "skip"
+		}
+		return false, fmt.Sprintf("failed to load vector extension: %v", err)
 	}
 	defer vecDB.Close()
 
-	// Verify the extension is loaded by checking vector_version()
 	rows, err := vecDB.QueryContext(ctx, "SELECT vec_version()")
 	if err != nil {
-		t.Logf("vec_version check failed: %v", err)
-		return false
+		return false, fmt.Sprintf("vec_version check failed: %v", err)
 	}
 	defer rows.Close()
 
-	return true
+	return true, ""
 }
