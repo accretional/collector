@@ -10,23 +10,52 @@ import (
 
 	pb "github.com/accretional/collector/gen/collector"
 	"github.com/accretional/collector/pkg/collection"
+	"github.com/accretional/collector/pkg/db/sqlite/ext"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	_ "modernc.org/sqlite" // Using modernc.org/sqlite (cgo-free)
 )
 
+// ExtensionConfig specifies an extension to load.
+// This type is used internally by the sqlite package and by the db factory.
+type ExtensionConfig struct {
+	Path       string
+	EntryPoint string
+	Required   bool
+}
+
 type SqliteStore struct {
 	db      *sql.DB
 	path    string
 	options collection.Options
+	driver  string // "sqlite" (pure Go) or "sqliteext" (CGo with extensions)
 	mu      sync.RWMutex
 }
 
 // NewSqliteStore initializes the database and applies schemas.
+// This is a convenience function that calls NewSqliteStoreWithExtensions with no extensions.
+// For extension support, use NewSqliteStoreWithExtensions or the db.NewStore factory.
 func NewSqliteStore(path string, opts collection.Options) (*SqliteStore, error) {
-	// WAL mode + busy_timeout are critical for concurrent access.
+	return NewSqliteStoreWithExtensions(context.Background(), path, opts, nil)
+}
+
+// NewSqliteStoreWithExtensions creates a SQLite store with optional extension support.
+// This is used by the factory when extensions are specified.
+// If extensions are provided, it uses the CGo driver (sqliteext); otherwise uses pure Go driver.
+func NewSqliteStoreWithExtensions(ctx context.Context, path string, opts collection.Options, extensions []ExtensionConfig) (*SqliteStore, error) {
+	// Determine which driver to use
+	useCGo := len(extensions) > 0 || opts.EnableVector
+
+	var driverName string
+	if useCGo {
+		driverName = "sqliteext"
+	} else {
+		driverName = "sqlite"
+	}
+
+	// Open database with appropriate driver
 	dsn := fmt.Sprintf("file:%s?_journal_mode=WAL&_busy_timeout=10000", path)
-	db, err := sql.Open("sqlite", dsn)
+	db, err := sql.Open(driverName, dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open db: %w", err)
 	}
@@ -51,7 +80,7 @@ func NewSqliteStore(path string, opts collection.Options) (*SqliteStore, error) 
 
 	if opts.EnableJSON {
 		if _, err := db.Exec(collection.JSONSchema); err != nil {
-			// Ignore error if column already exists, or handle strictly
+			// Ignore error if column already exists
 		}
 	}
 
@@ -92,11 +121,68 @@ func NewSqliteStore(path string, opts collection.Options) (*SqliteStore, error) 
 		}
 	}
 
-	return &SqliteStore{db: db, path: path, options: opts}, nil
+	store := &SqliteStore{
+		db:      db,
+		path:    path,
+		options: opts,
+		driver:  driverName,
+	}
+
+	// Load extensions if specified
+	if len(extensions) > 0 && driverName == "sqliteext" {
+		if err := loadExtensions(ctx, db, extensions); err != nil {
+			db.Close()
+			return nil, err
+		}
+	}
+
+	return store, nil
+}
+
+// loadExtensions loads SQLite extensions using the CGo driver.
+func loadExtensions(ctx context.Context, db *sql.DB, extensions []ExtensionConfig) error {
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get connection for extension loading: %w", err)
+	}
+	defer conn.Close()
+
+	for _, extCfg := range extensions {
+		err := conn.Raw(func(driverConn any) error {
+			c, ok := driverConn.(*ext.Conn)
+			if !ok {
+				return fmt.Errorf("unexpected connection type: %T (extensions require CGo driver)", driverConn)
+			}
+			return c.LoadExtension(extCfg.Path, extCfg.EntryPoint)
+		})
+
+		if err != nil {
+			if extCfg.Required {
+				return fmt.Errorf("failed to load required extension %s: %w", extCfg.Path, err)
+			}
+			// Extension not required, continue
+		}
+	}
+
+	return nil
 }
 
 func (s *SqliteStore) Close() error { return s.db.Close() }
 func (s *SqliteStore) Path() string { return s.path }
+
+func (s *SqliteStore) Supports(feature string) bool {
+	switch feature {
+	case "vector":
+		// Vector support requires both EnableVector option AND CGo driver
+		return s.options.EnableVector && s.driver == "sqliteext"
+	case "fts":
+		return s.options.EnableFTS
+	case "json":
+		return s.options.EnableJSON
+	default:
+		return false
+	}
+}
 
 func (s *SqliteStore) CreateRecord(ctx context.Context, r *pb.CollectionRecord) error {
 	s.mu.Lock()
