@@ -13,6 +13,13 @@ import (
 // DB is a stub for builds without CGo support.
 type DB struct{}
 
+// Conn is a stub for builds without CGo support.
+type Conn struct{}
+
+func (c *Conn) LoadExtension(path, entryPoint string) error {
+	return fmt.Errorf("extension loading requires CGo build: use 'go build' with CGO_ENABLED=1")
+}
+
 func Open(ctx context.Context, dbPath, extensionPath, entryPoint string) (*DB, error) {
 	return nil, fmt.Errorf("extension loading requires CGo build: use 'go build' with CGO_ENABLED=1")
 }
