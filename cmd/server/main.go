@@ -15,7 +15,7 @@ import (
 
 	pb "github.com/accretional/collector/gen/collector"
 	"github.com/accretional/collector/pkg/collection"
-	"github.com/accretional/collector/pkg/db/sqlite"
+	"github.com/accretional/collector/pkg/db"
 	"github.com/accretional/collector/pkg/dispatch"
 	"github.com/accretional/collector/pkg/registry"
 	"google.golang.org/grpc"
@@ -58,7 +58,10 @@ func run() error {
 
 	// Registry protos collection
 	protosDBPath := filepath.Join(registryPath, "protos.db")
-	protosStore, err := sqlite.NewSqliteStore(protosDBPath, collection.Options{EnableJSON: true})
+	protosStore, err := db.NewStore(ctx, db.StoreConfig{
+		Path:    protosDBPath,
+		Options: collection.Options{EnableJSON: true},
+	})
 	if err != nil {
 		return fmt.Errorf("init protos store: %w", err)
 	}
@@ -75,7 +78,10 @@ func run() error {
 
 	// Registry services collection
 	servicesDBPath := filepath.Join(registryPath, "services.db")
-	servicesStore, err := sqlite.NewSqliteStore(servicesDBPath, collection.Options{EnableJSON: true})
+	servicesStore, err := db.NewStore(ctx, db.StoreConfig{
+		Path:    servicesDBPath,
+		Options: collection.Options{EnableJSON: true},
+	})
 	if err != nil {
 		return fmt.Errorf("init services store: %w", err)
 	}
@@ -120,7 +126,10 @@ func run() error {
 	}
 
 	repoDBPath := filepath.Join(repoPath, "collections.db")
-	repoStore, err := sqlite.NewSqliteStore(repoDBPath, collection.Options{EnableJSON: true})
+	repoStore, err := db.NewStore(ctx, db.StoreConfig{
+		Path:    repoDBPath,
+		Options: collection.Options{EnableJSON: true},
+	})
 	if err != nil {
 		return fmt.Errorf("init repo store: %w", err)
 	}
