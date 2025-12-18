@@ -32,17 +32,8 @@ type SqliteStore struct {
 	mu      sync.RWMutex
 }
 
-// NewSqliteStore initializes the database and applies schemas.
-// This is a convenience function that calls NewSqliteStoreWithExtensions with no extensions.
-// For extension support, use NewSqliteStoreWithExtensions or the db.NewStore factory.
-func NewSqliteStore(path string, opts collection.Options) (*SqliteStore, error) {
-	return NewSqliteStoreWithExtensions(context.Background(), path, opts, nil)
-}
-
-// NewSqliteStoreWithExtensions creates a SQLite store with optional extension support.
-// This is used by the factory when extensions are specified.
-// If extensions are provided, it uses the CGo driver (sqliteext); otherwise uses pure Go driver.
-func NewSqliteStoreWithExtensions(ctx context.Context, path string, opts collection.Options, extensions []ExtensionConfig) (*SqliteStore, error) {
+// NewSqliteStore creates a SQLite store with optional extension support.
+func NewSqliteStore(ctx context.Context, path string, opts collection.Options, extensions []ExtensionConfig) (*SqliteStore, error) {
 	// Determine which driver to use
 	useCGo := len(extensions) > 0 || opts.EnableVector
 
