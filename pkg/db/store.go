@@ -59,13 +59,20 @@ func newSqliteStore(ctx context.Context, config StoreConfig) (collection.Store, 
 
 	store, err := sqlite.NewSqliteStore(ctx, config.Path, config.Options, extensions)
 	if err != nil {
-		if strings.Contains(err.Error(), "failed to load required extension") {
+		errStr := err.Error()
+		if strings.Contains(errStr, "failed to load required extension") {
 			for _, ext := range config.Extensions {
-				if strings.Contains(err.Error(), ext.Path) {
+				if ext.Required && strings.Contains(errStr, ext.Path) {
 					return nil, &ExtensionError{
 						Extension: ext.Path,
 						Cause:     err,
 					}
+				}
+			}
+			if strings.Contains(errStr, "extension") {
+				return nil, &ExtensionError{
+					Extension: "unknown",
+					Cause:     err,
 				}
 			}
 		}

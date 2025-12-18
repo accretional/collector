@@ -11,7 +11,7 @@ type Combinator struct{}
 // Attach links a secondary collection to the primary one using SQLite's ATTACH DATABASE.
 func (c *Combinator) Attach(ctx context.Context, primary *Collection, secondaryPath string, alias string) error {
 	query := fmt.Sprintf("ATTACH DATABASE '%s' AS %s", secondaryPath, alias)
-	return primary.Store.ExecuteRaw(query)
+	return primary.Store.ExecuteRaw(ctx, query)
 }
 
 // UnionView creates a virtual view over attached collections.
@@ -24,6 +24,6 @@ func (c *Combinator) UnionView(ctx context.Context, primary *Collection, viewNam
 
 	// Union query
 	// query := fmt.Sprintf("CREATE VIEW %s AS %s", viewName, strings.Join(selects, " UNION ALL "))
-	// return primary.Store.ExecuteRaw(query)
+	// return primary.Store.ExecuteRaw(ctx, query)
 	return nil
 }

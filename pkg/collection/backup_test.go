@@ -103,9 +103,14 @@ func (m *mockStore) Backup(ctx context.Context, destPath string) error {
 	return err
 }
 
-func (m *mockStore) ExecuteRaw(query string, args ...interface{}) error {
-	_, err := m.db.Exec(query, args...)
+func (m *mockStore) ExecuteRaw(ctx context.Context, query string, args ...interface{}) error {
+	_, err := m.db.ExecContext(ctx, query, args...)
 	return err
+}
+
+func (m *mockStore) Supports(feature string) bool {
+	// Mock store supports all features for testing
+	return true
 }
 
 // TestBackupCollection_Simple tests basic backup functionality

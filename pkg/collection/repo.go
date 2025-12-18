@@ -37,7 +37,7 @@ type Store interface {
 
 	// ExecuteRaw allows lower-level operations required for advanced features
 	// like backup (VACUUM INTO) or combination (ATTACH DATABASE).
-	ExecuteRaw(query string, args ...interface{}) error
+	ExecuteRaw(ctx context.Context, query string, args ...interface{}) error
 
 	// Supports returns true if the store supports the given feature (vector, fts, json).
 	Supports(feature string) bool

@@ -52,7 +52,7 @@ func (t *SqliteTransport) CloneFallback(ctx context.Context, c *Collection, dest
 	// Use VACUUM INTO for consistent snapshot
 	// This creates a complete copy but acquires locks during the operation
 	query := fmt.Sprintf("VACUUM INTO '%s'", destPath)
-	if err := c.Store.ExecuteRaw(query); err != nil {
+	if err := c.Store.ExecuteRaw(ctx, query); err != nil {
 		return fmt.Errorf("failed to clone database: %w", err)
 	}
 

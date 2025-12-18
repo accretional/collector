@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 
@@ -182,7 +183,10 @@ func (s *SqliteStore) CreateRecord(ctx context.Context, r *pb.CollectionRecord) 
 	query := `INSERT INTO records (id, proto_data, data_uri, created_at, updated_at, labels, jsontext) 
               VALUES (?, ?, ?, ?, ?, ?, ?)`
 
-	labelsJSON, _ := json.Marshal(r.Metadata.Labels)
+	labelsJSON, err := json.Marshal(r.Metadata.Labels)
+	if err != nil {
+		return fmt.Errorf("failed to marshal labels: %w", err)
+	}
 
 	// If proto_data is valid JSON, use it for jsontext. Otherwise, use a default.
 	var jsonText string
@@ -192,7 +196,7 @@ func (s *SqliteStore) CreateRecord(ctx context.Context, r *pb.CollectionRecord) 
 		jsonText = "{}"
 	}
 
-	_, err := s.db.ExecContext(ctx, query,
+	_, err = s.db.ExecContext(ctx, query,
 		r.Id,
 		r.ProtoData,
 		r.DataUri,
@@ -235,7 +239,9 @@ func (s *SqliteStore) GetRecord(ctx context.Context, id string) (*pb.CollectionR
 		r.DataUri = dataUri.String
 	}
 	if labelsJSON != "" {
-		json.Unmarshal([]byte(labelsJSON), &r.Metadata.Labels)
+		if err := json.Unmarshal([]byte(labelsJSON), &r.Metadata.Labels); err != nil {
+			log.Printf("Warning: failed to unmarshal labels for record %s: %v", id, err)
+		}
 	}
 
 	return r, nil
@@ -252,7 +258,10 @@ func (s *SqliteStore) UpdateRecord(ctx context.Context, r *pb.CollectionRecord) 
 	defer tx.Rollback()
 
 	query := `UPDATE records SET proto_data=?, updated_at=?, labels=?, jsontext=? WHERE id=?`
-	labelsJSON, _ := json.Marshal(r.Metadata.Labels)
+	labelsJSON, err := json.Marshal(r.Metadata.Labels)
+	if err != nil {
+		return fmt.Errorf("failed to marshal labels: %w", err)
+	}
 
 	var jsonText string
 	if json.Valid(r.ProtoData) {
@@ -272,7 +281,10 @@ func (s *SqliteStore) UpdateRecord(ctx context.Context, r *pb.CollectionRecord) 
 		return err
 	}
 
-	rows, _ := res.RowsAffected()
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
 	if rows == 0 {
 		return fmt.Errorf("record not found")
 	}
@@ -307,7 +319,9 @@ func (s *SqliteStore) ListRecords(ctx context.Context, offset, limit int) ([]*pb
 			lJSON            string
 		)
 
-		rows.Scan(&r.Id, &r.ProtoData, &dUri, &created, &updated, &lJSON)
+		if err := rows.Scan(&r.Id, &r.ProtoData, &dUri, &created, &updated, &lJSON); err != nil {
+			return nil, fmt.Errorf("failed to scan record: %w", err)
+		}
 
 		r.Metadata = &pb.Metadata{
 			CreatedAt: &timestamppb.Timestamp{Seconds: created},
@@ -317,7 +331,9 @@ func (s *SqliteStore) ListRecords(ctx context.Context, offset, limit int) ([]*pb
 			r.DataUri = dUri.String
 		}
 		if lJSON != "" {
-			json.Unmarshal([]byte(lJSON), &r.Metadata.Labels)
+			if err := json.Unmarshal([]byte(lJSON), &r.Metadata.Labels); err != nil {
+				log.Printf("Warning: failed to unmarshal labels for record %s: %v", r.Id, err)
+			}
 		}
 
 		items = append(items, &r)
@@ -434,8 +450,8 @@ func (s *SqliteStore) Checkpoint(ctx context.Context) error {
 	return err
 }
 
-func (s *SqliteStore) ExecuteRaw(q string, args ...interface{}) error {
-	_, err := s.db.Exec(q, args...)
+func (s *SqliteStore) ExecuteRaw(ctx context.Context, q string, args ...interface{}) error {
+	_, err := s.db.ExecContext(ctx, q, args...)
 	return err
 }
 
@@ -467,7 +483,7 @@ func (s *SqliteStore) Backup(ctx context.Context, destPath string) error {
 	// Use VACUUM INTO for the backup - this creates a consistent snapshot
 	// Even with WAL mode, VACUUM INTO creates a complete consistent copy
 	query := fmt.Sprintf("VACUUM INTO '%s'", destPath)
-	if err := s.ExecuteRaw(query); err != nil {
+	if err := s.ExecuteRaw(ctx, query); err != nil {
 		return fmt.Errorf("backup failed: %w", err)
 	}
 
@@ -498,7 +514,11 @@ func (s *SqliteStore) BackupOnline(ctx context.Context, destPath string, pagesBa
 	if _, err := s.db.ExecContext(ctx, attachQuery); err != nil {
 		return fmt.Errorf("failed to attach backup db: %w", err)
 	}
-	defer s.db.Exec("DETACH DATABASE backup")
+	defer func() {
+		if _, err := s.db.Exec("DETACH DATABASE backup"); err != nil {
+			log.Printf("Warning: failed to detach backup database: %v", err)
+		}
+	}()
 
 	// Get list of tables from main database
 	rows, err := s.db.QueryContext(ctx, `
