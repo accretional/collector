@@ -112,14 +112,18 @@ service CollectionService {
 ```go
 import (
     "github.com/accretional/collector/pkg/collection"
-    "github.com/accretional/collector/pkg/db/sqlite"
+    "github.com/accretional/collector/pkg/db"
     pb "github.com/accretional/collector/gen/collector"
 )
 
-// Create SQLite store
-store, err := sqlite.NewSqliteStore("./data/users.db", collection.Options{
-    EnableJSON: true,  // Enable JSONB indexing
-    EnableFTS:  true,  // Enable full-text search
+// Create SQLite store using factory
+ctx := context.Background()
+store, err := db.NewStore(ctx, db.StoreConfig{
+    Path: "./data/users.db",
+    Options: collection.Options{
+        EnableJSON: true,  // Enable JSONB indexing
+        EnableFTS:  true,  // Enable full-text search
+    },
 })
 
 // Create collection
@@ -545,7 +549,11 @@ options := collection.Options{
     CacheSize:  10000,  // SQLite cache size in pages
 }
 
-store, err := sqlite.NewSqliteStore(dbPath, options)
+ctx := context.Background()
+store, err := db.NewStore(ctx, db.StoreConfig{
+    Path:    dbPath,
+    Options: options,
+})
 ```
 
 ## Performance Considerations

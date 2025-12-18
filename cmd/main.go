@@ -9,7 +9,7 @@ import (
 
 	pb "github.com/accretional/collector/gen/collector"
 	"github.com/accretional/collector/pkg/collection"
-	"github.com/accretional/collector/pkg/db/sqlite"
+	"github.com/accretional/collector/pkg/db"
 )
 
 func main() {
@@ -48,7 +48,10 @@ func run() error {
 		EnableFTS:  true,
 		EnableJSON: true,
 	}
-	store, err := sqlite.NewSqliteStore(dbPath, storeOpts)
+	store, err := db.NewStore(ctx, db.StoreConfig{
+		Path:    dbPath,
+		Options: storeOpts,
+	})
 	if err != nil {
 		return fmt.Errorf("init sqlite: %w", err)
 	}

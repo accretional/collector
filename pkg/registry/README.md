@@ -391,8 +391,15 @@ func main() {
     // 1. Setup Registry Collections
     // ================================================================
 
-    protosStore, _ := sqlite.NewSqliteStore("./data/protos.db", collection.Options{EnableJSON: true})
-    servicesStore, _ := sqlite.NewSqliteStore("./data/services.db", collection.Options{EnableJSON: true})
+    ctx := context.Background()
+    protosStore, _ := db.NewStore(ctx, db.StoreConfig{
+        Path:    "./data/protos.db",
+        Options: collection.Options{EnableJSON: true},
+    })
+    servicesStore, _ := db.NewStore(ctx, db.StoreConfig{
+        Path:    "./data/services.db",
+        Options: collection.Options{EnableJSON: true},
+    })
 
     registeredProtos, _ := collection.NewCollection(
         &pb.Collection{Namespace: "system", Name: "registered_protos"},
