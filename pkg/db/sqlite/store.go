@@ -26,28 +26,18 @@ type ExtensionConfig struct {
 }
 
 type SqliteStore struct {
-	db      *sql.DB
-	path    string
-	options collection.Options
-	driver  string // "sqlite" (pure Go) or "sqliteext" (CGo with extensions)
-	mu      sync.RWMutex
+	db       *sql.DB // Pure Go connection - used for all regular operations
+	vectorDB *sql.DB // CGo connection - only used for vector search (nil if not needed)
+	path     string
+	options  collection.Options
+	mu       sync.RWMutex
 }
 
 // NewSqliteStore creates a SQLite store with optional extension support.
+// Uses hybrid model: pure Go driver for regular operations, CGo driver only for vector search.
 func NewSqliteStore(ctx context.Context, path string, opts collection.Options, extensions []ExtensionConfig) (*SqliteStore, error) {
-	// Determine which driver to use
-	useCGo := len(extensions) > 0 || opts.EnableVector
-
-	var driverName string
-	if useCGo {
-		driverName = "sqliteext"
-	} else {
-		driverName = "sqlite"
-	}
-
-	// Open database with appropriate driver
 	dsn := fmt.Sprintf("file:%s?_journal_mode=WAL&_busy_timeout=10000", path)
-	db, err := sql.Open(driverName, dsn)
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open db: %w", err)
 	}
@@ -117,12 +107,34 @@ func NewSqliteStore(ctx context.Context, path string, opts collection.Options, e
 		db:      db,
 		path:    path,
 		options: opts,
-		driver:  driverName,
 	}
 
-	// Load extensions if specified
-	if len(extensions) > 0 && driverName == "sqliteext" {
-		if err := loadExtensions(ctx, db, extensions); err != nil {
+	// Open CGo connection only if extensions are provided
+	if len(extensions) > 0 {
+		vectorDB, err := sql.Open("sqliteext", dsn)
+		if err != nil {
+			if strings.Contains(err.Error(), "unknown driver") {
+				db.Close()
+				return nil, fmt.Errorf("CGo driver required but not available: extensions require CGo build. Error: %w", err)
+			}
+			db.Close()
+			return nil, fmt.Errorf("failed to open vector db: %w", err)
+		}
+
+		// Apply same pragmas to vector connection
+		for _, p := range pragmas {
+			if _, err := vectorDB.Exec(p); err != nil {
+				vectorDB.Close()
+				db.Close()
+				return nil, fmt.Errorf("pragma failed on vector db: %w", err)
+			}
+		}
+
+		store.vectorDB = vectorDB
+
+		// Load extensions on CGo connection
+		if err := loadExtensions(ctx, vectorDB, extensions); err != nil {
+			vectorDB.Close()
 			db.Close()
 			return nil, err
 		}
@@ -159,14 +171,28 @@ func loadExtensions(ctx context.Context, db *sql.DB, extensions []ExtensionConfi
 	return nil
 }
 
-func (s *SqliteStore) Close() error { return s.db.Close() }
+func (s *SqliteStore) Close() error {
+	var errs []error
+	if s.vectorDB != nil {
+		if err := s.vectorDB.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close vector db: %w", err))
+		}
+	}
+	if err := s.db.Close(); err != nil {
+		errs = append(errs, fmt.Errorf("close db: %w", err))
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("close errors: %v", errs)
+	}
+	return nil
+}
 func (s *SqliteStore) Path() string { return s.path }
 
 func (s *SqliteStore) Supports(feature string) bool {
 	switch feature {
 	case "vector":
-		// Vector support requires both EnableVector option AND CGo driver
-		return s.options.EnableVector && s.driver == "sqliteext"
+		// Vector support requires both EnableVector option AND CGo connection exists
+		return s.options.EnableVector && s.vectorDB != nil
 	case "fts":
 		return s.options.EnableFTS
 	case "json":
@@ -501,15 +527,8 @@ func (s *SqliteStore) BackupOnline(ctx context.Context, destPath string, pagesBa
 		pagesBatchSize = 100 // Default: copy 100 pages at a time
 	}
 
-	// Open destination database
-	destDSN := fmt.Sprintf("file:%s?_journal_mode=WAL", destPath)
-	destDB, err := sql.Open("sqlite", destDSN)
-	if err != nil {
-		return fmt.Errorf("failed to open destination db: %w", err)
-	}
-	defer destDB.Close()
-
-	// Attach the destination database
+	// Attach the destination database (SQLite will create the file if it doesn't exist)
+	// We use the same connection to avoid conflicts
 	attachQuery := fmt.Sprintf("ATTACH DATABASE '%s' AS backup", destPath)
 	if _, err := s.db.ExecContext(ctx, attachQuery); err != nil {
 		return fmt.Errorf("failed to attach backup db: %w", err)
@@ -519,6 +538,11 @@ func (s *SqliteStore) BackupOnline(ctx context.Context, destPath string, pagesBa
 			log.Printf("Warning: failed to detach backup database: %v", err)
 		}
 	}()
+
+	// Set WAL mode on the backup database
+	if _, err := s.db.ExecContext(ctx, "PRAGMA backup.journal_mode=WAL"); err != nil {
+		return fmt.Errorf("failed to set WAL mode on backup: %w", err)
+	}
 
 	// Get list of tables from main database
 	rows, err := s.db.QueryContext(ctx, `
@@ -550,8 +574,12 @@ func (s *SqliteStore) BackupOnline(ctx context.Context, destPath string, pagesBa
 			return fmt.Errorf("failed to get schema for %s: %w", table, err)
 		}
 
-		// Create table in backup
-		if _, err := destDB.ExecContext(ctx, sql); err != nil {
+		// Create table in backup database
+		backupSQL := strings.Replace(sql, fmt.Sprintf("CREATE TABLE %s", table), fmt.Sprintf("CREATE TABLE backup.%s", table), 1)
+		if !strings.Contains(backupSQL, "backup.") {
+			backupSQL = strings.Replace(sql, fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s", table), fmt.Sprintf("CREATE TABLE IF NOT EXISTS backup.%s", table), 1)
+		}
+		if _, err := s.db.ExecContext(ctx, backupSQL); err != nil {
 			// Table might already exist, continue
 		}
 
@@ -577,7 +605,10 @@ func (s *SqliteStore) BackupOnline(ctx context.Context, destPath string, pagesBa
 		if err := idxRows.Scan(&sql); err != nil {
 			continue
 		}
-		destDB.ExecContext(ctx, sql) // Ignore errors, index might exist
+		// Create index in backup database
+		backupSQL := strings.Replace(sql, "CREATE INDEX", "CREATE INDEX IF NOT EXISTS", 1)
+		backupSQL = strings.Replace(backupSQL, "ON ", "ON backup.", 1)
+		s.db.ExecContext(ctx, backupSQL) // Ignore errors, index might exist
 	}
 
 	return nil

@@ -122,25 +122,19 @@ func TestNewStore_WithVectorOption(t *testing.T) {
 		},
 	})
 	if err != nil {
-		// On systems without CGo, this will fail because the sqliteext driver isn't available
-		// This is expected behavior
-		if strings.Contains(err.Error(), "unknown driver") || strings.Contains(err.Error(), "sqliteext") {
-			t.Logf("NewStore with EnableVector failed (expected without CGo): %v", err)
-			return
-		}
-		t.Fatalf("NewStore failed with unexpected error: %v", err)
+		t.Fatalf("NewStore failed: %v", err)
 	}
 	defer store.Close()
 
-	// Vector support requires CGo driver, which may not be available on macOS
-	// So we just check that the store was created, not that vector is supported
 	if store == nil {
 		t.Fatal("NewStore returned nil store")
 	}
 
-	// On systems with CGo, this should be true
-	// On systems without CGo (like macOS), this will be false
-	_ = store.Supports(CapabilityVector)
+	// EnableVector without extensions should NOT support vector
+	// (no CGo connection opened, so vectorDB is nil)
+	if store.Supports(CapabilityVector) {
+		t.Error("store should not support vector without extensions, even if EnableVector is true")
+	}
 }
 
 func TestNewStore_WithExtensions(t *testing.T) {

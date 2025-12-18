@@ -1,10 +1,10 @@
 # Database Package
 
-The `db` package provides a factory pattern for creating database stores with support for multiple database backends, extension loading, and capability detection.
+The `db` package provides a factory pattern for creating database stores with support for multiple databases, extension loading and capability detection.
 
 ## Overview
 
-The database package abstracts database creation behind a unified factory interface (`db.NewStore()`), allowing the system to support multiple database types (currently SQLite, with PostgreSQL planned) while hiding implementation details from higher layers.
+The database package abstracts database creation behind a unified factory interface (`db.NewStore()`), hiding implementation details from higher layers. This architecture makes it easy to add new database backends in the future.
 
 ## Architecture
 
@@ -31,10 +31,11 @@ The database package abstracts database creation behind a unified factory interf
          │                 │
          ▼                 ▼
 ┌─────────────────┐  ┌──────────────────┐
-│  SQLite Store   │  │  PostgreSQL      │
-│                 │  │  (Future)        │
-│  • Pure Go      │  │                  │
-│  • CGo + Exts   │  │                  │
+│  SQLite Store   │  │  (Future types)  │
+│                 │  │                  │
+│  • Pure Go      │  │  • PostgreSQL    │
+│  • CGo + Exts   │  │  • MySQL         │
+│                 │  │  • etc.          │
 └─────────────────┘  └──────────────────┘
 ```
 
@@ -71,29 +72,29 @@ defer store.Close()
 
 `StoreConfig` allows you to configure:
 
-- **Type**: Database type (`"sqlite"` is default, PostgreSQL planned)
-- **Path**: Database file path (or connection string for future DBs)
+- **Type**: Database type (Default: `"sqlite"`)
+- **Path**: Database file path
 - **Options**: Feature flags (FTS, JSON, Vector)
-- **Extensions**: SQLite extensions to load (e.g., sqlite-vec)
+- **Extensions**: Extensions to load (e.g., sqlite-vec for vector search)
 
 ```go
 type StoreConfig struct {
-    Type       string              // "sqlite" (default)
-    Path       string              // Database path
-    Options    collection.Options  // Feature flags
-    Extensions []ExtensionConfig   // Extensions to load
+    Type       string
+    Path       string
+    Options    collection.Options
+    Extensions []ExtensionConfig
 }
 ```
 
 ### Extension Loading
 
-SQLite extensions (like `sqlite-vec` for vector search) can be loaded via the factory:
+SQLite extensions (like `sqlite-vec` for vector search) can be loaded via the factory. Extensions require a CGo connection, which is automatically opened when extensions are provided.
 
 ```go
 store, err := db.NewStore(ctx, db.StoreConfig{
     Path: "./data.db",
     Options: collection.Options{
-        EnableVector: true,  // Enables CGo driver
+        EnableVector: true,  // Capability flag (must be true for vector support)
     },
     Extensions: []db.ExtensionConfig{
         {
@@ -106,9 +107,10 @@ store, err := db.NewStore(ctx, db.StoreConfig{
 ```
 
 **Extension Behavior:**
-- **Required extensions**: Store creation fails if extension can't load
-- **Optional extensions**: Store is created, but capability is unavailable
-- **CGo requirement**: Extensions require the CGo driver (`sqliteext`), which is automatically selected when `EnableVector` is true or extensions are specified
+- **Required extensions** (`Required: true`): Store creation fails if extension can't load
+- **Optional extensions** (`Required: false`): Store is created, but the extension capability is unavailable
+- **CGo requirement**: Extensions require a CGo connection (`vectorDB`), which is automatically opened when extensions are provided
+- **EnableVector flag**: This is a capability flag only - it does NOT trigger CGo connection opening. Both `EnableVector: true` AND extensions are required for vector support
 
 ### Capability Detection
 
@@ -129,20 +131,35 @@ if store.Supports(db.CapabilityJSON) {
 ```
 
 **Capability Constants:**
-- `db.CapabilityVector` - Vector search support (requires CGo + extensions)
-- `db.CapabilityFTS` - Full-text search support
-- `db.CapabilityJSON` - JSONB operator support
+- `db.CapabilityVector` - Vector search support (requires CGo + extensions + EnableVector)
+- `db.CapabilityFTS` - Full-text search support (requires EnableFTS)
+- `db.CapabilityJSON` - JSONB operator support (requires EnableJSON)
 
-### Driver Selection
+## Hybrid Model: Pure Go + CGo
 
-The SQLite implementation automatically selects the appropriate driver:
+The SQLite implementation uses a **hybrid dual-connection architecture**:
 
-- **Pure Go driver** (`modernc.org/sqlite`): Used by default, no CGo required
-- **CGo driver** (`sqliteext`): Used when:
-  - `EnableVector` option is true, OR
-  - Extensions are specified
+- **Pure Go connection** (`modernc.org/sqlite`): 
+  - Always opened for all regular operations (CRUD, FTS, JSON)
+  - No CGo required - works on all platforms
+  - Fast compilation and deployment
+  
+- **CGo connection** (`sqliteext`): 
+  - Only opened when extensions are provided
+  - Used exclusively for vector search operations (when implemented)
+  - Extensions loaded only on this connection
 
-This selection is transparent to the caller - the factory handles it automatically.
+**Benefits:**
+- Most operations use pure Go (fast, portable)
+- CGo only when needed (lightweight, optional)
+- Works without CGo for 99% of use cases
+- Better than fully CGo-based drivers
+
+**Connection Behavior:**
+- Both connections point to the same database file
+- SQLite WAL mode handles concurrent access safely
+- Regular operations never touch the CGo connection
+- Vector operations (when implemented) will use the CGo connection exclusively
 
 ## Error Handling
 
@@ -165,46 +182,16 @@ if db.IsExtensionError(err) {
 
 ### CapabilityError
 
-Returned when attempting to use an unsupported capability (future use):
+Returned when attempting to use an unsupported capability:
 
 ```go
 if !store.Supports(db.CapabilityVector) {
     return &db.CapabilityError{
         Feature: db.CapabilityVector,
-        Message: "CGo driver not available",
+        Message: "Vector search not available: CGo driver or extensions not loaded",
     }
 }
 ```
-
-## Adding New Database Types
-
-To add a new database type (e.g., PostgreSQL):
-
-1. **Implement the `Store` interface** in a new package (e.g., `pkg/db/postgres/`)
-
-2. **Add factory case** in `pkg/db/store.go`:
-
-```go
-func NewStore(ctx context.Context, config StoreConfig) (collection.Store, error) {
-    storeType := config.Type
-    if storeType == "" {
-        storeType = "sqlite"
-    }
-
-    switch storeType {
-    case "sqlite":
-        return newSqliteStore(ctx, config)
-    case "postgres":  // NEW
-        return newPostgresStore(ctx, config)
-    default:
-        return nil, fmt.Errorf("unsupported store type: %s", storeType)
-    }
-}
-```
-
-3. **Implement `newPostgresStore()`** following the SQLite pattern
-
-4. **Update tests** to cover the new database type
 
 ## Implementation Details
 
@@ -223,44 +210,21 @@ pkg/db/sqlite/
 
 1. Factory receives `StoreConfig` with extensions
 2. Factory calls `sqlite.NewSqliteStore()`
-3. SQLite package detects extensions → selects CGo driver
-4. Database opened with `sqliteext` driver
-5. Extensions loaded via `ext.Conn.LoadExtension()`
-6. Store returned with capabilities set
+3. **Pure Go connection** is always opened first (for regular operations)
+4. If extensions are provided:
+   - **CGo connection** is opened (for vector operations only)
+   - Extensions loaded via `ext.Conn.LoadExtension()` on CGo connection
+5. Store returned with both connections (vectorDB is nil if no extensions provided)
+
+**Note:** `EnableVector` is a capability flag only - it does NOT trigger CGo connection opening. Extensions must be explicitly provided to open the CGo connection.
 
 ### Capability Detection Flow
 
-1. Store tracks enabled options and driver type
+1. Store tracks enabled options and connection availability
 2. `Supports()` checks:
-   - **Vector**: Requires `EnableVector` AND `driver == "sqliteext"`
-   - **FTS**: Requires `EnableFTS` option
-   - **JSON**: Requires `EnableJSON` option
-
-## Migration from Direct SQLite Calls
-
-**Before (direct SQLite):**
-```go
-import "github.com/accretional/collector/pkg/db/sqlite"
-
-store, err := sqlite.NewSqliteStore(ctx, path, opts, nil)
-```
-
-**After (factory pattern):**
-```go
-import "github.com/accretional/collector/pkg/db"
-
-store, err := db.NewStore(ctx, db.StoreConfig{
-    Path:    path,
-    Options: opts,
-})
-```
-
-**Benefits:**
-- ✅ Database-agnostic code (easy to switch backends)
-- ✅ Consistent error handling
-- ✅ Extension loading support
-- ✅ Capability detection
-- ✅ Future-proof for new database types
+   - **Vector**: Requires `EnableVector` AND `vectorDB != nil` (CGo connection exists)
+   - **FTS**: Requires `EnableFTS` option (uses pure Go connection)
+   - **JSON**: Requires `EnableJSON` option (uses pure Go connection)
 
 ## Examples
 
@@ -284,13 +248,13 @@ store, err := db.NewStore(ctx, db.StoreConfig{
 })
 ```
 
-### Store with Vector Search
+### Store with Vector Search (Extension Setup)
 
 ```go
 store, err := db.NewStore(ctx, db.StoreConfig{
     Path: "./data.db",
     Options: collection.Options{
-        EnableVector: true,
+        EnableVector: true,  // Capability flag
     },
     Extensions: []db.ExtensionConfig{
         {
@@ -302,9 +266,12 @@ store, err := db.NewStore(ctx, db.StoreConfig{
 })
 
 if store.Supports(db.CapabilityVector) {
-    // Vector search available
+    // Vector search available (requires both EnableVector AND extensions)
+    // Note: Vector search implementation is not yet complete
 }
 ```
+
+**Important:** `EnableVector` is a capability flag only. The CGo connection is opened **only when extensions are provided**. Both `EnableVector: true` and extensions are required for `Supports(CapabilityVector)` to return `true`.
 
 ### Memory Database
 
@@ -315,6 +282,73 @@ store, err := db.NewStore(ctx, db.StoreConfig{
         EnableJSON: true,
     },
 })
+```
+
+## Adding New Database Types
+
+To add a new database type (e.g., PostgreSQL):
+
+1. **Implement the `Store` interface** in a new package (e.g., `pkg/db/postgres/`)
+
+   The `Store` interface is defined in `pkg/collection/repo.go`. You'll need to implement:
+   - `CreateRecord`, `GetRecord`, `UpdateRecord`, `DeleteRecord`, `ListRecords`
+   - `Search`, `CountRecords`
+   - `ExecuteRaw`, `Supports`, `Close`, `Path`
+   - `Backup`, `BackupOnline`, `Checkpoint`, `ReIndex`
+
+2. **Add factory case** in `pkg/db/store.go`:
+
+```go
+func NewStore(ctx context.Context, config StoreConfig) (collection.Store, error) {
+    storeType := config.Type
+    if storeType == "" {
+        storeType = "sqlite"
+    }
+
+    switch storeType {
+    case "sqlite":
+        return newSqliteStore(ctx, config)
+    case "postgres":  // NEW
+        return newPostgresStore(ctx, config)
+    default:
+        return nil, fmt.Errorf("unsupported store type: %s (supported: sqlite)", storeType)
+    }
+}
+```
+
+3. **Implement `newPostgresStore()`** following the SQLite pattern:
+   - Parse `StoreConfig` to extract database-specific settings
+   - Create database connection
+   - Apply schemas and migrations
+   - Return a `Store` implementation
+
+4. **Update tests** in `pkg/db/store_test.go` to cover the new database type
+
+5. **Update this README** to document the new database type
+
+## Adding Vector Search
+
+Vector search is not yet implemented, but the infrastructure is in place. To implement it:
+
+1. **Extension Loading** (already implemented):
+   - Load `sqlite-vec` extension via `Extensions` in `StoreConfig`
+   - Extension loads on the CGo connection (`vectorDB`)
+
+2. **Vector Search Implementation** (to be implemented):
+   - Add vector search methods to the `Store` interface (or extend `Search` method)
+   - Implement vector search in `pkg/db/sqlite/store.go` using the `vectorDB` connection
+   - Use SQLite vector functions (e.g., `vec_search`, `vec_distance`) from the loaded extension
+
+3. **Capability Detection** (already implemented):
+   - `Supports(db.CapabilityVector)` returns `true` when:
+     - `EnableVector: true` is set
+     - Extensions are provided (CGo connection exists)
+     - Extension loads successfully
+
+4. **Example Usage** (when implemented):
+```go
+// Vector search will use the CGo connection
+results, err := store.VectorSearch(ctx, queryVector, limit)
 ```
 
 ## Testing
@@ -334,17 +368,8 @@ go test ./pkg/db -v
 
 **Note**: CGo-dependent tests may fail on macOS. Tests are designed to run on Linux systems with CGo enabled.
 
-## Future Work
-
-- [ ] PostgreSQL backend implementation
-- [ ] Connection pooling configuration
-- [ ] Transaction management abstraction
-- [ ] Migration system
-- [ ] Query builder abstraction
-
 ## See Also
 
 - [Collection Package](../collection/README.md) - Uses the Store interface
 - [SQLite Implementation](./sqlite/store.go) - SQLite-specific implementation
 - [Store Interface](../collection/repo.go) - Store interface definition
-
