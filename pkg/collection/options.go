@@ -6,4 +6,5 @@ type Options struct {
 	EnableJSON       bool
 	EnableVector     bool
 	VectorDimensions int
+	Embedder         Embedder // Required when EnableVector is true
 }
