@@ -436,15 +436,7 @@ func (s *Store) BackupOnline(ctx context.Context, destPath string, pagesBatchSiz
 		pagesBatchSize = 100 // Default: copy 100 pages at a time
 	}
 
-	// Open destination database
-	destDSN := fmt.Sprintf("file:%s?_journal_mode=WAL", destPath)
-	destDB, err := sql.Open("sqlite3", destDSN)
-	if err != nil {
-		return fmt.Errorf("failed to open destination db: %w", err)
-	}
-	defer destDB.Close()
-
-	// Attach the destination database
+	// Attach the destination database (creates file if it doesn't exist)
 	attachQuery := fmt.Sprintf("ATTACH DATABASE '%s' AS backup", destPath)
 	if _, err := s.db.ExecContext(ctx, attachQuery); err != nil {
 		return fmt.Errorf("failed to attach backup db: %w", err)
@@ -481,9 +473,10 @@ func (s *Store) BackupOnline(ctx context.Context, destPath string, pagesBatchSiz
 			return fmt.Errorf("failed to get schema for %s: %w", table, err)
 		}
 
-		// Create table in backup
-		if _, err := destDB.ExecContext(ctx, sql); err != nil {
-			// Table might already exist, continue
+		// Create table in backup (modify CREATE TABLE to use backup schema)
+		backupSQL := strings.Replace(sql, "CREATE TABLE ", "CREATE TABLE IF NOT EXISTS backup.", 1)
+		if _, err := s.db.ExecContext(ctx, backupSQL); err != nil {
+			return fmt.Errorf("failed to create table %s in backup: %w", table, err)
 		}
 
 		// Copy data in batches (for large tables)
@@ -504,11 +497,13 @@ func (s *Store) BackupOnline(ctx context.Context, destPath string, pagesBatchSiz
 	defer idxRows.Close()
 
 	for idxRows.Next() {
-		var sql string
-		if err := idxRows.Scan(&sql); err != nil {
+		var idxSQL string
+		if err := idxRows.Scan(&idxSQL); err != nil {
 			continue
 		}
-		if _, err := destDB.ExecContext(ctx, sql); err != nil {
+		// Modify index to use backup schema
+		backupIdxSQL := strings.Replace(idxSQL, " ON ", " ON backup.", 1)
+		if _, err := s.db.ExecContext(ctx, backupIdxSQL); err != nil {
 			log.Printf("failed to copy index: %v", err)
 		}
 	}
