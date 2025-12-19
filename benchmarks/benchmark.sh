@@ -39,6 +39,7 @@ cd "$PROJECT_ROOT" || exit 1
 if [ "$1" != "skip-cgo" ]; then
     if ! go list -m github.com/mattn/go-sqlite3 > /dev/null 2>&1; then
         echo -e "${YELLOW}⚠ Installing mattn/go-sqlite3 for CGo comparison...${NC}"
+        echo -e "${YELLOW}   Note: FTS5 support requires sqlite_fts5 build tag${NC}"
         go get github.com/mattn/go-sqlite3
         go mod tidy
     fi
@@ -71,8 +72,15 @@ run_benchmark() {
     echo -e "${CYAN}CGO_ENABLED=$cgo_flag${NC}"
     echo -e "${CYAN}BENCHMARK_SCENARIO=$scenario${NC}"
     
+    # For cgo_full scenario, add sqlite_fts5 tag to enable FTS5 in mattn/go-sqlite3
+    local build_tags="benchmark"
+    if [ "$scenario" = "cgo_full" ]; then
+        build_tags="benchmark sqlite_fts5"
+        echo -e "${CYAN}Using build tags: $build_tags (FTS5 enabled)${NC}"
+    fi
+    
     BENCHMARK_SCENARIO="$scenario" CGO_ENABLED=$cgo_flag go test \
-        -tags=benchmark \
+        -tags="$build_tags" \
         -bench=. \
         -benchmem \
         -benchtime=3s \
