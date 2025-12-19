@@ -294,6 +294,12 @@ func (s *BackupMetadataStore) DeleteBackup(ctx context.Context, backupID string)
 
 // NewBackupManager creates a new backup manager.
 func NewBackupManager(repo CollectionRepo, transport Transport, pathConfig *PathConfig) (*BackupManager, error) {
+	// Ensure backup directory exists
+	backupDir := pathConfig.BackupDir()
+	if err := os.MkdirAll(backupDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create backup directory: %w", err)
+	}
+
 	metaStorePath := pathConfig.BackupsMetadataPath()
 	metaStore, err := NewBackupMetadataStore(metaStorePath)
 	if err != nil {
@@ -328,15 +334,6 @@ func (bm *BackupManager) BackupCollection(ctx context.Context, req *pb.BackupCol
 		}, nil
 	}
 
-	if req.DestPath == "" {
-		return &pb.BackupCollectionResponse{
-			Status: &pb.Status{
-				Code:    pb.Status_INVALID_ARGUMENT,
-				Message: "dest_path is required",
-			},
-		}, nil
-	}
-
 	// Get source collection
 	sourceCollection, err := bm.repo.GetCollection(ctx, req.Collection.Namespace, req.Collection.Name)
 	if err != nil {
@@ -348,31 +345,15 @@ func (bm *BackupManager) BackupCollection(ctx context.Context, req *pb.BackupCol
 		}, nil
 	}
 
-	// Determine storage type from path
-	storageType := "local"
-	if strings.HasPrefix(req.DestPath, "s3://") {
-		storageType = "s3"
-	} else if strings.HasPrefix(req.DestPath, "gcs://") {
-		storageType = "gcs"
-	}
-
-	// For now, only support local storage
-	if storageType != "local" {
-		return &pb.BackupCollectionResponse{
-			Status: &pb.Status{
-				Code:    pb.Status_UNIMPLEMENTED,
-				Message: fmt.Sprintf("storage type %s not yet implemented", storageType),
-			},
-		}, nil
-	}
-
-	// Generate backup ID (hash of collection + timestamp)
+	// Generate backup ID and path (auto-generated, not user-specified)
 	timestamp := time.Now().Unix()
 	backupID := generateBackupID(req.Collection.Namespace, req.Collection.Name, timestamp)
+	backupPath := bm.pathConfig.BackupPath(req.Collection.Namespace, req.Collection.Name, timestamp)
+	storageType := "local"
 
-	// Ensure backup directory exists
-	backupPath := req.DestPath
-	if err := os.MkdirAll(filepath.Dir(backupPath), 0755); err != nil {
+	// Ensure namespace backup directory exists
+	namespaceDir := filepath.Dir(backupPath)
+	if err := os.MkdirAll(namespaceDir, 0755); err != nil {
 		return &pb.BackupCollectionResponse{
 			Status: &pb.Status{
 				Code:    pb.Status_INTERNAL,
@@ -408,7 +389,7 @@ func (bm *BackupManager) BackupCollection(ctx context.Context, req *pb.BackupCol
 	// Backup files if requested
 	var fileCount int64
 	if req.IncludeFiles && sourceCollection.FS != nil {
-		filesDir := backupPath + ".files"
+		filesDir := bm.pathConfig.BackupFilesPath(req.Collection.Namespace, req.Collection.Name, timestamp)
 		if err := os.MkdirAll(filesDir, 0755); err != nil {
 			// Clean up database backup
 			os.Remove(dbBackupPath)
@@ -476,7 +457,8 @@ func (bm *BackupManager) BackupCollection(ctx context.Context, req *pb.BackupCol
 		// Clean up backup files
 		os.Remove(dbBackupPath)
 		if req.IncludeFiles {
-			os.RemoveAll(backupPath + ".files")
+			filesDir := bm.pathConfig.BackupFilesPath(req.Collection.Namespace, req.Collection.Name, timestamp)
+			os.RemoveAll(filesDir)
 		}
 		return &pb.BackupCollectionResponse{
 			Status: &pb.Status{
@@ -484,6 +466,11 @@ func (bm *BackupManager) BackupCollection(ctx context.Context, req *pb.BackupCol
 				Message: fmt.Sprintf("failed to save backup metadata: %v", err),
 			},
 		}, nil
+	}
+
+	// Trigger automatic cleanup if backup policy is enabled
+	if sourceCollection.Meta.BackupPolicy != nil && sourceCollection.Meta.BackupPolicy.Enabled {
+		go bm.cleanupOldBackups(context.Background(), req.Collection.Namespace, req.Collection.Name, sourceCollection.Meta.BackupPolicy)
 	}
 
 	return &pb.BackupCollectionResponse{
@@ -858,6 +845,79 @@ func (bm *BackupManager) VerifyBackup(ctx context.Context, req *pb.VerifyBackupR
 		IsValid: true,
 		Backup:  backup,
 	}, nil
+}
+
+// cleanupOldBackups enforces retention policy for a collection's backups.
+// This runs asynchronously and logs errors without failing the backup operation.
+func (bm *BackupManager) cleanupOldBackups(ctx context.Context, namespace, name string, policy *pb.BackupPolicy) {
+	if policy == nil || !policy.Enabled {
+		return
+	}
+
+	// List all backups for this collection
+	listReq := &pb.ListBackupsRequest{
+		Collection: &pb.NamespacedName{
+			Namespace: namespace,
+			Name:      name,
+		},
+	}
+
+	backups, _, err := bm.metaStore.ListBackups(ctx, listReq)
+	if err != nil {
+		fmt.Printf("cleanup: failed to list backups for %s/%s: %v\n", namespace, name, err)
+		return
+	}
+
+	// Sort by timestamp (oldest first) - ListBackups already returns sorted, but let's be explicit
+	var toDelete []*pb.BackupMetadata
+	now := time.Now().Unix()
+
+	// Apply retention_seconds policy
+	if policy.RetentionSeconds > 0 {
+		cutoffTime := now - policy.RetentionSeconds
+		for _, backup := range backups {
+			if backup.Timestamp < cutoffTime {
+				toDelete = append(toDelete, backup)
+			}
+		}
+	}
+
+	// Apply max_backups policy (keep newest N)
+	if policy.MaxBackups > 0 {
+		// Remove already-deleted backups from count
+		activeBackups := make([]*pb.BackupMetadata, 0)
+		for _, b := range backups {
+			found := false
+			for _, d := range toDelete {
+				if d.BackupId == b.BackupId {
+					found = true
+					break
+				}
+			}
+			if !found {
+				activeBackups = append(activeBackups, b)
+			}
+		}
+
+		// If still over limit, delete oldest
+		if len(activeBackups) > int(policy.MaxBackups) {
+			excess := len(activeBackups) - int(policy.MaxBackups)
+			for i := 0; i < excess; i++ {
+				toDelete = append(toDelete, activeBackups[i])
+			}
+		}
+	}
+
+	// Delete old backups
+	for _, backup := range toDelete {
+		deleteReq := &pb.DeleteBackupRequest{BackupId: backup.BackupId}
+		_, err := bm.DeleteBackup(ctx, deleteReq)
+		if err != nil {
+			fmt.Printf("cleanup: failed to delete backup %s: %v\n", backup.BackupId, err)
+		} else {
+			fmt.Printf("cleanup: deleted old backup %s (timestamp: %d)\n", backup.BackupId, backup.Timestamp)
+		}
+	}
 }
 
 // Helper functions

@@ -156,18 +156,19 @@ func (s *SqliteRegistryStore) GetCollection(ctx context.Context, namespace, name
 	id := fmt.Sprintf("%s/%s", namespace, name)
 
 	query := `
-		SELECT db_path, message_type_name, server_endpoint, indexed_fields, labels
+		SELECT db_path, message_type_name, server_endpoint, indexed_fields, labels, backup_policy
 		FROM collections
 		WHERE id = ?
 	`
 
-	var dbPath, messageTypeName, serverEndpoint, indexedFieldsJSON, labelsJSON string
+	var dbPath, messageTypeName, serverEndpoint, indexedFieldsJSON, labelsJSON, backupPolicyJSON string
 	err := s.db.QueryRowContext(ctx, query, id).Scan(
 		&dbPath,
 		&messageTypeName,
 		&serverEndpoint,
 		&indexedFieldsJSON,
 		&labelsJSON,
+		&backupPolicyJSON,
 	)
 
 	if err == sql.ErrNoRows {
@@ -209,6 +210,14 @@ func (s *SqliteRegistryStore) GetCollection(ctx context.Context, namespace, name
 		}
 	}
 
+	// Decode backup policy
+	if backupPolicyJSON != "" {
+		var backupPolicy pb.BackupPolicy
+		if err := json.Unmarshal([]byte(backupPolicyJSON), &backupPolicy); err == nil {
+			collection.BackupPolicy = &backupPolicy
+		}
+	}
+
 	return &CollectionMetadata{
 		Collection: collection,
 		DBPath:     dbPath,
@@ -224,10 +233,10 @@ func (s *SqliteRegistryStore) ListCollections(ctx context.Context, namespace str
 	var args []interface{}
 
 	if namespace != "" {
-		query = `SELECT namespace, name, db_path, message_type_name, server_endpoint, indexed_fields, labels FROM collections WHERE namespace = ?`
+		query = `SELECT namespace, name, db_path, message_type_name, server_endpoint, indexed_fields, labels, backup_policy FROM collections WHERE namespace = ?`
 		args = []interface{}{namespace}
 	} else {
-		query = `SELECT namespace, name, db_path, message_type_name, server_endpoint, indexed_fields, labels FROM collections`
+		query = `SELECT namespace, name, db_path, message_type_name, server_endpoint, indexed_fields, labels, backup_policy FROM collections`
 	}
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
@@ -239,8 +248,8 @@ func (s *SqliteRegistryStore) ListCollections(ctx context.Context, namespace str
 	var results []*CollectionMetadata
 
 	for rows.Next() {
-		var ns, name, dbPath, messageTypeName, serverEndpoint, indexedFieldsJSON, labelsJSON string
-		if err := rows.Scan(&ns, &name, &dbPath, &messageTypeName, &serverEndpoint, &indexedFieldsJSON, &labelsJSON); err != nil {
+		var ns, name, dbPath, messageTypeName, serverEndpoint, indexedFieldsJSON, labelsJSON, backupPolicyJSON string
+		if err := rows.Scan(&ns, &name, &dbPath, &messageTypeName, &serverEndpoint, &indexedFieldsJSON, &labelsJSON, &backupPolicyJSON); err != nil {
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 
@@ -272,6 +281,14 @@ func (s *SqliteRegistryStore) ListCollections(ctx context.Context, namespace str
 					collection.Metadata = &pb.Metadata{}
 				}
 				collection.Metadata.Labels = labels
+			}
+		}
+
+		// Decode backup policy
+		if backupPolicyJSON != "" {
+			var backupPolicy pb.BackupPolicy
+			if err := json.Unmarshal([]byte(backupPolicyJSON), &backupPolicy); err == nil {
+				collection.BackupPolicy = &backupPolicy
 			}
 		}
 

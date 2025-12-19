@@ -121,6 +121,7 @@ func run() error {
 	}
 	pathConfig := collection.NewPathConfig(dataDir)
 	log.Printf("Data directory: %s", dataDir)
+	log.Printf("Backup directory: %s", pathConfig.BackupDir())
 
 	// Create registry store
 	registryStorePath := pathConfig.RegistryDBPath()
