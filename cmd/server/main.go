@@ -114,19 +114,71 @@ func run() error {
 	// 2. Setup Collection Repository
 	// ========================================================================
 
-	repoPath := "./data/repo"
-	if err := os.MkdirAll(repoPath, 0755); err != nil {
-		return fmt.Errorf("create repo dir: %w", err)
+	// Get configurable data directory
+	dataDir := os.Getenv("COLLECTOR_DATA_DIR")
+	if dataDir == "" {
+		dataDir = "./data"
 	}
+	pathConfig := collection.NewPathConfig(dataDir)
+	log.Printf("Data directory: %s", dataDir)
 
-	repoDBPath := filepath.Join(repoPath, "collections.db")
-	repoStore, err := sqlite.NewSqliteStore(repoDBPath, collection.Options{EnableJSON: true})
+	// Create registry store
+	registryStorePath := pathConfig.RegistryDBPath()
+	if err := os.MkdirAll(filepath.Dir(registryStorePath), 0755); err != nil {
+		return fmt.Errorf("create registry dir: %w", err)
+	}
+	log.Printf("Registry database: %s", registryStorePath)
+
+	registryStore, err := collection.NewSqliteRegistryStore(registryStorePath)
 	if err != nil {
-		return fmt.Errorf("init repo store: %w", err)
+		return fmt.Errorf("failed to init registry store: %w", err)
 	}
-	defer repoStore.Close()
+	defer registryStore.Close()
 
-	collectionRepo := collection.NewCollectionRepo(repoStore)
+	// Migration check
+	migrator := collection.NewMigrator(pathConfig, registryStore)
+	needsMigration, err := migrator.NeedsMigration(ctx)
+	if err != nil {
+		log.Printf("Warning: failed to check migration status: %v", err)
+	}
+
+	if needsMigration {
+		log.Println("========================================")
+		log.Println("Detecting old database structure")
+		log.Println("Starting automatic migration...")
+		log.Println("========================================")
+
+		report, err := migrator.MigrateAll(ctx)
+		if err != nil {
+			log.Printf("Warning: migration had errors: %v", err)
+		}
+
+		log.Printf("Migration completed:")
+		log.Printf("  - Migrated: %d collections", report.Migrated)
+		log.Printf("  - Failed: %d collections", report.Failed)
+		log.Printf("  - Duration: %v", report.EndTime.Sub(report.StartTime))
+
+		if len(report.Errors) > 0 {
+			log.Println("  Migration errors:")
+			for _, e := range report.Errors {
+				log.Printf("    - %s", e)
+			}
+		}
+
+		if report.Migrated > 0 {
+			log.Println("  Old directories renamed to *.old")
+		}
+		log.Println("========================================")
+	}
+
+	// Create repo with PathConfig and registry store
+	dummyStore, err := sqlite.NewSqliteStore(":memory:", collection.Options{})
+	if err != nil {
+		return fmt.Errorf("failed to create dummy store: %w", err)
+	}
+	defer dummyStore.Close()
+
+	collectionRepo := collection.NewCollectionRepo(dummyStore, pathConfig, registryStore)
 	log.Println("✓ Collection repository created")
 
 	// ========================================================================
@@ -148,7 +200,7 @@ func run() error {
 	log.Println("✓ Registered CollectionService")
 
 	// 4. CollectionRepo Service
-	repoGrpcServer := collection.NewGrpcServer(collectionRepo)
+	repoGrpcServer := collection.NewGrpcServer(collectionRepo, pathConfig)
 	pb.RegisterCollectionRepoServer(grpcServer, repoGrpcServer)
 	log.Println("✓ Registered CollectionRepo")
 

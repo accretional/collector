@@ -3,6 +3,7 @@ package collection
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 
@@ -12,17 +13,22 @@ import (
 // CollectionRepoService provides a persistent implementation of the CollectionRepo interface.
 // It uses a Store (like SqliteStore) for the underlying data storage.
 type CollectionRepoService struct {
-	store       Store
-	collections map[string]*pb.Collection // Track created collections by namespace/name
-	mu          sync.RWMutex
+	store         Store
+	registryStore RegistryStore                 // Persist collection metadata
+	collections   map[string]*pb.Collection     // In-memory cache for performance
+	mu            sync.RWMutex
 }
 
 // NewCollectionRepoService creates a new service instance.
-func NewCollectionRepoService(store Store) *CollectionRepoService {
-	return &CollectionRepoService{
-		store:       store,
-		collections: make(map[string]*pb.Collection),
+func NewCollectionRepoService(store Store, registryStore RegistryStore) *CollectionRepoService {
+	service := &CollectionRepoService{
+		store:         store,
+		registryStore: registryStore,
+		collections:   make(map[string]*pb.Collection),
 	}
+	// Load existing collections from registry into in-memory cache
+	service.loadFromRegistry(context.Background())
+	return service
 }
 
 // CreateCollection creates a new collection.
@@ -44,8 +50,18 @@ func (s *CollectionRepoService) CreateCollection(ctx context.Context, collection
 		return nil, fmt.Errorf("collection %s already exists", id)
 	}
 
-	// Track the collection
+	// Track the collection in-memory
 	s.collections[id] = collection
+
+	// Persist to registry store if available
+	if s.registryStore != nil {
+		dbPath := fmt.Sprintf("%s/%s.db", collection.Namespace, collection.Name)
+		if err := s.registryStore.SaveCollection(ctx, collection, dbPath); err != nil {
+			// Rollback in-memory
+			delete(s.collections, id)
+			return nil, fmt.Errorf("failed to persist collection to registry: %w", err)
+		}
+	}
 
 	return &pb.CreateCollectionResponse{
 		Status:       &pb.Status{Code: 200, Message: "OK"},
@@ -214,4 +230,30 @@ func (s *CollectionRepoService) SearchCollections(ctx context.Context, req *pb.S
 		Results:      []*pb.SearchCollectionsResponse_CollectionResult{},
 		TotalMatches: 0,
 	}, nil
+}
+
+// loadFromRegistry loads existing collections from the registry store into the in-memory cache.
+// This is called during initialization to restore state.
+func (s *CollectionRepoService) loadFromRegistry(ctx context.Context) {
+	if s.registryStore == nil {
+		return
+	}
+
+	collections, err := s.registryStore.ListCollections(ctx, "")
+	if err != nil {
+		log.Printf("Warning: failed to load collections from registry: %v", err)
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, meta := range collections {
+		id := fmt.Sprintf("%s/%s", meta.Collection.Namespace, meta.Collection.Name)
+		s.collections[id] = meta.Collection
+	}
+
+	if len(collections) > 0 {
+		log.Printf("Loaded %d collections from registry", len(collections))
+	}
 }

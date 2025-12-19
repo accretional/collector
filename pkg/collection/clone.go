@@ -20,19 +20,19 @@ const (
 
 // CloneManager handles collection cloning operations.
 type CloneManager struct {
-	repo      CollectionRepo
-	transport Transport
-	fetcher   *Fetcher
-	dataDir   string
+	repo       CollectionRepo
+	transport  Transport
+	fetcher    *Fetcher
+	pathConfig *PathConfig
 }
 
 // NewCloneManager creates a new CloneManager.
-func NewCloneManager(repo CollectionRepo, dataDir string) *CloneManager {
+func NewCloneManager(repo CollectionRepo, pathConfig *PathConfig) *CloneManager {
 	return &CloneManager{
-		repo:      repo,
-		transport: &SqliteTransport{},
-		fetcher:   NewFetcher(),
-		dataDir:   dataDir,
+		repo:       repo,
+		transport:  &SqliteTransport{},
+		fetcher:    NewFetcher(),
+		pathConfig: pathConfig,
 	}
 }
 
@@ -55,8 +55,8 @@ func (cm *CloneManager) CloneLocal(ctx context.Context, req *pb.CloneRequest) (*
 	}
 
 	// Create destination paths
-	destDBPath := filepath.Join(cm.dataDir, "collections", req.DestNamespace, req.DestName+".db")
-	destFilesPath := filepath.Join(cm.dataDir, "files", req.DestNamespace, req.DestName)
+	destDBPath := cm.pathConfig.CollectionDBPath(req.DestNamespace, req.DestName)
+	destFilesPath := cm.pathConfig.CollectionFilesPath(req.DestNamespace, req.DestName)
 
 	// Clone database
 	if err := cm.transport.Clone(ctx, srcCollection, destDBPath); err != nil {
@@ -275,7 +275,7 @@ func (cm *CloneManager) FetchRemote(ctx context.Context, req *pb.FetchRequest) (
 	}
 
 	// Create temporary file for receiving data
-	destDBPath := filepath.Join(cm.dataDir, "collections", req.DestNamespace, req.DestName+".db")
+	destDBPath := cm.pathConfig.CollectionDBPath(req.DestNamespace, req.DestName)
 	if err := os.MkdirAll(filepath.Dir(destDBPath), 0755); err != nil {
 		return nil, fmt.Errorf("failed to create destination directory: %w", err)
 	}

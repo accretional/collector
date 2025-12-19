@@ -20,10 +20,11 @@ import (
 // BackupManager manages backup operations for collections.
 // Unlike Clone, backups create snapshots without registering them as active collections.
 type BackupManager struct {
-	repo      CollectionRepo
-	transport Transport
-	metaStore *BackupMetadataStore
-	mu        sync.RWMutex
+	repo       CollectionRepo
+	transport  Transport
+	metaStore  *BackupMetadataStore
+	pathConfig *PathConfig
+	mu         sync.RWMutex
 }
 
 // BackupMetadataStore persists backup metadata to a SQLite database.
@@ -292,16 +293,18 @@ func (s *BackupMetadataStore) DeleteBackup(ctx context.Context, backupID string)
 }
 
 // NewBackupManager creates a new backup manager.
-func NewBackupManager(repo CollectionRepo, transport Transport, metaStorePath string) (*BackupManager, error) {
+func NewBackupManager(repo CollectionRepo, transport Transport, pathConfig *PathConfig) (*BackupManager, error) {
+	metaStorePath := pathConfig.BackupsMetadataPath()
 	metaStore, err := NewBackupMetadataStore(metaStorePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create metadata store: %w", err)
 	}
 
 	return &BackupManager{
-		repo:      repo,
-		transport: transport,
-		metaStore: metaStore,
+		repo:       repo,
+		transport:  transport,
+		metaStore:  metaStore,
+		pathConfig: pathConfig,
 	}, nil
 }
 
@@ -572,8 +575,8 @@ func (bm *BackupManager) RestoreBackup(ctx context.Context, req *pb.RestoreBacku
 	}
 
 	// If overwriting, remove existing database and files
-	destDBPath := fmt.Sprintf("./data/collections/%s/%s/collection.db", req.DestNamespace, req.DestName)
-	destFilesDir := fmt.Sprintf("./data/files/%s/%s", req.DestNamespace, req.DestName)
+	destDBPath := bm.pathConfig.CollectionDBPath(req.DestNamespace, req.DestName)
+	destFilesDir := bm.pathConfig.CollectionFilesPath(req.DestNamespace, req.DestName)
 	if existingCollection != nil && req.Overwrite {
 		// Close the existing collection's store if possible
 		if existingCollection.Store != nil {
@@ -693,7 +696,7 @@ func (bm *BackupManager) RestoreBackup(ctx context.Context, req *pb.RestoreBacku
 		// Clean up
 		os.Remove(destDBPath)
 		if backup.IncludesFiles {
-			os.RemoveAll(fmt.Sprintf("./data/files/%s/%s", req.DestNamespace, req.DestName))
+			os.RemoveAll(bm.pathConfig.CollectionFilesPath(req.DestNamespace, req.DestName))
 		}
 		return &pb.RestoreBackupResponse{
 			Status: &pb.Status{

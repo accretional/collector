@@ -154,7 +154,8 @@ func TestBackupCollection_Simple(t *testing.T) {
 
 	// Create backup manager
 	backupMetaPath := filepath.Join(tmpDir, "backups", "metadata.db")
-	backupManager, err := NewBackupManager(repo, &SqliteTransport{}, backupMetaPath)
+	pathConfig := NewPathConfig(tmpDir)
+	backupManager, err := NewBackupManager(repo, &SqliteTransport{}, pathConfig)
 	if err != nil {
 		t.Fatalf("failed to create backup manager: %v", err)
 	}
@@ -308,7 +309,8 @@ func TestDeleteBackup(t *testing.T) {
 
 	// Create backup manager
 	repo := &MockCollectionRepo{collections: make(map[string]*Collection)}
-	backupManager, err := NewBackupManager(repo, &SqliteTransport{}, filepath.Join(tmpDir, "metadata.db"))
+	pathConfig := NewPathConfig(tmpDir)
+	backupManager, err := NewBackupManager(repo, &SqliteTransport{}, pathConfig)
 	if err != nil {
 		t.Fatalf("failed to create backup manager: %v", err)
 	}
@@ -378,7 +380,8 @@ func TestVerifyBackup(t *testing.T) {
 
 	// Create backup manager
 	repo := &MockCollectionRepo{collections: make(map[string]*Collection)}
-	backupManager, err := NewBackupManager(repo, &SqliteTransport{}, filepath.Join(tmpDir, "metadata.db"))
+	pathConfig := NewPathConfig(tmpDir)
+	backupManager, err := NewBackupManager(repo, &SqliteTransport{}, pathConfig)
 	if err != nil {
 		t.Fatalf("failed to create backup manager: %v", err)
 	}
@@ -433,7 +436,8 @@ func TestVerifyBackup_Missing(t *testing.T) {
 
 	// Create backup manager
 	repo := &MockCollectionRepo{collections: make(map[string]*Collection)}
-	backupManager, err := NewBackupManager(repo, &SqliteTransport{}, filepath.Join(tmpDir, "metadata.db"))
+	pathConfig := NewPathConfig(tmpDir)
+	backupManager, err := NewBackupManager(repo, &SqliteTransport{}, pathConfig)
 	if err != nil {
 		t.Fatalf("failed to create backup manager: %v", err)
 	}
@@ -463,7 +467,8 @@ func TestBackupValidation(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	repo := &MockCollectionRepo{collections: make(map[string]*Collection)}
-	backupManager, err := NewBackupManager(repo, &SqliteTransport{}, filepath.Join(tmpDir, "metadata.db"))
+	pathConfig := NewPathConfig(tmpDir)
+	backupManager, err := NewBackupManager(repo, &SqliteTransport{}, pathConfig)
 	if err != nil {
 		t.Fatalf("failed to create backup manager: %v", err)
 	}
@@ -617,7 +622,8 @@ func TestBackupWithFiles(t *testing.T) {
 	repo.collections["test/users"] = collection
 
 	// Create backup manager
-	backupManager, err := NewBackupManager(repo, &SqliteTransport{}, filepath.Join(tmpDir, "backups", "metadata.db"))
+	pathConfig := NewPathConfig(tmpDir)
+	backupManager, err := NewBackupManager(repo, &SqliteTransport{}, pathConfig)
 	if err != nil {
 		t.Fatalf("failed to create backup manager: %v", err)
 	}
@@ -701,7 +707,8 @@ func TestBackupConcurrent(t *testing.T) {
 	}
 
 	// Create backup manager
-	backupManager, err := NewBackupManager(repo, &SqliteTransport{}, filepath.Join(tmpDir, "backups", "metadata.db"))
+	pathConfig := NewPathConfig(tmpDir)
+	backupManager, err := NewBackupManager(repo, &SqliteTransport{}, pathConfig)
 	if err != nil {
 		t.Fatalf("failed to create backup manager: %v", err)
 	}
@@ -807,7 +814,8 @@ func TestBackupLargeDataset(t *testing.T) {
 	repo.collections["test/large"] = collection
 
 	// Create backup manager
-	backupManager, err := NewBackupManager(repo, &SqliteTransport{}, filepath.Join(tmpDir, "backups", "metadata.db"))
+	pathConfig := NewPathConfig(tmpDir)
+	backupManager, err := NewBackupManager(repo, &SqliteTransport{}, pathConfig)
 	if err != nil {
 		t.Fatalf("failed to create backup manager: %v", err)
 	}
@@ -908,7 +916,8 @@ func TestRestoreWithOverwrite(t *testing.T) {
 
 	// Create backup manager
 	repo := &MockCollectionRepo{collections: make(map[string]*Collection)}
-	backupManager, err := NewBackupManager(repo, &SqliteTransport{}, filepath.Join(tmpDir, "metadata.db"))
+	pathConfig := NewPathConfig(tmpDir)
+	backupManager, err := NewBackupManager(repo, &SqliteTransport{}, pathConfig)
 	if err != nil {
 		t.Fatalf("failed to create backup manager: %v", err)
 	}
@@ -958,7 +967,8 @@ func TestBackupEmptyCollection(t *testing.T) {
 	repo.collections["test/empty"] = collection
 
 	// Create backup manager
-	backupManager, err := NewBackupManager(repo, &SqliteTransport{}, filepath.Join(tmpDir, "backups", "metadata.db"))
+	pathConfig := NewPathConfig(tmpDir)
+	backupManager, err := NewBackupManager(repo, &SqliteTransport{}, pathConfig)
 	if err != nil {
 		t.Fatalf("failed to create backup manager: %v", err)
 	}
@@ -1048,7 +1058,8 @@ func TestBackupWithSpecialCharacters(t *testing.T) {
 	repo.collections["test/special-chars"] = collection
 
 	// Create backup manager
-	backupManager, err := NewBackupManager(repo, &SqliteTransport{}, filepath.Join(tmpDir, "backups", "metadata.db"))
+	pathConfig := NewPathConfig(tmpDir)
+	backupManager, err := NewBackupManager(repo, &SqliteTransport{}, pathConfig)
 	if err != nil {
 		t.Fatalf("failed to create backup manager: %v", err)
 	}

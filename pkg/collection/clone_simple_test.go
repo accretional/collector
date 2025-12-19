@@ -90,7 +90,8 @@ func TestCloneManager_ValidateRequest(t *testing.T) {
 
 	// Create a mock repo
 	mockRepo := &mockCollectionRepo{}
-	cloneManager := NewCloneManager(mockRepo, tempDir)
+	pathConfig := NewPathConfig(tempDir)
+	cloneManager := NewCloneManager(mockRepo, pathConfig)
 
 	ctx := context.Background()
 

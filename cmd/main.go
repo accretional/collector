@@ -20,18 +20,15 @@ func main() {
 
 func run() error {
 	ctx := context.Background()
-	basePath := "./data/collections"
 
-	// 1. Setup Namespace/Name
+	// 1. Setup Path Configuration
+	pathConfig := collection.NewPathConfig("./data")
+
+	// 2. Setup Namespace/Name
 	namespace := "demo"
 	name := "tasks"
-	fullPath := filepath.Join(basePath, namespace, name)
 
-	if err := os.MkdirAll(fullPath, 0755); err != nil {
-		return fmt.Errorf("create dir: %w", err)
-	}
-
-	// 2. Initialize Metadata
+	// 3. Initialize Metadata
 	proto := &pb.Collection{
 		Namespace: namespace,
 		Name:      name,
@@ -40,10 +37,14 @@ func run() error {
 		},
 	}
 
-	// 3. Initialize Dependencies (The "Glue")
+	// 4. Initialize Dependencies (The "Glue")
 
 	// A. SQLite Store
-	dbPath := filepath.Join(fullPath, "data.db")
+	dbPath := pathConfig.CollectionDBPath(namespace, name)
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
+		return fmt.Errorf("create db dir: %w", err)
+	}
+
 	storeOpts := collection.Options{
 		EnableFTS:  true,
 		EnableJSON: true,
@@ -55,20 +56,21 @@ func run() error {
 	defer store.Close()
 
 	// B. Local Filesystem
-	// (We need a concrete implementation of collection.FileSystem)
-	// For this example, we use a simple wrapper around os methods.
-	fs, err := collection.NewLocalFileSystem(filepath.Join(fullPath, "files"))
+	filesPath := pathConfig.CollectionFilesPath(namespace, name)
+	fs, err := collection.NewLocalFileSystem(filesPath)
 	if err != nil {
 		log.Fatalf("Failed to create filesystem: %v", err)
 	}
 
-	// 4. Create Domain Object
+	// 5. Create Domain Object
 	coll, err := collection.NewCollection(proto, store, fs)
 	if err != nil {
 		return fmt.Errorf("create collection: %w", err)
 	}
 
 	fmt.Printf("✓ Collection Ready: %s/%s\n", coll.GetNamespace(), coll.GetName())
+	fmt.Printf("  Database: %s\n", dbPath)
+	fmt.Printf("  Files: %s\n", filesPath)
 
 	// Test a create
 	err = coll.CreateRecord(ctx, &pb.CollectionRecord{

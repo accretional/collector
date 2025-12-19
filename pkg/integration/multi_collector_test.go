@@ -81,17 +81,29 @@ func setupCollector(t *testing.T, collectorID, namespace string, port int) (
 		t.Fatalf("failed to register CollectionRepo: %v", err)
 	}
 
-	// Setup CollectionRepo
-	repoStore, err := sqlite.NewSqliteStore(
-		filepath.Join(tempDir, "repo.db"),
-		collection.Options{EnableJSON: true},
-	)
+	// Setup CollectionRepo with PathConfig and RegistryStore
+	pathConfig := collection.NewPathConfig(tempDir)
+
+	// Create registry store
+	registryPath := pathConfig.RegistryDBPath()
+	if err := os.MkdirAll(filepath.Dir(registryPath), 0755); err != nil {
+		t.Fatalf("failed to create registry dir: %v", err)
+	}
+
+	registryStore, err := collection.NewSqliteRegistryStore(registryPath)
+	if err != nil {
+		t.Fatalf("failed to create registry store: %v", err)
+	}
+	t.Cleanup(func() { registryStore.Close() })
+
+	// Create dummy store
+	repoStore, err := sqlite.NewSqliteStore(":memory:", collection.Options{})
 	if err != nil {
 		t.Fatalf("failed to create repo store: %v", err)
 	}
 	t.Cleanup(func() { repoStore.Close() })
 
-	collectionRepo := collection.NewCollectionRepo(repoStore)
+	collectionRepo := collection.NewCollectionRepo(repoStore, pathConfig, registryStore)
 
 	// Setup Dispatcher with Registry
 	validator := registry.NewRegistryValidator(registryServer)
@@ -111,7 +123,7 @@ func setupCollector(t *testing.T, collectorID, namespace string, port int) (
 	collectionServer := collection.NewCollectionServer(collectionRepo)
 	pb.RegisterCollectionServiceServer(grpcServer, collectionServer)
 	pb.RegisterCollectiveDispatcherServer(grpcServer, dispatcher)
-	repoGrpcServer := collection.NewGrpcServer(collectionRepo)
+	repoGrpcServer := collection.NewGrpcServer(collectionRepo, pathConfig)
 	pb.RegisterCollectionRepoServer(grpcServer, repoGrpcServer)
 
 	// Start listener

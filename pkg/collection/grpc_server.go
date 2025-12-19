@@ -16,33 +16,21 @@ type GrpcServer struct {
 	repo          CollectionRepo
 	cloneManager  *CloneManager
 	backupManager *BackupManager
+	pathConfig    *PathConfig
 }
 
 // NewGrpcServer creates a new instance of our gRPC server.
-func NewGrpcServer(repo CollectionRepo) *GrpcServer {
-	backupManager, err := NewBackupManager(repo, &SqliteTransport{}, "./data/backups/metadata.db")
+func NewGrpcServer(repo CollectionRepo, pathConfig *PathConfig) *GrpcServer {
+	backupManager, err := NewBackupManager(repo, &SqliteTransport{}, pathConfig)
 	if err != nil {
 		log.Printf("Warning: failed to initialize backup manager: %v", err)
 	}
 
 	return &GrpcServer{
 		repo:          repo,
-		cloneManager:  NewCloneManager(repo, "./data"),
+		cloneManager:  NewCloneManager(repo, pathConfig),
 		backupManager: backupManager,
-	}
-}
-
-// NewGrpcServerWithDataDir creates a new instance with a custom data directory.
-func NewGrpcServerWithDataDir(repo CollectionRepo, dataDir string) *GrpcServer {
-	backupManager, err := NewBackupManager(repo, &SqliteTransport{}, dataDir+"/backups/metadata.db")
-	if err != nil {
-		log.Printf("Warning: failed to initialize backup manager: %v", err)
-	}
-
-	return &GrpcServer{
-		repo:          repo,
-		cloneManager:  NewCloneManager(repo, dataDir),
-		backupManager: backupManager,
+		pathConfig:    pathConfig,
 	}
 }
 

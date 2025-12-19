@@ -12,11 +12,18 @@ import (
 // Re-export for cleaner test code
 var NewGrpcServer = collection.NewGrpcServer
 
+// setupGrpcServer creates a test gRPC server with PathConfig
+func setupGrpcServer(t *testing.T) (*collection.GrpcServer, func()) {
+	repo, cleanup := setupTestRepo(t)
+	pathConfig := collection.NewPathConfig(t.TempDir())
+	server := collection.NewGrpcServer(repo, pathConfig)
+	return server, cleanup
+}
+
 // TestGrpcServer_CreateCollection tests the CreateCollection gRPC endpoint
 func TestGrpcServer_CreateCollection(t *testing.T) {
-	repo, cleanup := setupTestRepo(t)
+	server, cleanup := setupGrpcServer(t)
 	defer cleanup()
-	server := collection.NewGrpcServer(repo)
 	ctx := context.Background()
 
 	req := &pb.CreateCollectionRequest{
@@ -49,9 +56,8 @@ func TestGrpcServer_CreateCollection(t *testing.T) {
 }
 
 func TestGrpcServer_CreateCollection_WithServerEndpoint(t *testing.T) {
-	repo, cleanup := setupTestRepo(t)
+	server, cleanup := setupGrpcServer(t)
 	defer cleanup()
-	server := collection.NewGrpcServer(repo)
 	ctx := context.Background()
 
 	req := &pb.CreateCollectionRequest{
@@ -78,9 +84,8 @@ func TestGrpcServer_CreateCollection_WithServerEndpoint(t *testing.T) {
 }
 
 func TestGrpcServer_CreateCollection_WithIndexedFields(t *testing.T) {
-	repo, cleanup := setupTestRepo(t)
+	server, cleanup := setupGrpcServer(t)
 	defer cleanup()
-	server := collection.NewGrpcServer(repo)
 	ctx := context.Background()
 
 	req := &pb.CreateCollectionRequest{
@@ -103,9 +108,8 @@ func TestGrpcServer_CreateCollection_WithIndexedFields(t *testing.T) {
 
 // TestGrpcServer_Discover tests the Discover gRPC endpoint
 func TestGrpcServer_Discover(t *testing.T) {
-	repo, cleanup := setupTestRepo(t)
+	server, cleanup := setupGrpcServer(t)
 	defer cleanup()
-	server := collection.NewGrpcServer(repo)
 	ctx := context.Background()
 
 	// Create test collections
@@ -136,9 +140,8 @@ func TestGrpcServer_Discover(t *testing.T) {
 }
 
 func TestGrpcServer_Discover_WithFilters(t *testing.T) {
-	repo, cleanup := setupTestRepo(t)
+	server, cleanup := setupGrpcServer(t)
 	defer cleanup()
-	server := collection.NewGrpcServer(repo)
 	ctx := context.Background()
 
 	// Create collections with different properties
@@ -208,9 +211,8 @@ func TestGrpcServer_Discover_WithFilters(t *testing.T) {
 }
 
 func TestGrpcServer_Discover_WithPagination(t *testing.T) {
-	repo, cleanup := setupTestRepo(t)
+	server, cleanup := setupGrpcServer(t)
 	defer cleanup()
-	server := collection.NewGrpcServer(repo)
 	ctx := context.Background()
 
 	// Create many collections
@@ -243,9 +245,8 @@ func TestGrpcServer_Discover_WithPagination(t *testing.T) {
 
 // TestGrpcServer_Route tests the Route gRPC endpoint
 func TestGrpcServer_Route(t *testing.T) {
-	repo, cleanup := setupTestRepo(t)
+	server, cleanup := setupGrpcServer(t)
 	defer cleanup()
-	server := collection.NewGrpcServer(repo)
 	ctx := context.Background()
 
 	// Create a collection
@@ -282,9 +283,8 @@ func TestGrpcServer_Route(t *testing.T) {
 }
 
 func TestGrpcServer_Route_NonExistent(t *testing.T) {
-	repo, cleanup := setupTestRepo(t)
+	server, cleanup := setupGrpcServer(t)
 	defer cleanup()
-	server := collection.NewGrpcServer(repo)
 	ctx := context.Background()
 
 	// Try to route to non-existent collection
@@ -308,9 +308,8 @@ func TestGrpcServer_Route_NonExistent(t *testing.T) {
 
 // TestGrpcServer_SearchCollections tests the SearchCollections gRPC endpoint
 func TestGrpcServer_SearchCollections(t *testing.T) {
-	repo, cleanup := setupTestRepo(t)
+	server, cleanup := setupGrpcServer(t)
 	defer cleanup()
-	server := collection.NewGrpcServer(repo)
 	ctx := context.Background()
 
 	// Create collections
@@ -346,9 +345,8 @@ func TestGrpcServer_SearchCollections(t *testing.T) {
 }
 
 func TestGrpcServer_SearchCollections_WithQuery(t *testing.T) {
-	repo, cleanup := setupTestRepo(t)
+	server, cleanup := setupGrpcServer(t)
 	defer cleanup()
-	server := collection.NewGrpcServer(repo)
 	ctx := context.Background()
 
 	// Create a collection
@@ -386,9 +384,8 @@ func TestGrpcServer_SearchCollections_WithQuery(t *testing.T) {
 }
 
 func TestGrpcServer_SearchCollections_AcrossNamespaces(t *testing.T) {
-	repo, cleanup := setupTestRepo(t)
+	server, cleanup := setupGrpcServer(t)
 	defer cleanup()
-	server := collection.NewGrpcServer(repo)
 	ctx := context.Background()
 
 	// Create collections in different namespaces
@@ -423,9 +420,8 @@ func TestGrpcServer_SearchCollections_AcrossNamespaces(t *testing.T) {
 }
 
 func TestGrpcServer_SearchCollections_SpecificCollections(t *testing.T) {
-	repo, cleanup := setupTestRepo(t)
+	server, cleanup := setupGrpcServer(t)
 	defer cleanup()
-	server := collection.NewGrpcServer(repo)
 	ctx := context.Background()
 
 	// Create multiple collections
@@ -463,9 +459,8 @@ func TestGrpcServer_SearchCollections_SpecificCollections(t *testing.T) {
 
 // TestGrpcServer_ErrorHandling tests error handling in the gRPC server
 func TestGrpcServer_ErrorHandling_NilCollection(t *testing.T) {
-	repo, cleanup := setupTestRepo(t)
+	server, cleanup := setupGrpcServer(t)
 	defer cleanup()
-	server := collection.NewGrpcServer(repo)
 	ctx := context.Background()
 
 	// Try to create with nil collection (should handle gracefully)
@@ -482,9 +477,8 @@ func TestGrpcServer_ErrorHandling_NilCollection(t *testing.T) {
 
 // TestGrpcServer_Concurrency tests concurrent requests to the gRPC server
 func TestGrpcServer_ConcurrentRequests(t *testing.T) {
-	repo, cleanup := setupTestRepo(t)
+	server, cleanup := setupGrpcServer(t)
 	defer cleanup()
-	server := collection.NewGrpcServer(repo)
 	ctx := context.Background()
 
 	done := make(chan error, 10)
@@ -513,9 +507,8 @@ func TestGrpcServer_ConcurrentRequests(t *testing.T) {
 }
 
 func TestGrpcServer_ConcurrentMixedOperations(t *testing.T) {
-	repo, cleanup := setupTestRepo(t)
+	server, cleanup := setupGrpcServer(t)
 	defer cleanup()
-	server := collection.NewGrpcServer(repo)
 	ctx := context.Background()
 
 	// Create a base collection first
@@ -564,9 +557,8 @@ func TestGrpcServer_ConcurrentMixedOperations(t *testing.T) {
 
 // TestGrpcServer_Integration tests end-to-end flow
 func TestGrpcServer_Integration_CreateAndRoute(t *testing.T) {
-	repo, cleanup := setupTestRepo(t)
+	server, cleanup := setupGrpcServer(t)
 	defer cleanup()
-	server := collection.NewGrpcServer(repo)
 	ctx := context.Background()
 
 	// 1. Create a collection

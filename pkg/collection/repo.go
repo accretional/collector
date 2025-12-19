@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	pb "github.com/accretional/collector/gen/collector"
+	"github.com/accretional/collector/pkg/db/sqlite"
 )
 
 // Store defines the interface for the underlying database.
@@ -43,17 +44,19 @@ type Store interface {
 // DefaultCollectionRepo is a facade that provides a simple interface for managing collections.
 // It uses a CollectionRepoService and a Store to do the heavy lifting.
 type DefaultCollectionRepo struct {
-	service *CollectionRepoService
-	store   Store
+	service    *CollectionRepoService
+	store      Store
+	pathConfig *PathConfig
 }
 
-// NewCollectionRepo creates a new DefaultCollectionRepo with the given Store.
-func NewCollectionRepo(store Store) *DefaultCollectionRepo {
-	service := NewCollectionRepoService(store)
+// NewCollectionRepo creates a new DefaultCollectionRepo with the given Store, PathConfig, and RegistryStore.
+func NewCollectionRepo(store Store, pathConfig *PathConfig, registryStore RegistryStore) *DefaultCollectionRepo {
+	service := NewCollectionRepoService(store, registryStore)
 
 	return &DefaultCollectionRepo{
-		service: service,
-		store:   store,
+		service:    service,
+		store:      store,
+		pathConfig: pathConfig,
 	}
 }
 
@@ -79,20 +82,29 @@ func (r *DefaultCollectionRepo) SearchCollections(ctx context.Context, req *pb.S
 
 // GetCollection retrieves a Collection instance by namespace and name.
 func (r *DefaultCollectionRepo) GetCollection(ctx context.Context, namespace, name string) (*Collection, error) {
-	// Check if collection exists in the service
 	key := namespace + "/" + name
-	meta, exists := r.service.collections[key]
-	if !exists {
-		return nil, fmt.Errorf("collection %s not found", key)
-	}
 
-	// Use a local filesystem implementation
-	fs, err := NewLocalFileSystem("./data/files")
+	// Get metadata from registry
+	metadata, err := r.service.registryStore.GetCollection(ctx, namespace, name)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create filesystem: %w", err)
+		return nil, fmt.Errorf("collection %s not found: %w", key, err)
 	}
 
-	return NewCollection(meta, r.store, fs)
+	// Open database at path from registry
+	dbPath := r.pathConfig.CollectionDBPath(namespace, name)
+	store, err := sqlite.NewSqliteStore(dbPath, Options{EnableJSON: true, EnableFTS: true})
+	if err != nil {
+		return nil, fmt.Errorf("failed to open database at %s: %w", dbPath, err)
+	}
+
+	// Create filesystem
+	filesPath := r.pathConfig.CollectionFilesPath(namespace, name)
+	fs, err := NewLocalFileSystem(filesPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create filesystem at %s: %w", filesPath, err)
+	}
+
+	return NewCollection(metadata.Collection, store, fs)
 }
 
 // UpdateCollectionMetadata updates the metadata for an existing collection.
