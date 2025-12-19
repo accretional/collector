@@ -82,8 +82,11 @@ run_benchmark() {
     
     if [ -f "$output_file" ]; then
         echo -e "${GREEN}✓ Results saved to: $output_file${NC}"
-        # Show summary
-        grep -E "^(Benchmark|ok)" "$output_file" | head -20
+        # Show summary with headers
+        echo ""
+        printf "%-50s %12s %15s %15s %15s\n" "Benchmark Name" "Iterations" "Time/op" "Bytes/op" "Allocs/op"
+        echo "────────────────────────────────────────────────────────────────────────────────"
+        grep -E "^Benchmark" "$output_file" | head -20
     else
         echo -e "${RED}✗ Benchmark failed${NC}"
     fi
@@ -137,6 +140,9 @@ for scenario in cgo_full hybrid_cgo hybrid_purego; do
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >> "$REPORT_FILE"
         echo "$scenario" >> "$REPORT_FILE"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >> "$REPORT_FILE"
+        # Add column headers
+        printf "%-50s %12s %15s %15s %15s\n" "Benchmark Name" "Iterations" "Time/op" "Bytes/op" "Allocs/op" >> "$REPORT_FILE"
+        echo "────────────────────────────────────────────────────────────────────────────────" >> "$REPORT_FILE"
         grep -E "^Benchmark" "$result_file" >> "$REPORT_FILE" || echo "No benchmarks found" >> "$REPORT_FILE"
     fi
 done
