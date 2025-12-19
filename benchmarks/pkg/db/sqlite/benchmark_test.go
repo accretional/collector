@@ -31,9 +31,9 @@ func getScenario() string {
 }
 
 // setupBenchmarkStore creates a store based on the scenario from environment
-func setupBenchmarkStore(t *testing.T) (collection.Store, func()) {
+func setupBenchmarkStore(tb testing.TB) (collection.Store, func()) {
 	scenario := getScenario()
-	tempDir := t.TempDir()
+	tempDir := tb.TempDir()
 	dbPath := filepath.Join(tempDir, "bench.db")
 	ctx := context.Background()
 
@@ -51,17 +51,17 @@ func setupBenchmarkStore(t *testing.T) (collection.Store, func()) {
 		// Our hybrid model with CGo disabled
 		store, err = setupHybridStore(ctx, dbPath, false)
 	default:
-		t.Fatalf("Unknown scenario: %s", scenario)
+		tb.Fatalf("Unknown scenario: %s", scenario)
 	}
 
 	if err != nil {
-		t.Fatalf("Failed to setup store: %v", err)
+		tb.Fatalf("Failed to setup store: %v", err)
 	}
 
 	// Apply schema
 	if err := applySchema(store); err != nil {
 		store.Close()
-		t.Fatalf("Failed to apply schema: %v", err)
+		tb.Fatalf("Failed to apply schema: %v", err)
 	}
 
 	return store, func() {
@@ -632,9 +632,9 @@ func BenchmarkConcurrentReads(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB) {
+	b.RunParallel(func(p *testing.PB) {
 		i := 0
-		for pb.Next() {
+		for p.Next() {
 			id := fmt.Sprintf("concurrent-%d", i%100)
 			if _, err := store.GetRecord(ctx, id); err != nil {
 				b.Fatal(err)
@@ -650,9 +650,9 @@ func BenchmarkConcurrentWrites(b *testing.B) {
 	ctx := context.Background()
 
 	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB) {
+	b.RunParallel(func(p *testing.PB) {
 		i := 0
-		for pb.Next() {
+		for p.Next() {
 			record := &pb.CollectionRecord{
 				Id:        fmt.Sprintf("write-%d-%d", time.Now().UnixNano(), i),
 				ProtoData: []byte(fmt.Sprintf(`{"id": %d}`, i)),
