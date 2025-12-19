@@ -112,6 +112,11 @@ func (m *Migrator) MigrateAll(ctx context.Context) (*MigrationReport, error) {
 				continue
 			}
 
+			// Skip .old directories (backups from previous migrations)
+			if filepath.Ext(coll.Name()) == ".old" {
+				continue
+			}
+
 			if err := m.migrateCollection(ctx, ns.Name(), coll.Name()); err != nil {
 				report.Failed++
 				report.Errors = append(report.Errors,
