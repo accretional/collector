@@ -43,7 +43,7 @@ The `RUN_ALL_TESTS_BEFORE_SUBMIT.sh` script runs:
 
 2. **During development:**
    - Run relevant package tests frequently
-   - Use `go test ./pkg/collection -short` for quick feedback
+   - Use `go test -tags sqlite_fts5 ./pkg/collection -short` for quick feedback
    - Fix any breakage immediately
 
 3. **Before claiming completion:**
