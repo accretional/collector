@@ -117,9 +117,13 @@ import (
 )
 
 // Create SQLite store
-store, err := sqlite.NewSqliteStore("./data/users.db", collection.Options{
-    EnableJSON: true,  // Enable JSONB indexing
-    EnableFTS:  true,  // Enable full-text search
+store, err := db.NewStore(ctx, db.Config{
+	Type:       db.DBTypeSQLite,
+    SQLitePath: "./data/users.db",
+    Options: collection.Options{
+        EnableJSON: true,  // Enable JSONB indexing
+        EnableFTS:  true,  // Enable full-text search
+    },
 })
 
 // Create collection
@@ -545,7 +549,11 @@ options := collection.Options{
     CacheSize:  10000,  // SQLite cache size in pages
 }
 
-store, err := sqlite.NewSqliteStore(dbPath, options)
+store, err := db.NewStore(ctx, db.Config{
+    Type: db.DBTypeSQLite,
+    SQLitePath: dbPath,
+    Options:    options,
+})
 ```
 
 ## Performance Considerations

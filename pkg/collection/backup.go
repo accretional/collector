@@ -14,7 +14,7 @@ import (
 
 	pb "github.com/accretional/collector/gen/collector"
 	"github.com/accretional/collector/pkg/fs/local"
-	_ "modernc.org/sqlite"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 // BackupManager manages backup operations for collections.
@@ -41,7 +41,7 @@ func NewBackupMetadataStore(dbPath string) (*BackupMetadataStore, error) {
 	}
 
 	dsn := fmt.Sprintf("file:%s?_journal_mode=WAL&_busy_timeout=10000", dbPath)
-	db, err := sql.Open("sqlite", dsn)
+	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open metadata db: %w", err)
 	}
@@ -791,7 +791,7 @@ func (bm *BackupManager) VerifyBackup(ctx context.Context, req *pb.VerifyBackupR
 
 	// Verify database can be opened (basic integrity check)
 	dsn := fmt.Sprintf("file:%s?mode=ro", backup.StoragePath)
-	testDB, err := sql.Open("sqlite", dsn)
+	testDB, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return &pb.VerifyBackupResponse{
 			Status: &pb.Status{

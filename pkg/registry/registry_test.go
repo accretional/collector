@@ -7,7 +7,7 @@ import (
 
 	"github.com/accretional/collector/gen/collector"
 	"github.com/accretional/collector/pkg/collection"
-	"github.com/accretional/collector/pkg/db/sqlite"
+	"github.com/accretional/collector/pkg/db"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
@@ -38,7 +38,11 @@ func newTempStore(t *testing.T) collection.Store {
 		os.Remove(f.Name())
 	})
 
-	store, err := sqlite.NewSqliteStore(f.Name(), collection.Options{EnableJSON: true})
+	store, err := db.NewStore(context.Background(), db.Config{
+		Type:       db.DBTypeSQLite,
+		SQLitePath: f.Name(),
+		Options:    collection.Options{EnableJSON: true},
+	})
 	if err != nil {
 		t.Fatalf("failed to create in-memory store: %v", err)
 	}

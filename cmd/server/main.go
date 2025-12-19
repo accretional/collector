@@ -15,7 +15,7 @@ import (
 
 	pb "github.com/accretional/collector/gen/collector"
 	"github.com/accretional/collector/pkg/collection"
-	"github.com/accretional/collector/pkg/db/sqlite"
+	"github.com/accretional/collector/pkg/db"
 	"github.com/accretional/collector/pkg/dispatch"
 	"github.com/accretional/collector/pkg/registry"
 	"google.golang.org/grpc"
@@ -58,7 +58,11 @@ func run() error {
 
 	// Registry protos collection
 	protosDBPath := filepath.Join(registryPath, "protos.db")
-	protosStore, err := sqlite.NewSqliteStore(protosDBPath, collection.Options{EnableJSON: true})
+	protosStore, err := db.NewStore(ctx, db.Config{
+		Type:       db.DBTypeSQLite,
+		SQLitePath: protosDBPath,
+		Options:    collection.Options{EnableJSON: true},
+	})
 	if err != nil {
 		return fmt.Errorf("init protos store: %w", err)
 	}
@@ -75,7 +79,11 @@ func run() error {
 
 	// Registry services collection
 	servicesDBPath := filepath.Join(registryPath, "services.db")
-	servicesStore, err := sqlite.NewSqliteStore(servicesDBPath, collection.Options{EnableJSON: true})
+	servicesStore, err := db.NewStore(ctx, db.Config{
+		Type:       db.DBTypeSQLite,
+		SQLitePath: servicesDBPath,
+		Options:    collection.Options{EnableJSON: true},
+	})
 	if err != nil {
 		return fmt.Errorf("init services store: %w", err)
 	}
@@ -120,7 +128,11 @@ func run() error {
 	}
 
 	repoDBPath := filepath.Join(repoPath, "collections.db")
-	repoStore, err := sqlite.NewSqliteStore(repoDBPath, collection.Options{EnableJSON: true})
+	repoStore, err := db.NewStore(ctx, db.Config{
+		Type:       db.DBTypeSQLite,
+		SQLitePath: repoDBPath,
+		Options:    collection.Options{EnableJSON: true},
+	})
 	if err != nil {
 		return fmt.Errorf("init repo store: %w", err)
 	}
@@ -156,7 +168,7 @@ func run() error {
 	// 4. Start Server and Create Loopback Connection
 	// ========================================================================
 
-	lis, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", collectorPort))
+	lis, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", collectorPort))
 	if err != nil {
 		return fmt.Errorf("failed to listen: %w", err)
 	}
@@ -200,7 +212,7 @@ func run() error {
 	log.Println("✓ Registered CollectiveDispatcher service")
 
 	log.Println("\n========================================")
-	log.Printf("Collector %s running on 0.0.0.0:%d", collectorID, collectorPort)
+	log.Printf("Collector %s running on localhost:%d", collectorID, collectorPort)
 	log.Println("All services available:")
 	log.Println("  - CollectorRegistry")
 	log.Println("  - CollectionService")

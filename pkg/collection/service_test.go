@@ -7,7 +7,7 @@ import (
 
 	pb "github.com/accretional/collector/gen/collector"
 	"github.com/accretional/collector/pkg/collection"
-	"github.com/accretional/collector/pkg/db/sqlite"
+	"github.com/accretional/collector/pkg/db"
 )
 
 // setupTestService creates a test service instance
@@ -15,9 +15,13 @@ func setupTestService(t *testing.T) (*collection.CollectionRepoService, func()) 
 	t.Helper()
 
 	// Create temp store
-	store, err := sqlite.NewSqliteStore(":memory:", collection.Options{
-		EnableFTS:  true,
-		EnableJSON: true,
+	store, err := db.NewStore(context.Background(), db.Config{
+		Type:       db.DBTypeSQLite,
+		SQLitePath: ":memory:",
+		Options: collection.Options{
+			EnableFTS:  true,
+			EnableJSON: true,
+		},
 	})
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)

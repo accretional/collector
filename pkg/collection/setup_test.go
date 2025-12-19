@@ -5,9 +5,12 @@ import (
 	"path/filepath"
 	"testing"
 
+	"context"
+
 	pb "github.com/accretional/collector/gen/collector"
 	"github.com/accretional/collector/pkg/collection"
-	"github.com/accretional/collector/pkg/db/sqlite"
+
+	"github.com/accretional/collector/pkg/db"
 )
 
 // setupTestCollection creates a REAL SQLite-backed collection for integration testing.
@@ -23,9 +26,13 @@ func setupTestCollection(t *testing.T) (*collection.Collection, func()) {
 	// 2. Initialize the REAL SQLite Store
 	dbPath := filepath.Join(tempDir, "test.db")
 
-	store, err := sqlite.NewSqliteStore(dbPath, collection.Options{
-		EnableFTS:  true, // Test FTS tables
-		EnableJSON: true, // Test JSON columns
+	store, err := db.NewStore(context.Background(), db.Config{
+		Type:       db.DBTypeSQLite,
+		SQLitePath: dbPath,
+		Options: collection.Options{
+			EnableFTS:  true, // Test FTS tables
+			EnableJSON: true, // Test JSON columns
+		},
 	})
 	if err != nil {
 		os.RemoveAll(tempDir)
@@ -75,9 +82,13 @@ func setupTestRepo(t *testing.T) (collection.CollectionRepo, func()) {
 	// 2. Initialize the REAL SQLite Store
 	dbPath := filepath.Join(tempDir, "repo.db")
 
-	store, err := sqlite.NewSqliteStore(dbPath, collection.Options{
-		EnableFTS:  true,
-		EnableJSON: true,
+	store, err := db.NewStore(context.Background(), db.Config{
+		Type:       db.DBTypeSQLite,
+		SQLitePath: dbPath,
+		Options: collection.Options{
+			EnableFTS:  true,
+			EnableJSON: true,
+		},
 	})
 	if err != nil {
 		os.RemoveAll(tempDir)

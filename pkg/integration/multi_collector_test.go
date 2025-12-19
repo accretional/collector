@@ -10,7 +10,7 @@ import (
 
 	pb "github.com/accretional/collector/gen/collector"
 	"github.com/accretional/collector/pkg/collection"
-	"github.com/accretional/collector/pkg/db/sqlite"
+	"github.com/accretional/collector/pkg/db"
 	"github.com/accretional/collector/pkg/dispatch"
 	"github.com/accretional/collector/pkg/registry"
 	"google.golang.org/grpc"
@@ -32,10 +32,11 @@ func setupCollector(t *testing.T, collectorID, namespace string, port int) (
 	tempDir := t.TempDir()
 
 	// Setup Registry
-	protosStore, err := sqlite.NewSqliteStore(
-		filepath.Join(tempDir, "protos.db"),
-		collection.Options{EnableJSON: true},
-	)
+	protosStore, err := db.NewStore(ctx, db.Config{
+		Type:       db.DBTypeSQLite,
+		SQLitePath: filepath.Join(tempDir, "protos.db"),
+		Options:    collection.Options{EnableJSON: true},
+	})
 	if err != nil {
 		t.Fatalf("failed to create protos store: %v", err)
 	}
@@ -50,10 +51,11 @@ func setupCollector(t *testing.T, collectorID, namespace string, port int) (
 		t.Fatalf("failed to create protos collection: %v", err)
 	}
 
-	servicesStore, err := sqlite.NewSqliteStore(
-		filepath.Join(tempDir, "services.db"),
-		collection.Options{EnableJSON: true},
-	)
+	servicesStore, err := db.NewStore(ctx, db.Config{
+		Type:       db.DBTypeSQLite,
+		SQLitePath: filepath.Join(tempDir, "services.db"),
+		Options:    collection.Options{EnableJSON: true},
+	})
 	if err != nil {
 		t.Fatalf("failed to create services store: %v", err)
 	}
@@ -82,10 +84,11 @@ func setupCollector(t *testing.T, collectorID, namespace string, port int) (
 	}
 
 	// Setup CollectionRepo
-	repoStore, err := sqlite.NewSqliteStore(
-		filepath.Join(tempDir, "repo.db"),
-		collection.Options{EnableJSON: true},
-	)
+	repoStore, err := db.NewStore(ctx, db.Config{
+		Type:       db.DBTypeSQLite,
+		SQLitePath: filepath.Join(tempDir, "repo.db"),
+		Options:    collection.Options{EnableJSON: true},
+	})
 	if err != nil {
 		t.Fatalf("failed to create repo store: %v", err)
 	}
