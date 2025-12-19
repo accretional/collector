@@ -178,7 +178,12 @@ func run() error {
 	}
 	defer dummyStore.Close()
 
-	collectionRepo := collection.NewCollectionRepo(dummyStore, pathConfig, registryStore)
+	// Create store factory wrapper to convert concrete type to interface
+	storeFactory := func(path string, opts collection.Options) (collection.Store, error) {
+		return sqlite.NewSqliteStore(path, opts)
+	}
+
+	collectionRepo := collection.NewCollectionRepo(dummyStore, pathConfig, registryStore, storeFactory)
 	log.Println("✓ Collection repository created")
 
 	// ========================================================================

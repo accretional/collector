@@ -382,7 +382,7 @@ func (cm *CloneManager) ReceivePushedCollection(stream pb.CollectionRepo_PushCol
 	}
 
 	// Create destination paths
-	destDBPath := filepath.Join(cm.dataDir, "collections", metadata.DestNamespace, metadata.DestName+".db")
+	destDBPath := cm.pathConfig.CollectionDBPath(metadata.DestNamespace, metadata.DestName)
 	if err := os.MkdirAll(filepath.Dir(destDBPath), 0755); err != nil {
 		return fmt.Errorf("failed to create destination directory: %w", err)
 	}

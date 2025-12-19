@@ -153,7 +153,6 @@ func TestBackupCollection_Simple(t *testing.T) {
 	repo.collections["test/users"] = collection
 
 	// Create backup manager
-	backupMetaPath := filepath.Join(tmpDir, "backups", "metadata.db")
 	pathConfig := NewPathConfig(tmpDir)
 	backupManager, err := NewBackupManager(repo, &SqliteTransport{}, pathConfig)
 	if err != nil {

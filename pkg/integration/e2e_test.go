@@ -97,7 +97,11 @@ func TestEndToEndIntegration(t *testing.T) {
 	}
 	defer repoStore.Close()
 
-	collectionRepo := collection.NewCollectionRepo(repoStore, pathConfig, registryStore)
+	// Create store factory
+	storeFactory := func(path string, opts collection.Options) (collection.Store, error) {
+		return sqlite.NewSqliteStore(path, opts)
+	}
+	collectionRepo := collection.NewCollectionRepo(repoStore, pathConfig, registryStore, storeFactory)
 
 	// ========================================================================
 	// 3. Setup Dispatcher with Registry

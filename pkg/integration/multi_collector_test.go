@@ -103,7 +103,11 @@ func setupCollector(t *testing.T, collectorID, namespace string, port int) (
 	}
 	t.Cleanup(func() { repoStore.Close() })
 
-	collectionRepo := collection.NewCollectionRepo(repoStore, pathConfig, registryStore)
+	// Create store factory
+	storeFactory := func(path string, opts collection.Options) (collection.Store, error) {
+		return sqlite.NewSqliteStore(path, opts)
+	}
+	collectionRepo := collection.NewCollectionRepo(repoStore, pathConfig, registryStore, storeFactory)
 
 	// Setup Dispatcher with Registry
 	validator := registry.NewRegistryValidator(registryServer)

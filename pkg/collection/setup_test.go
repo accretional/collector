@@ -104,8 +104,11 @@ func setupTestRepo(t *testing.T) (collection.CollectionRepo, func()) {
 		t.Fatalf("failed to create dummy store: %v", err)
 	}
 
-	// 5. Create the DefaultCollectionRepo
-	repo := collection.NewCollectionRepo(dummyStore, pathConfig, registryStore)
+	// 5. Create the DefaultCollectionRepo with StoreFactory
+	storeFactory := func(path string, opts collection.Options) (collection.Store, error) {
+		return sqlite.NewSqliteStore(path, opts)
+	}
+	repo := collection.NewCollectionRepo(dummyStore, pathConfig, registryStore, storeFactory)
 
 	// Cleanup function
 	cleanup := func() {

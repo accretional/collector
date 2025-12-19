@@ -175,7 +175,7 @@ func (s *SqliteRegistryStore) GetCollection(ctx context.Context, namespace, name
 	}
 
 	if messageTypeName != "" {
-		collection.MessageType = &pb.MessageType{
+		collection.MessageType = &pb.MessageTypeRef{
 			MessageName: messageTypeName,
 		}
 	}
@@ -241,7 +241,7 @@ func (s *SqliteRegistryStore) ListCollections(ctx context.Context, namespace str
 		}
 
 		if messageTypeName != "" {
-			collection.MessageType = &pb.MessageType{
+			collection.MessageType = &pb.MessageTypeRef{
 				MessageName: messageTypeName,
 			}
 		}
@@ -305,9 +305,6 @@ func (s *SqliteRegistryStore) DeleteCollection(ctx context.Context, namespace, n
 
 // UpdateMetadata updates the metadata for an existing collection.
 func (s *SqliteRegistryStore) UpdateMetadata(ctx context.Context, namespace, name string, meta *pb.Collection) error {
-	// For now, just re-save the collection
-	id := fmt.Sprintf("%s/%s", namespace, name)
-
 	// Get existing dbPath
 	existing, err := s.GetCollection(ctx, namespace, name)
 	if err != nil {

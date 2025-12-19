@@ -14,8 +14,8 @@ import (
 // It uses a Store (like SqliteStore) for the underlying data storage.
 type CollectionRepoService struct {
 	store         Store
-	registryStore RegistryStore                 // Persist collection metadata
-	collections   map[string]*pb.Collection     // In-memory cache for performance
+	registryStore RegistryStore             // Persist collection metadata
+	collections   map[string]*pb.Collection // In-memory cache for performance
 	mu            sync.RWMutex
 }
 

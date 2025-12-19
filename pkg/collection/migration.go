@@ -160,7 +160,7 @@ func (m *Migrator) migrateCollection(ctx context.Context, namespace, name string
 		Name:      name,
 		Metadata: &pb.Metadata{
 			Labels: map[string]string{
-				"migrated": "true",
+				"migrated":       "true",
 				"migration_time": time.Now().Format(time.RFC3339),
 			},
 		},
