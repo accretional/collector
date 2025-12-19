@@ -444,3 +444,89 @@ func TestNewStore_StoreOperations(t *testing.T) {
 		t.Errorf("expected 0 records, got %d", len(records))
 	}
 }
+
+func TestSearch_VectorQueryValidation(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+
+	tests := []struct {
+		name          string
+		options       collection.Options
+		extensions    []ExtensionConfig
+		expectError   bool
+		errorContains string
+	}{
+		{
+			name: "vector query without extensions",
+			options: collection.Options{
+				EnableVector: true,
+			},
+			extensions:    nil,
+			expectError:   true,
+			errorContains: "capability 'vector' not available",
+		},
+		{
+			name: "vector query without EnableVector",
+			options: collection.Options{
+				EnableVector: false,
+			},
+			extensions: []ExtensionConfig{
+				{
+					Path:       "/nonexistent/vec.so",
+					EntryPoint: "sqlite3_vec_init",
+					Required:   false,
+				},
+			},
+			expectError:   true,
+			errorContains: "EnableVector option is false",
+		},
+		{
+			name: "vector query with EnableVector but no extensions (CGo unavailable)",
+			options: collection.Options{
+				EnableVector: true,
+			},
+			extensions:    nil,
+			expectError:   true,
+			errorContains: "capability 'vector' not available",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dbPath := filepath.Join(tempDir, tt.name+".db")
+			store, err := NewStore(ctx, StoreConfig{
+				Path:       dbPath,
+				Options:    tt.options,
+				Extensions: tt.extensions,
+			})
+			if err != nil {
+				// On systems without CGo, extension loading will fail earlier
+				// That's expected, skip this test
+				if strings.Contains(err.Error(), "unknown driver") || strings.Contains(err.Error(), "sqliteext") {
+					t.Logf("Skipping test: CGo not available: %v", err)
+					return
+				}
+				t.Fatalf("NewStore failed: %v", err)
+			}
+			defer store.Close()
+
+			// Try to search with a vector query
+			_, err = store.Search(ctx, &collection.SearchQuery{
+				Vector: []float32{0.1, 0.2, 0.3},
+				Limit:  10,
+			})
+
+			if tt.expectError {
+				if err == nil {
+					t.Error("expected error for vector query without support, got nil")
+				} else if !strings.Contains(err.Error(), tt.errorContains) {
+					t.Errorf("expected error to contain '%s', got: %v", tt.errorContains, err)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}

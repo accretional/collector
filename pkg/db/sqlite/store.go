@@ -374,6 +374,23 @@ func (s *SqliteStore) CountRecords(ctx context.Context) (int64, error) {
 }
 
 func (s *SqliteStore) Search(ctx context.Context, q *collection.SearchQuery) ([]*collection.SearchResult, error) {
+
+	if len(q.Vector) > 0 {
+		if !s.Supports("vector") {
+			var reason string
+			if s.vectorDB == nil {
+				reason = "CGo connection not available: extensions not provided"
+			} else if !s.options.EnableVector {
+				reason = "EnableVector option is false"
+			} else {
+				reason = "vector extension not loaded or not available"
+			}
+			return nil, fmt.Errorf("capability 'vector' not available: %s", reason)
+		}
+		// TODO: Implement vector search using vectorDB connection
+		return nil, fmt.Errorf("vector search not yet implemented")
+	}
+
 	var query strings.Builder
 	var args []interface{}
 	var whereClauses []string
