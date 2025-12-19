@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -137,31 +138,74 @@ func applySchema(store collection.Store) error {
 	// Apply JSON schema (adds jsontext column)
 	if err := store.ExecuteRaw(ctx, collection.JSONSchema); err != nil {
 		// Ignore if column already exists
+		errStr := err.Error()
+		if !containsIgnoreCase(errStr, "duplicate column") && !containsIgnoreCase(errStr, "already exists") {
+			return fmt.Errorf("JSON schema failed: %w", err)
+		}
 	}
 
-	// Apply FTS schema
-	if err := store.ExecuteRaw(ctx, collection.FTSSchema); err != nil {
-		// Ignore if already exists
+	// Try to apply FTS schema - FTS5 may not be available in all SQLite builds
+	ftsErr := store.ExecuteRaw(ctx, collection.FTSSchema)
+	if ftsErr != nil {
+		errStr := ftsErr.Error()
+		// Check if it's just "already exists" error
+		if containsIgnoreCase(errStr, "already exists") || containsIgnoreCase(errStr, "duplicate") {
+			// Table already exists, that's fine - continue
+		} else if containsIgnoreCase(errStr, "no such module") || containsIgnoreCase(errStr, "fts5") {
+			// FTS5 not available - skip FTS features for this store
+			// This is expected for some SQLite builds
+			return nil
+		} else {
+			// Some other error - return it
+			return fmt.Errorf("FTS schema failed: %w", ftsErr)
+		}
 	}
 
-	// Apply FTS triggers
-	triggers := `
-	CREATE TRIGGER IF NOT EXISTS records_ai AFTER INSERT ON records BEGIN
-		INSERT INTO records_fts(rowid, content) VALUES (new.rowid, new.jsontext);
-	END;
-	CREATE TRIGGER IF NOT EXISTS records_ad AFTER DELETE ON records BEGIN
-		DELETE FROM records_fts WHERE rowid=old.rowid;
-	END;
-	CREATE TRIGGER IF NOT EXISTS records_au AFTER UPDATE ON records BEGIN
-		DELETE FROM records_fts WHERE rowid=old.rowid;
-		INSERT INTO records_fts(rowid, content) VALUES (new.rowid, new.jsontext);
-	END;
-	`
-	if err := store.ExecuteRaw(ctx, triggers); err != nil {
-		// Ignore if already exists
+	// Verify FTS table exists before creating triggers
+	// For cgoStore, check directly
+	var ftsTableExists bool
+	if cgoStore, ok := store.(*cgoStore); ok {
+		var count int
+		err := cgoStore.db.QueryRowContext(ctx,
+			"SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='records_fts'").Scan(&count)
+		if err == nil && count > 0 {
+			ftsTableExists = true
+		}
+	} else {
+		// For hybrid stores, if schema didn't error, assume table exists
+		ftsTableExists = (ftsErr == nil)
+	}
+
+	// Apply FTS triggers only if FTS table exists
+	if ftsTableExists {
+		triggers := `
+		CREATE TRIGGER IF NOT EXISTS records_ai AFTER INSERT ON records BEGIN
+			INSERT INTO records_fts(rowid, content) VALUES (new.rowid, new.jsontext);
+		END;
+		CREATE TRIGGER IF NOT EXISTS records_ad AFTER DELETE ON records BEGIN
+			DELETE FROM records_fts WHERE rowid=old.rowid;
+		END;
+		CREATE TRIGGER IF NOT EXISTS records_au AFTER UPDATE ON records BEGIN
+			DELETE FROM records_fts WHERE rowid=old.rowid;
+			INSERT INTO records_fts(rowid, content) VALUES (new.rowid, new.jsontext);
+		END;
+		`
+		if err := store.ExecuteRaw(ctx, triggers); err != nil {
+			errStr := err.Error()
+			if !containsIgnoreCase(errStr, "already exists") && !containsIgnoreCase(errStr, "duplicate") {
+				return fmt.Errorf("trigger creation failed: %w", err)
+			}
+		}
 	}
 
 	return nil
+}
+
+// containsIgnoreCase checks if a string contains a substring (case-insensitive)
+func containsIgnoreCase(s, substr string) bool {
+	s = strings.ToLower(s)
+	substr = strings.ToLower(substr)
+	return strings.Contains(s, substr)
 }
 
 // cgoStore is a wrapper around mattn/go-sqlite3 to implement Store interface
