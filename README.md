@@ -593,14 +593,21 @@ See: [Backup Availability Test Results](docs/testing/backup-availability.md)
 
 ```bash
 # Build the server
-go build ./cmd/server
+go build -tags sqlite_fts5 ./cmd/server
 
 # Build and run
-go run ./cmd/server/main.go
+go run -tags sqlite_fts5 ./cmd/server/main.go
+
+# Run tests
+go test -tags sqlite_fts5 ./...
 
 # Generate protobuf code (if proto files change)
 ./scripts/gen-proto.sh
 ```
+
+### Build Tags
+
+- **`sqlite_fts5` or `fts5`**: Enables FTS5 (Full-Text Search) support in SQLite. This is **required** for full-text search functionality. The Makefile includes this tag automatically in all builds.
 
 ## Project Structure
 

@@ -53,11 +53,12 @@ run_test() {
 ALL_PASSED=true
 
 print_section "1. BUILD VERIFICATION"
-if ! run_test "Build all packages" "go build ./..."; then
+# Build with FTS5 support for production builds
+if ! run_test "Build all packages" "go build -tags sqlite_fts5 ./..."; then
     ALL_PASSED=false
 fi
 
-if ! run_test "Build main server" "go build ./cmd/server"; then
+if ! run_test "Build main server" "go build -tags sqlite_fts5 ./cmd/server"; then
     ALL_PASSED=false
 fi
 
@@ -72,7 +73,8 @@ if ! run_test "Go fmt - code formatting" "test -z \$(gofmt -l ./pkg/ ./cmd/)"; t
 fi
 
 print_section "3. UNIT TESTS - ALL PACKAGES"
-if ! run_test "pkg/collection - unit tests" "go test ./pkg/collection -short -v"; then
+# Note: sqlite_fts5 tag is required for FTS5 support in tests
+if ! run_test "pkg/collection - unit tests" "go test -tags sqlite_fts5 ./pkg/collection -short -v"; then
     ALL_PASSED=false
 fi
 
@@ -84,23 +86,23 @@ if ! run_test "pkg/dispatch - unit tests" "go test ./pkg/dispatch -short -v"; th
     ALL_PASSED=false
 fi
 
-if ! run_test "pkg/db/sqlite - unit tests" "go test ./pkg/db/sqlite -short -v"; then
+if ! run_test "pkg/db/sqlite - unit tests" "go test -tags sqlite_fts5 ./pkg/db/sqlite -short -v"; then
     ALL_PASSED=false
 fi
 
 print_section "4. INTEGRATION TESTS"
-if ! run_test "Integration tests" "go test ./pkg/integration -short -v"; then
+if ! run_test "Integration tests" "go test -tags sqlite_fts5 ./pkg/integration -short -v"; then
     ALL_PASSED=false
 fi
 
 print_section "5. BACKUP SYSTEM VALIDATION"
 echo "Testing backup functionality and availability..."
 
-if ! run_test "Backup tests - all scenarios" "go test ./pkg/collection -run 'Test.*Backup' -short -v"; then
+if ! run_test "Backup tests - all scenarios" "go test -tags sqlite_fts5 ./pkg/collection -run 'Test.*Backup' -short -v"; then
     ALL_PASSED=false
 fi
 
-if ! run_test "Backup availability - near-zero downtime" "go test ./pkg/db/sqlite -run TestBackup -v"; then
+if ! run_test "Backup availability - near-zero downtime" "go test -tags sqlite_fts5 ./pkg/db/sqlite -run TestBackup -v"; then
     ALL_PASSED=false
 fi
 
@@ -109,7 +111,7 @@ echo "Note: Race detector adds overhead and may cause timing-sensitive tests to 
 echo "      This is expected - race detector significantly slows execution"
 echo ""
 
-if ! run_test "Race detector - collection package" "go test ./pkg/collection -race -short"; then
+if ! run_test "Race detector - collection package" "go test -tags sqlite_fts5 ./pkg/collection -race -short"; then
     ALL_PASSED=false
 fi
 
@@ -123,17 +125,17 @@ fi
 echo "⚠️  Skipping race detection on pkg/db/sqlite (lock timing tests incompatible with race overhead)"
 
 print_section "7. DURABILITY & STRESS TESTS"
-if ! run_test "Durability tests" "go test ./pkg/collection -run Durability -short -v"; then
+if ! run_test "Durability tests" "go test -tags sqlite_fts5 ./pkg/collection -run Durability -short -v"; then
     ALL_PASSED=false
 fi
 
-if ! run_test "Concurrent operations" "go test ./pkg/collection -run Concurrent -short -v"; then
+if ! run_test "Concurrent operations" "go test -tags sqlite_fts5 ./pkg/collection -run Concurrent -short -v"; then
     ALL_PASSED=false
 fi
 
 print_section "8. BENCHMARKS"
 echo "Running performance benchmarks..."
-if ! go test -bench=. ./pkg/collection -benchtime=1s -run=^$ > /tmp/bench.txt 2>&1; then
+if ! go test -tags sqlite_fts5 -bench=. ./pkg/collection -benchtime=1s -run=^$ > /tmp/bench.txt 2>&1; then
     echo -e "${YELLOW}⚠ Benchmarks completed with warnings${NC}"
     cat /tmp/bench.txt
 else
@@ -143,7 +145,7 @@ fi
 
 print_section "9. COVERAGE REPORT"
 echo "Generating coverage report..."
-if go test -coverprofile=coverage.out ./pkg/... > /dev/null 2>&1; then
+if go test -tags sqlite_fts5 -coverprofile=coverage.out ./pkg/... > /dev/null 2>&1; then
     COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}')
     echo -e "${GREEN}✓ Overall test coverage: ${COVERAGE}${NC}"
 
@@ -158,7 +160,7 @@ fi
 
 print_section "10. FINAL VERIFICATION"
 # One more comprehensive run of all tests
-if ! run_test "Final comprehensive test run" "go test ./pkg/... -short"; then
+if ! run_test "Final comprehensive test run" "go test -tags sqlite_fts5 ./pkg/... -short"; then
     ALL_PASSED=false
 fi
 
