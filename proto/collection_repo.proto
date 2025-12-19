@@ -173,9 +173,10 @@ message BackupMetadata {
 
 message BackupCollectionRequest {
   NamespacedName collection = 1;
-  string dest_path = 2;           // Local file path or URI (s3://, gcs://)
+  // dest_path REMOVED - backups now stored automatically at:
+  // {DataDir}/.backup/{namespace}/{collectionname}-{timestampseconds}.db
   bool include_files = 3;         // Include filesystem data
-  map<string, string> metadata = 4; // Optional metadata (tags, notes, retention policy)
+  map<string, string> metadata = 4; // Optional metadata (tags, notes)
 }
 
 message BackupCollectionResponse {

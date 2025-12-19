@@ -37,15 +37,23 @@ message CollectionRecord {
   Metadata metadata = 4;
 }
 
+// BackupPolicy defines retention rules for automatic backup management
+message BackupPolicy {
+  int32 max_backups = 1;          // Maximum number of backups to retain (0 = unlimited)
+  int64 retention_seconds = 2;    // Retention duration in seconds (0 = unlimited)
+  bool enabled = 3;               // Whether policy is enabled
+}
+
 // The Collection itself: table (inode) + optional filesystem
 message Collection {
   string namespace = 1;
   string name = 2;
   MessageTypeRef message_type = 3;
   repeated string indexed_fields = 4;
-  
+
   // Optional: if this Collection is served by a separate CollectionServer
   string server_endpoint = 5;
-  
+
   Metadata metadata = 6;
+  BackupPolicy backup_policy = 7; // Optional backup retention policy
 }

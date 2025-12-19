@@ -1,8 +1,10 @@
 package collection
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 )
 
 // PathConfig provides centralized path management for collection storage.
@@ -57,4 +59,42 @@ func (pc *PathConfig) HasOldStructure(namespace, name string) bool {
 	oldPath := pc.OldCollectionDBPath(namespace, name)
 	_, err := os.Stat(oldPath)
 	return err == nil
+}
+
+// BackupDir returns the base backup directory.
+// Format: {DataDir}/.backup
+func (pc *PathConfig) BackupDir() string {
+	return filepath.Join(pc.DataDir, ".backup")
+}
+
+// BackupPath generates a backup file path for a collection.
+// Format: {DataDir}/.backup/{namespace}/{collectionname}-{timestampseconds}.db
+func (pc *PathConfig) BackupPath(namespace, name string, timestamp int64) string {
+	filename := fmt.Sprintf("%s-%d.db", name, timestamp)
+	return filepath.Join(pc.BackupDir(), namespace, filename)
+}
+
+// BackupFilesPath generates a backup files directory path.
+// Format: {DataDir}/.backup/{namespace}/{collectionname}-{timestampseconds}.files
+func (pc *PathConfig) BackupFilesPath(namespace, name string, timestamp int64) string {
+	filename := fmt.Sprintf("%s-%d.files", name, timestamp)
+	return filepath.Join(pc.BackupDir(), namespace, filename)
+}
+
+// ListBackupPaths lists all backup database files for a collection.
+// Returns sorted list (oldest to newest).
+func (pc *PathConfig) ListBackupPaths(namespace, name string) ([]string, error) {
+	backupDir := filepath.Join(pc.BackupDir(), namespace)
+	if _, err := os.Stat(backupDir); os.IsNotExist(err) {
+		return nil, nil
+	}
+
+	pattern := filepath.Join(backupDir, name+"-*.db")
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return nil, err
+	}
+
+	sort.Strings(matches)
+	return matches, nil
 }

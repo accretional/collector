@@ -282,8 +282,15 @@ func TestDeleteBackup(t *testing.T) {
 		t.Fatalf("failed to create backup file: %v", err)
 	}
 
+	// Create pathConfig and use its metadata path
+	pathConfig := NewPathConfig(tmpDir)
+	metadataPath := pathConfig.BackupsMetadataPath()
+	if err := os.MkdirAll(filepath.Dir(metadataPath), 0755); err != nil {
+		t.Fatalf("failed to create backups dir: %v", err)
+	}
+
 	// Create metadata store
-	metaStore, err := NewBackupMetadataStore(filepath.Join(tmpDir, "metadata.db"))
+	metaStore, err := NewBackupMetadataStore(metadataPath)
 	if err != nil {
 		t.Fatalf("failed to create metadata store: %v", err)
 	}
@@ -308,7 +315,6 @@ func TestDeleteBackup(t *testing.T) {
 
 	// Create backup manager
 	repo := &MockCollectionRepo{collections: make(map[string]*Collection)}
-	pathConfig := NewPathConfig(tmpDir)
 	backupManager, err := NewBackupManager(repo, &SqliteTransport{}, pathConfig)
 	if err != nil {
 		t.Fatalf("failed to create backup manager: %v", err)
@@ -353,8 +359,15 @@ func TestVerifyBackup(t *testing.T) {
 	}
 	store.Close()
 
+	// Create pathConfig and use its metadata path
+	pathConfig := NewPathConfig(tmpDir)
+	metadataPath := pathConfig.BackupsMetadataPath()
+	if err := os.MkdirAll(filepath.Dir(metadataPath), 0755); err != nil {
+		t.Fatalf("failed to create backups dir: %v", err)
+	}
+
 	// Create metadata store
-	metaStore, err := NewBackupMetadataStore(filepath.Join(tmpDir, "metadata.db"))
+	metaStore, err := NewBackupMetadataStore(metadataPath)
 	if err != nil {
 		t.Fatalf("failed to create metadata store: %v", err)
 	}
@@ -379,7 +392,6 @@ func TestVerifyBackup(t *testing.T) {
 
 	// Create backup manager
 	repo := &MockCollectionRepo{collections: make(map[string]*Collection)}
-	pathConfig := NewPathConfig(tmpDir)
 	backupManager, err := NewBackupManager(repo, &SqliteTransport{}, pathConfig)
 	if err != nil {
 		t.Fatalf("failed to create backup manager: %v", err)
@@ -409,8 +421,15 @@ func TestVerifyBackup_Missing(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 
+	// Create pathConfig and use its metadata path
+	pathConfig := NewPathConfig(tmpDir)
+	metadataPath := pathConfig.BackupsMetadataPath()
+	if err := os.MkdirAll(filepath.Dir(metadataPath), 0755); err != nil {
+		t.Fatalf("failed to create backups dir: %v", err)
+	}
+
 	// Create metadata store
-	metaStore, err := NewBackupMetadataStore(filepath.Join(tmpDir, "metadata.db"))
+	metaStore, err := NewBackupMetadataStore(metadataPath)
 	if err != nil {
 		t.Fatalf("failed to create metadata store: %v", err)
 	}
@@ -435,7 +454,6 @@ func TestVerifyBackup_Missing(t *testing.T) {
 
 	// Create backup manager
 	repo := &MockCollectionRepo{collections: make(map[string]*Collection)}
-	pathConfig := NewPathConfig(tmpDir)
 	backupManager, err := NewBackupManager(repo, &SqliteTransport{}, pathConfig)
 	if err != nil {
 		t.Fatalf("failed to create backup manager: %v", err)
@@ -889,8 +907,15 @@ func TestRestoreWithOverwrite(t *testing.T) {
 	}
 	store.Close()
 
+	// Create pathConfig and use its metadata path
+	pathConfig := NewPathConfig(tmpDir)
+	metadataPath := pathConfig.BackupsMetadataPath()
+	if err := os.MkdirAll(filepath.Dir(metadataPath), 0755); err != nil {
+		t.Fatalf("failed to create backups dir: %v", err)
+	}
+
 	// Create metadata store
-	metaStore, err := NewBackupMetadataStore(filepath.Join(tmpDir, "metadata.db"))
+	metaStore, err := NewBackupMetadataStore(metadataPath)
 	if err != nil {
 		t.Fatalf("failed to create metadata store: %v", err)
 	}
@@ -915,7 +940,6 @@ func TestRestoreWithOverwrite(t *testing.T) {
 
 	// Create backup manager
 	repo := &MockCollectionRepo{collections: make(map[string]*Collection)}
-	pathConfig := NewPathConfig(tmpDir)
 	backupManager, err := NewBackupManager(repo, &SqliteTransport{}, pathConfig)
 	if err != nil {
 		t.Fatalf("failed to create backup manager: %v", err)

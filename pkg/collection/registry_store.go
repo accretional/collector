@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS collections (
     server_endpoint TEXT,
     indexed_fields TEXT,
     labels TEXT,
+    backup_policy TEXT,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     UNIQUE(namespace, name)
@@ -81,8 +82,8 @@ func (s *SqliteRegistryStore) SaveCollection(ctx context.Context, collection *pb
 	id := fmt.Sprintf("%s/%s", collection.Namespace, collection.Name)
 	now := time.Now().Unix()
 
-	// Encode indexed fields and labels as JSON
-	var indexedFieldsJSON, labelsJSON []byte
+	// Encode indexed fields, labels, and backup policy as JSON
+	var indexedFieldsJSON, labelsJSON, backupPolicyJSON []byte
 	var err error
 
 	if collection.IndexedFields != nil && len(collection.IndexedFields) > 0 {
@@ -99,6 +100,13 @@ func (s *SqliteRegistryStore) SaveCollection(ctx context.Context, collection *pb
 		}
 	}
 
+	if collection.BackupPolicy != nil {
+		backupPolicyJSON, err = json.Marshal(collection.BackupPolicy)
+		if err != nil {
+			return fmt.Errorf("failed to marshal backup policy: %w", err)
+		}
+	}
+
 	// Get message type name if available
 	var messageTypeName string
 	if collection.MessageType != nil {
@@ -107,14 +115,15 @@ func (s *SqliteRegistryStore) SaveCollection(ctx context.Context, collection *pb
 
 	// Insert or update
 	query := `
-		INSERT INTO collections (id, namespace, name, db_path, message_type_name, server_endpoint, indexed_fields, labels, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO collections (id, namespace, name, db_path, message_type_name, server_endpoint, indexed_fields, labels, backup_policy, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			db_path = excluded.db_path,
 			message_type_name = excluded.message_type_name,
 			server_endpoint = excluded.server_endpoint,
 			indexed_fields = excluded.indexed_fields,
 			labels = excluded.labels,
+			backup_policy = excluded.backup_policy,
 			updated_at = excluded.updated_at
 	`
 
@@ -127,6 +136,7 @@ func (s *SqliteRegistryStore) SaveCollection(ctx context.Context, collection *pb
 		collection.ServerEndpoint,
 		string(indexedFieldsJSON),
 		string(labelsJSON),
+		string(backupPolicyJSON),
 		now,
 		now,
 	)

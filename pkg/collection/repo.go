@@ -68,6 +68,11 @@ func NewCollectionRepo(store Store, pathConfig *PathConfig, registryStore Regist
 
 // CreateCollection creates a new collection.
 func (r *DefaultCollectionRepo) CreateCollection(ctx context.Context, collection *pb.Collection) (*pb.CreateCollectionResponse, error) {
+	// Validate input
+	if collection == nil {
+		return nil, fmt.Errorf("collection cannot be nil")
+	}
+
 	// Create the database file and files directory first
 	dbPath := r.pathConfig.CollectionDBPath(collection.Namespace, collection.Name)
 	filesPath := r.pathConfig.CollectionFilesPath(collection.Namespace, collection.Name)
@@ -146,5 +151,13 @@ func (r *DefaultCollectionRepo) UpdateCollectionMetadata(ctx context.Context, na
 
 	// Update the collection metadata
 	r.service.collections[key] = meta
+
+	// Persist to registry store if available
+	if r.service.registryStore != nil {
+		if err := r.service.registryStore.UpdateMetadata(ctx, namespace, name, meta); err != nil {
+			return fmt.Errorf("failed to persist metadata update: %w", err)
+		}
+	}
+
 	return nil
 }
