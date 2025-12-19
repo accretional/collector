@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 
@@ -60,19 +61,18 @@ func NewStore(path string, opts collection.Options) (*Store, error) {
 		}
 	}
 
-	// Apply Schemas
 	if _, err := db.Exec(collection.DefaultSchema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("default schema failed: %w", err)
 	}
 
 	if _, err := db.Exec(collection.JSONSchema); err != nil {
-		// Ignore error if column already exists, or handle strictly
+		log.Println("JSONSchema already exists")
 	}
 
 	if opts.EnableVector {
 		if _, err := db.Exec(collection.VectorSchema); err != nil {
-			// Ignore error if column already exists, or handle strictly
+			log.Println("VectorSchema already exists")
 		}
 
 		stmt := fmt.Sprintf(`CREATE VIRTUAL TABLE IF NOT EXISTS records_vec USING vec0(vector FLOAT[%d]);`, opts.VectorDimensions)
@@ -508,7 +508,9 @@ func (s *Store) BackupOnline(ctx context.Context, destPath string, pagesBatchSiz
 		if err := idxRows.Scan(&sql); err != nil {
 			continue
 		}
-		destDB.ExecContext(ctx, sql) // Ignore errors, index might exist
+		if _, err := destDB.ExecContext(ctx, sql); err != nil {
+			log.Printf("failed to copy index: %v", err)
+		}
 	}
 
 	return nil
@@ -560,16 +562,16 @@ func (b *searchQueryBuilder) buildHybrid(ctx context.Context) ([]*collection.Sea
 
 	limit := b.getKNNLimit()
 
-	b.selectFields(`r.id, r.proto_data, r.data_uri, r.created_at, r.updated_at, r.labels, 
-                    v.distance, bm25(fts) as fts_score`)
-	b.fromClause(`records_vec v 
-                  JOIN records r ON r.rowid = v.rowid 
-                  JOIN records_fts fts ON r.rowid = fts.rowid`)
+	b.selectFields(`r.id, r.proto_data, r.data_uri, r.created_at, r.updated_at, r.labels,
+                    v.distance, bm25(records_fts) as fts_score`)
+	b.fromClause(`records_vec v
+                  JOIN records r ON r.rowid = v.rowid
+                  JOIN records_fts ON r.rowid = records_fts.rowid`)
 
 	b.whereClauses = []string{
 		`v.vector MATCH ?`,
 		`k = ?`,
-		`fts MATCH ?`,
+		`records_fts MATCH ?`,
 	}
 	b.args = append(b.args, queryVector, limit, b.query.FullText)
 
@@ -618,11 +620,11 @@ func (b *searchQueryBuilder) buildFTS(ctx context.Context) ([]*collection.Search
 		return nil, fmt.Errorf("full-text search requested but FTS5 is not available. Build with -tags sqlite_fts5 or -tags fts5 to enable FTS5 support")
 	}
 
-	b.selectFields(`r.id, r.proto_data, r.data_uri, r.created_at, r.updated_at, r.labels, 
-                    bm25(fts) as score`)
-	b.fromClause(`records r JOIN records_fts fts ON r.rowid = fts.rowid`)
+	b.selectFields(`r.id, r.proto_data, r.data_uri, r.created_at, r.updated_at, r.labels,
+                    bm25(records_fts) as score`)
+	b.fromClause(`records r JOIN records_fts ON r.rowid = records_fts.rowid`)
 
-	b.whereClauses = []string{`fts MATCH ?`}
+	b.whereClauses = []string{`records_fts MATCH ?`}
 	b.args = append(b.args, b.query.FullText)
 
 	b.addFilters()

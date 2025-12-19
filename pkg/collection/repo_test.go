@@ -85,16 +85,15 @@ func TestCollectionRepo_Discover(t *testing.T) {
 		}
 	}
 
-	// Discover all collections (currently returns Not Implemented)
+	// Discover all collections
 	req := &pb.DiscoverRequest{}
 	resp, err := repo.Discover(ctx, req)
 	if err != nil {
 		t.Fatalf("Discover failed: %v", err)
 	}
 
-	// Implementation returns 501 Not Implemented
-	if resp.Status.Code != 501 {
-		t.Logf("Discover returned status %d (expected 501 Not Implemented during development)", resp.Status.Code)
+	if resp.Status.Code != 200 {
+		t.Errorf("expected status 200, got %d", resp.Status.Code)
 	}
 }
 
@@ -127,9 +126,8 @@ func TestCollectionRepo_Discover_WithNamespaceFilter(t *testing.T) {
 		t.Fatalf("Discover failed: %v", err)
 	}
 
-	// Implementation returns 501 Not Implemented
-	if resp.Status.Code != 501 {
-		t.Logf("Discover returned status %d", resp.Status.Code)
+	if resp.Status.Code != 200 {
+		t.Errorf("expected status 200, got %d", resp.Status.Code)
 	}
 }
 
@@ -169,9 +167,8 @@ func TestCollectionRepo_Discover_WithMessageTypeFilter(t *testing.T) {
 		t.Fatalf("Discover failed: %v", err)
 	}
 
-	// Implementation returns 501 Not Implemented
-	if resp.Status.Code != 501 {
-		t.Logf("Discover returned status %d", resp.Status.Code)
+	if resp.Status.Code != 200 {
+		t.Errorf("expected status 200, got %d", resp.Status.Code)
 	}
 }
 
