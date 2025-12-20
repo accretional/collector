@@ -310,6 +310,11 @@ func (s *SqliteRegistryStore) DeleteCollection(ctx context.Context, namespace, n
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Prevent deletion of system namespace collections
+	if namespace == "system" {
+		return fmt.Errorf("cannot delete system collection: %s/%s (system namespace is protected)", namespace, name)
+	}
+
 	id := fmt.Sprintf("%s/%s", namespace, name)
 
 	query := `DELETE FROM collections WHERE id = ?`

@@ -46,6 +46,34 @@ func (cm *CloneManager) CloneLocal(ctx context.Context, req *pb.CloneRequest) (*
 		return nil, fmt.Errorf("destination namespace and name are required")
 	}
 
+	// Check if destination exists and has active operations
+	destExists := false
+	existingDest, err := cm.repo.GetCollection(ctx, req.DestNamespace, req.DestName)
+	if err == nil {
+		destExists = true
+		// Check for operation conflicts on destination
+		if err := CheckOperationConflict(existingDest.Meta); err != nil {
+			return nil, fmt.Errorf("destination has active operation: %w", err)
+		}
+	}
+
+	// Register clone operation on destination (if it exists)
+	if destExists {
+		cloneURI := fmt.Sprintf("clone:%s/%s->%s/%s",
+			req.SourceCollection.Namespace, req.SourceCollection.Name,
+			req.DestNamespace, req.DestName)
+		if err := StartOperation(ctx, cm.repo, req.DestNamespace, req.DestName,
+			"clone", cloneURI, cm.pathConfig.DataDir, CloneTimeout); err != nil {
+			return nil, fmt.Errorf("failed to register clone operation: %w", err)
+		}
+
+		defer func() {
+			if err := CompleteOperation(ctx, cm.repo, req.DestNamespace, req.DestName); err != nil {
+				fmt.Printf("Warning: failed to clear clone operation state: %v\n", err)
+			}
+		}()
+	}
+
 	// Get source collection
 	srcNamespace := req.SourceCollection.Namespace
 	srcName := req.SourceCollection.Name
@@ -388,6 +416,37 @@ func (cm *CloneManager) ReceivePushedCollection(stream pb.CollectionRepo_PushCol
 	metadata := firstMsg.GetMetadata()
 	if metadata == nil {
 		return fmt.Errorf("expected metadata in first message")
+	}
+
+	// Check if destination exists and has active operations
+	destExists := false
+	existingDest, err := cm.repo.GetCollection(ctx, metadata.DestNamespace, metadata.DestName)
+	if err == nil {
+		destExists = true
+		// Check for operation conflicts on destination
+		if err := CheckOperationConflict(existingDest.Meta); err != nil {
+			return fmt.Errorf("destination has active operation: %w", err)
+		}
+	}
+
+	// Register clone operation on destination (if it exists)
+	if destExists {
+		cloneURI := fmt.Sprintf("clone:remote->%s/%s", metadata.DestNamespace, metadata.DestName)
+		if metadata.SourceCollection != nil {
+			cloneURI = fmt.Sprintf("clone:%s/%s->%s/%s",
+				metadata.SourceCollection.Namespace, metadata.SourceCollection.Name,
+				metadata.DestNamespace, metadata.DestName)
+		}
+		if err := StartOperation(ctx, cm.repo, metadata.DestNamespace, metadata.DestName,
+			"clone", cloneURI, cm.pathConfig.DataDir, CloneTimeout); err != nil {
+			return fmt.Errorf("failed to register clone operation: %w", err)
+		}
+
+		defer func() {
+			if err := CompleteOperation(ctx, cm.repo, metadata.DestNamespace, metadata.DestName); err != nil {
+				fmt.Printf("Warning: failed to clear clone operation state: %v\n", err)
+			}
+		}()
 	}
 
 	// Create destination paths

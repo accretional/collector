@@ -541,9 +541,11 @@ func (bm *BackupManager) BackupCollection(ctx context.Context, req *pb.BackupCol
 		}, nil
 	}
 
-	// Trigger automatic cleanup if backup policy is enabled
+	// Run automatic cleanup if backup policy is enabled
+	// This runs synchronously while backup operation is still active,
+	// preventing concurrent restore/delete/clone during cleanup
 	if sourceCollection.Meta.BackupPolicy != nil && sourceCollection.Meta.BackupPolicy.Enabled {
-		go bm.cleanupOldBackups(context.Background(), req.Collection.Namespace, req.Collection.Name, sourceCollection.Meta.BackupPolicy)
+		bm.cleanupOldBackups(ctx, req.Collection.Namespace, req.Collection.Name, sourceCollection.Meta.BackupPolicy)
 	}
 
 	return &pb.BackupCollectionResponse{
@@ -978,7 +980,8 @@ func (bm *BackupManager) VerifyBackup(ctx context.Context, req *pb.VerifyBackupR
 }
 
 // cleanupOldBackups enforces retention policy for a collection's backups.
-// This runs asynchronously and logs errors without failing the backup operation.
+// This runs synchronously while the backup operation is still active, preventing
+// concurrent restore/delete/clone operations during cleanup.
 func (bm *BackupManager) cleanupOldBackups(ctx context.Context, namespace, name string, policy *pb.BackupPolicy) {
 	if policy == nil || !policy.Enabled {
 		return
