@@ -1,558 +1,455 @@
-# CollectorRegistry Comprehensive Analysis
+# CollectorRegistry Comprehensive Analysis (Updated 2025-12-20)
 
 ## Executive Summary
 
-CollectorRegistry is **functionally complete** for its core use case (service validation), but has several gaps that limit its utility as a general-purpose type registry and service catalog.
+CollectorRegistry is **production-ready for basic schema registration** with strong security validation, but **critically incomplete** for real-world schema evolution, operational needs, and debugging scenarios.
+
+**Recent Improvements** (2025-12-20):
+- ✅ Added comprehensive namespace/name validation (TDD-based)
+- ✅ Implemented configurable size limits (DoS protection)
+- ✅ Global MaxProtoSize enforcement at collection level
+- ✅ Expanded test coverage (+12 tests)
+
+**Grade**: B+ (85%) - Strong security foundation, missing lifecycle management
+
+---
 
 ## ✅ What Works Well
 
+### Security & Validation
+- ✅ **Input Validation**: Namespace, proto name, service name validation blocking path traversal, reserved names, invalid characters
+- ✅ **Size Limits**: Configurable limits on message count (100k), nesting depth (100), proto size (10MB)
+- ✅ **Global Protection**: MaxProtoSize enforced at collection level (defense-in-depth)
+- ✅ **Reserved Namespaces**: Blocks `repo`, `backups`, `files`, `system`, `internal`, `admin`, `metadata`
+- ✅ **Hierarchical Validation**: ValidateServiceName rejects slashes; ValidateProtoFileName allows dots for extensions
+
 ### Core Functionality
-- ✅ Service registration and validation (primary use case)
-- ✅ Method validation via interceptors
-- ✅ Namespace isolation
-- ✅ Duplicate detection
-- ✅ DB-level filtering with labels (no 10k limit)
-- ✅ Complex type support (nested, enums, maps, oneofs)
-- ✅ Streaming method support
-- ✅ Integration with validation interceptors
+- ✅ **Proto Registration**: RegisterProto with FileDescriptorProto, namespace isolation, ID format `{namespace}/{filename}`
+- ✅ **Service Registration**: RegisterService with ServiceDescriptorProto, gRPC endpoints, ID format `{namespace}/{serviceName}`
+- ✅ **Dependency Resolution**: Hierarchical namespace resolution (child can access parent protos)
+- ✅ **Well-Known Types**: Auto-skips validation for `google/protobuf/*`, `google/api/*`, collector core types
+- ✅ **Lookup Operations**: LookupProto (internal), LookupService (gRPC), both with namespace+name queries
+- ✅ **List Operations**: ListProtos, ListServices with optional namespace filtering, DB-level filtering
+- ✅ **Validation Interceptors**: Stream and unary interceptors for method validation
+- ✅ **Type Registry Integration**: Optional TypeRegistrar interface for separate type registry
 
 ### Test Coverage
-- ✅ 43 test functions covering core scenarios
-- ✅ 100k scalability tests (services and protos)
-- ✅ 9 dependency validation tests (missing, circular, hierarchical, well-known types)
-- ✅ Integration tests with dispatcher
-- ✅ Validation interceptor tests
-- ✅ Edge cases (nil values, empty strings, duplicates)
+- ✅ 54 test functions covering core scenarios (excluding slow scalability tests)
+- ✅ Validation tests (8): reserved namespaces, invalid chars, length limits, hierarchical namespaces
+- ✅ Size limit tests (4): too many messages, deep nesting, proto size, within limits
+- ✅ Dependency tests (9): missing deps, circular deps, transitive deps, cross-namespace, hierarchical resolution
+- ✅ Integration tests: dispatcher, collection service, validation interceptors
+- ✅ Edge cases: nil values, empty strings, duplicates, complex types, streaming methods
 
-## ⚠️ Missing Features & Gaps
+---
 
-### 1. **🔴 CRITICAL: Missing Namespace Validation**
+## 🔴 CRITICAL GAPS
 
-**Problem**: RegisterProto and RegisterService do NOT validate namespace names.
+### 1. **No Update Operations**
+
+**Problem**: Cannot modify registered protos/services after initial registration.
 
 **Impact**:
-- Users can register in reserved namespaces: `repo`, `backups`, `files`
-- Users can use invalid characters that break filesystem operations
-- No length limits enforced
-- Path traversal attacks possible: `../../malicious`
-- Hidden namespaces possible: `.hidden`
+- Schema evolution impossible
+- Typo fixes require deletion (which doesn't exist)
+- Dependency updates blocked
+- Breaking changes irreversible
 
-**Current Code** (registry.go:158-160):
+**Missing APIs**:
 ```go
-if req.Namespace == "" {
-    return nil, status.Errorf(codes.InvalidArgument, "namespace is required")
-}
-// ❌ No validation.ValidateNamespace(req.Namespace) call!
+// Not implemented:
+UpdateProto(ctx, namespace, fileName, newFileDescriptor) error
+UpdateService(ctx, namespace, serviceName, newServiceDescriptor) error
 ```
 
-**What should happen**:
+**Real-world scenario**: Deploy v2 of proto; must choose between:
+- Keep old name → break registry contract (duplicate error)
+- New name → break all clients (they expect old name)
+
+**Priority**: 🔴 **CRITICAL** - Blocks schema evolution
+
+---
+
+### 2. **No Deletion Operations**
+
+**Problem**: Cannot remove registered protos/services.
+
+**Impact**:
+- Registry grows indefinitely
+- No cleanup path for obsolete schemas
+- Cannot recover from bad registration
+- No way to deprecate/sunset schemas
+
+**Missing APIs**:
 ```go
-if req.Namespace == "" {
-    return nil, status.Errorf(codes.InvalidArgument, "namespace is required")
-}
-if err := collection.ValidateNamespace(req.Namespace); err != nil {
-    return nil, status.Errorf(codes.InvalidArgument, "invalid namespace: %v", err)
-}
+// Not implemented:
+DeleteProto(ctx, namespace, fileName) error
+DeleteService(ctx, namespace, serviceName) error
+// Should also check:
+FindDependents(protoID) ([]string, error) // prevent orphans
 ```
 
-**Tests missing**:
-- ❌ Test registering in reserved namespace "repo" (should fail)
-- ❌ Test registering with invalid chars like "../test" (should fail)
-- ❌ Test registering with dots ".hidden" (should fail)
-- ❌ Test namespace length limits
+**Real-world scenario**: Accidentally register wrong proto; must live with it forever or manually edit database.
 
-**Priority**: 🔴 **CRITICAL** - Security and data integrity issue
+**Priority**: 🔴 **CRITICAL** - No recovery from mistakes
 
 ---
 
-### 2. **🔴 CRITICAL: No Proto/Service Name Validation**
+### 3. **No Reverse Dependency Queries**
 
-**Problem**: File descriptor names and service names are not validated.
-
-**Impact**:
-- Path traversal: `../../etc/passwd.proto`
-- Invalid IDs: IDs are `namespace/name`, so `/` in name breaks format
-- No length limits on names
-- Hidden files: `.hidden.proto`
-
-**Tests missing**:
-- ❌ Test proto name with path traversal
-- ❌ Test proto name with invalid characters
-- ❌ Test extremely long proto names (1000+ chars)
-- ❌ Test service name with special characters
-
-**Priority**: 🔴 **CRITICAL** - Security issue
-
----
-
-### 3. **🔴 CRITICAL: No Size Limits**
-
-**Problem**: No validation on proto size or message count.
+**Problem**: Cannot find "what depends on this proto?"
 
 **Impact**:
-- DoS attack: Register 1GB proto file
-- Database bloat: Unlimited FileDescriptorProto size
-- Memory exhaustion during unmarshaling
+- Cannot safely delete (if deletion existed)
+- Cannot assess impact of schema changes
+- Cannot find unused schemas
+- Debugging dependency issues is trial-and-error
 
-**What's missing**:
+**Missing APIs**:
 ```go
-// No size checks like:
-if proto.Size(req.FileDescriptor) > 10*1024*1024 { // 10MB limit
-    return nil, status.Errorf(codes.InvalidArgument, "proto too large")
-}
-if len(req.FileDescriptor.MessageType) > 10000 {
-    return nil, status.Errorf(codes.InvalidArgument, "too many message types")
-}
+// Not implemented:
+FindDependents(ctx, namespace, fileName) ([]*RegisteredProto, error)
+FindDependencyChain(ctx, namespace, fileName) (*DependencyGraph, error)
 ```
 
-**Tests missing**:
-- ❌ Test registering very large proto (100MB+)
-- ❌ Test registering proto with 100k+ message types
-- ❌ Test registering proto with deeply nested messages (1000+ levels)
+**Real-world scenario**: Want to deprecate `common.proto`; need to know which services will break.
 
-**Priority**: 🔴 **CRITICAL** - DoS vulnerability
+**Priority**: 🔴 **CRITICAL** - Blocks safe schema management
 
 ---
 
-### 4. **🟡 Race Condition in Dependency Validation**
+### 4. **Zero Observability**
 
-**Problem**: Time-of-check-to-time-of-use (TOCTOU) race in dependency validation.
+**Problem**: No logging, metrics, or audit trail.
 
-**Scenario**:
-1. Thread A validates proto B depends on proto A (A exists ✓)
-2. Thread B deletes proto A (when delete is implemented)
-3. Thread A completes registration of proto B
-4. Result: Proto B registered with missing dependency A
+**Current State**:
+- **Logging**: One comment "Log error but don't fail" (no actual log call)
+- **Metrics**: None
+- **Audit Trail**: No record of who/when/what
 
-**Current code** (registry.go:159-162):
+**Missing**:
 ```go
-// Validate dependencies exist
-if err := s.validateDependencies(ctx, req.Namespace, req.FileDescriptor.GetName(), req.FileDescriptor.Dependency); err != nil {
-    return nil, err
-}
-// ❌ Gap here - dependencies could be deleted before CreateRecord
-// Validate dependencies exist
-registeredProto := &collector.RegisteredProto{...}
-// ... CreateRecord happens later
+// No implementation of:
+- Registration attempt counts (success/failure)
+- Lookup latency histograms
+- Dependency validation failure reasons
+- Type registrar integration errors
+- Per-namespace registration quotas
 ```
 
-**Solution**: Need transactional guarantees or locking. SQLite supports transactions, but Collection interface doesn't expose them.
+**Real-world scenario**: Service failing with "proto not found"; no way to debug when it was registered, by whom, or if it ever existed.
 
-**Priority**: 🟡 **MEDIUM** - Only matters when delete is implemented
+**Priority**: 🔴 **CRITICAL** - Cannot debug production issues
 
 ---
 
-### 5. **🟡 No Rate Limiting**
+## 🟡 HIGH PRIORITY GAPS
 
-**Problem**: No rate limiting on registration operations.
+### 5. **No Schema Versioning**
+
+**Problem**: No version tracking in proto/service IDs.
+
+**Current ID Format**: `{namespace}/{name}`
+**Should Support**: `{namespace}/{name}/v{version}` or `{namespace}/{name}@{version}`
 
 **Impact**:
-- Spam attack: Register millions of bogus protos
-- Resource exhaustion
-- Database bloat
+- Cannot deploy v1 and v2 simultaneously
+- No gradual migration path
+- Breaking changes force flag day deployments
+- Cannot query "give me latest version of X"
 
-**What's missing**:
-- Per-namespace rate limits
-- Global rate limits
-- Burst handling
-- Backpressure mechanisms
+**Missing**:
+```go
+// Not in RegisteredProto:
+Version string // e.g., "v1", "v2", "1.0.0"
+IsLatest bool
+PreviousVersion string // link to prior version
+```
 
-**Tests missing**:
-- ❌ Test rapid registration (1000+ protos/sec)
-- ❌ Test behavior under sustained high load
-
-**Priority**: 🟡 **MEDIUM** - Production deployments need this
+**Priority**: 🟡 **HIGH** - Blocks graceful migrations
 
 ---
 
-### 6. **🟡 Interceptor Performance Issues**
+### 6. **No Deprecation Support**
 
-**Problem**: Validation interceptor calls ValidateMethod on EVERY RPC.
+**Problem**: No way to mark schemas as deprecated or set sunset dates.
+
+**Missing Fields**:
+```go
+// Should add to RegisteredProto/RegisteredService:
+Deprecated bool
+SunsetAt *timestamppb.Timestamp
+DeprecationMessage string // "Use v2 instead"
+```
+
+**Missing Queries**:
+```go
+ListDeprecatedProtos(ctx, namespace) ([]*RegisteredProto, error)
+```
+
+**Real-world scenario**: Deploy v2, want to give 6 months notice before removing v1; no mechanism exists.
+
+**Priority**: 🟡 **HIGH** - Essential for schema lifecycle
+
+---
+
+### 7. **No Export/Import Capabilities**
+
+**Problem**: Cannot snapshot or migrate registry state.
+
+**Missing Operations**:
+```go
+ExportRegistry(ctx, namespace) (*RegistrySnapshot, error)
+ImportRegistry(ctx, snapshot) error
+ExportProto(ctx, namespace, fileName) (*FileDescriptorSet, error)
+```
 
 **Impact**:
-- Additional database query per RPC call
-- Latency overhead
-- Database load
+- Cannot distribute schemas across collectors
+- No disaster recovery beyond raw DB backup
+- Cannot migrate between environments (dev→staging→prod)
+- No schema distribution to clients
 
-**Current behavior**:
-```
-Every RPC → ValidateMethod → LookupService → DB query → Unmarshal
-```
+**Real-world scenario**: Dev team wants to share schemas with partner team; must manually copy database files.
 
-**Missing optimization**:
-- No caching of validation results
-- No batch validation
-- No pre-computed validation map
-
-**Tests missing**:
-- ❌ Benchmark validation interceptor latency
-- ❌ Test interceptor under high concurrency
-- ❌ Test memory usage of interceptor
-
-**Priority**: 🟡 **MEDIUM** - Performance impact on every RPC
+**Priority**: 🟡 **HIGH** - Blocks multi-instance deployments
 
 ---
 
-### 7. **Missing RPC Endpoints**
+### 8. **Memory Leak Risk**
 
-#### Critical Missing RPCs:
-- ❌ **LookupProto** - Implementation exists as helper, not exposed as RPC
-- ❌ **ListProtos** - Implementation exists as helper, not exposed as RPC
-- ❌ **DeleteService** - No way to unregister services
-- ❌ **DeleteProto** - No way to unregister protos
-- ❌ **UpdateService** - Cannot update existing registrations
-- ❌ **UpdateProto** - Cannot update existing registrations
+**Problem**: No limits on total registrations; no cleanup policy.
 
-**Impact**: Registry entries accumulate indefinitely. No lifecycle management.
+**Current Behavior**:
+- Registry grows indefinitely
+- Same proto stored separately per namespace (no deduplication)
+- No max registrations limit
+- No LRU eviction
 
-**Proto definition gap**: These RPCs don't exist in `registry.proto` at all.
+**Risk**: Long-running collector with active registration could OOM.
 
-```protobuf
-// MISSING from proto/registry.proto:
-service CollectorRegistry {
-  rpc LookupProto(LookupProtoRequest) returns (LookupProtoResponse);
-  rpc ListProtos(ListProtosRequest) returns (ListProtosResponse);
-  rpc DeleteService(DeleteServiceRequest) returns (DeleteServiceResponse);
-  rpc DeleteProto(DeleteProtoRequest) returns (DeleteProtoResponse);
-  rpc UpdateService(UpdateServiceRequest) returns (UpdateServiceResponse);
-  rpc UpdateProto(UpdateProtoRequest) returns (UpdateProtoResponse);
+**Missing Configuration**:
+```go
+type RegistryLimits struct {
+    MaxTotalRegistrations int
+    MaxPerNamespace int
+    EnableDeduplication bool
 }
 ```
 
-### 2. **Unused Proto Fields**
+**Priority**: 🟡 **HIGH** - Production stability risk
 
-#### RegisterProtoRequest.dependencies (line 39)
-```protobuf
-message RegisterProtoRequest {
-  string namespace = 1;
-  google.protobuf.FileDescriptorProto file_descriptor = 2;
-  repeated google.protobuf.FileDescriptorProto dependencies = 3;  // ← NEVER USED
-}
-```
+---
 
-**Issue**: The `dependencies` field is defined but never accessed in the implementation.
-Only `FileDescriptor.Dependency` (string array) is used.
+### 9. **Type Registrar Failures Silently Ignored**
 
-**Impact**: If a user passes dependencies via this field, they're silently ignored.
+**Problem**: Type registry integration errors logged but not surfaced.
 
-**Fix Options**:
-1. Remove the field (breaking change)
-2. Use it to register dependencies automatically
-3. Document that it's unused
-
-#### RegisterServiceRequest.file_descriptor (line 51)
-```protobuf
-message RegisterServiceRequest {
-  string namespace = 1;
-  google.protobuf.ServiceDescriptorProto service_descriptor = 2;
-  google.protobuf.FileDescriptorProto file_descriptor = 3;  // ← NEVER USED
-}
-```
-
-**Issue**: Field is defined but never accessed. Purpose unclear.
-
-**Impact**: Unclear API contract - why is it there if unused?
-
-### 3. **No Pagination Support**
-
-ListServices and ListProtos return ALL records with no pagination:
-- No `page_size` or `page_token` fields
-- No cursor-based pagination
-- Could cause memory issues with 100k+ registrations
-
-**Current workaround**: Limit=0 returns everything, which works but isn't ideal for very large registries.
-
-### 4. **Dependency Resolution** ✅ IMPLEMENTED
-
-Dependencies are now validated with hierarchical namespace resolution:
-- ✅ Check if dependencies exist before registering a proto
-- ✅ Hierarchical namespace resolution (child namespaces can access parent dependencies)
-- ✅ Dependency graph validation (circular dependencies detected)
-- ✅ Well-known Google protobuf types automatically allowed
-- ✅ Cross-namespace dependencies validated (different branches fail)
-
-**Implementation Details**:
-- Dependencies resolved by walking up namespace hierarchy: `team/project/service` → `team/project` → `team` → ``
-- Well-known types (google/protobuf/*, google/api/*) don't require registration
-- Circular dependencies (including self-reference) are rejected
-- Missing dependencies return InvalidArgument error with details
-
-**Test Coverage**: 9 comprehensive tests covering all dependency scenarios
-
-### 5. **No Versioning Support**
-
-- Cannot register multiple versions of the same service
-- No version field in RegisteredProto or RegisteredService
-- ID format is `namespace/name` without version
-- No version negotiation or compatibility checking
-
-**Impact**: Cannot support rolling upgrades or A/B testing with different service versions.
-
-### 6. **Silent Errors**
-
-#### TypeRegistrar Integration (registry.go:95-101)
+**Current Code** (registry.go:226-231):
 ```go
 if s.typeRegistrar != nil {
     if err := s.typeRegistrar.RegisterFileDescriptor(...); err != nil {
-        // Log error but don't fail the registration - type registry is optional
-        // In production, you might want to return this error or handle it differently
-        _ = err  // ← SILENT ERROR
+        // Log error but don't fail the registration
+        _ = err
     }
 }
 ```
 
-**Issue**: Type registration failures are silently ignored with `_ = err`.
+**Impact**:
+- Proto registered but types unavailable
+- Runtime type lookup failures
+- Inconsistent state between registries
+- No way to detect the problem
 
-**Impact**: Types might not be available even though proto registration succeeded.
+**Should**: Either fail-fast OR log with metrics/alerting.
 
-**Fix**: At minimum, log the error. Optionally, make it configurable whether to fail.
+**Priority**: 🟡 **HIGH** - Silent data corruption
 
-### 7. **No Concurrency Tests**
+---
 
-Test coverage gaps:
-- ❌ No concurrent registration tests
-- ❌ No race condition tests
-- ❌ No test for concurrent ListServices during RegisterService
-- ❌ No stress tests (beyond 100k sequential operations)
+## 🟢 MEDIUM PRIORITY GAPS
 
-**Risk**: Potential data races or deadlocks under high concurrency load.
+### 10. **No Advanced Search**
 
-### 8. **No Metadata Support**
+**Missing**: Search by message name, field name, method name, tags, comments.
 
-RegisteredProto and RegisteredService have `metadata` fields, but:
-- Metadata is never set (except timestamps from Store)
-- No way to add custom metadata (tags, descriptions, ownership)
-- No search by metadata
+**Current**: Only list all + filter by namespace client-side.
 
-**Use case gap**: Cannot search for "all services owned by team-payments" or "all protos tagged with 'deprecated'".
+**Priority**: 🟢 **MEDIUM** - Nice-to-have for discovery
 
-### 9. **No Audit Trail**
+---
 
-- No history of changes
-- No "who registered this" tracking
-- No "when was this last updated" info
-- No tombstones after deletion
+### 11. **No Batch Operations**
 
-### 10. **Namespace Validation**
+**Missing**: BatchRegister, BatchLookup, BatchDelete.
 
-Namespace names are not validated for:
-- Length limits
-- Character restrictions
-- Reserved names (e.g., "system", "internal")
+**Impact**: High latency for bulk operations.
 
-**Risk**: Could create invalid or conflicting namespaces.
+**Priority**: 🟢 **MEDIUM** - Performance optimization
 
-## 🧪 Missing Test Coverage
+---
+
+### 12. **Incomplete Circular Dependency Detection**
+
+**Current**: Only detects self-reference (`A → A`).
+
+**Missing**: Transitive cycles (`A → B → C → A`).
+
+**Priority**: 🟢 **MEDIUM** - Edge case
+
+---
+
+### 13. **No Documentation Preservation**
+
+**Problem**: Proto comments not stored (upstream protobuf limitation).
+
+**Workaround**: Would need separate doc store.
+
+**Priority**: 🟢 **MEDIUM** - Requires design work
+
+---
+
+## 📊 TESTING GAPS
 
 ### Untested Scenarios
 
-1. **Concurrency**
-   - Concurrent RegisterService calls for same service
-   - Concurrent ListServices during RegisterService
-   - Race conditions in validation interceptor
+| Scenario | Risk | Priority |
+|----------|------|----------|
+| Concurrent registrations (race conditions) | Data corruption | 🔴 CRITICAL |
+| Transaction consistency (type registrar + DB) | Inconsistent state | 🔴 CRITICAL |
+| 10k+ dependencies per proto | Performance collapse | 🟡 HIGH |
+| Memory pressure (OOM scenarios) | Service crash | 🟡 HIGH |
+| Invalid UTF-8 in names | Undefined behavior | 🟢 MEDIUM |
+| Malformed FileDescriptorProto (nil fields) | Panic risk | 🟢 MEDIUM |
+| Transitive circular dependencies | Infinite loops | 🟢 MEDIUM |
 
-3. **Error Recovery**
-   - Database failure during registration
-   - Partial registration failures
-   - Recovery from corrupted records
+---
 
-4. **Edge Cases**
-   - Service with 1000+ methods
-   - Proto with deeply nested types (10+ levels)
-   - Unicode in service/proto names
-   - Very long service/proto names (1000+ chars)
+## ⚡ PERFORMANCE CONCERNS
 
-5. **Performance**
-   - Validation interceptor latency under load
-   - Memory usage with 1M+ registrations
-   - Search performance with complex label filters
+### Dependency Validation Scalability
 
-6. **Integration**
-   - TypeRegistrar failure modes
-   - Behavior when both protos and services collections are unavailable
-   - Cross-namespace service calls
+**Current Algorithm**:
+```
+For each of N dependencies:
+    For each namespace in hierarchy (avg 2):
+        LookupProto() -> DB query
+Total: N × 2 database queries
+```
 
-## 🔧 Recommended Improvements
+**Worst Case**: Proto with 10k dependencies → 20k DB queries (~10-30 seconds)
 
-### Priority 1: High Impact, Low Effort
+**Missing Optimizations**:
+- No dependency cache
+- No eager loading
+- No batch lookup
+- Linear search through hierarchy
 
-1. **Add LookupProto and ListProtos RPCs** (2-3 hours)
-   - Add to proto definition
-   - Expose existing helpers as RPC methods
-   - Add tests
+**Solution**: Implement `BatchLookupProtos(ctx, namespace, []fileName)`.
 
-2. **Fix Silent TypeRegistrar Errors** (30 min)
-   - Add proper logging
-   - Optionally make it configurable to fail on error
+---
 
-3. **Add DeleteService and DeleteProto RPCs** (4-5 hours)
-   - Add proto definitions
-   - Implement deletion logic
-   - Add tests including cascade options
+### List Operations Memory Usage
 
-4. **Document Unused Fields** (30 min)
-   - Add comments explaining why RegisterProtoRequest.dependencies is unused
-   - Add comments for RegisterServiceRequest.file_descriptor
+**Current**: `ListProtos/ListServices` with `Limit: 0` (unlimited) unmarshals ALL matching records into memory.
 
-### Priority 2: Medium Impact, Medium Effort
+**Example**: 100k services × 1KB average = **100MB allocation spike**
 
-5. **Add Concurrency Tests** (3-4 hours)
-   - Test concurrent registrations
-   - Test race conditions with validation
-   - Stress test with parallel operations
+**Risk**: OOM in production with large registries.
 
-6. **Add Namespace Validation** (2 hours)
-   - Validate namespace format
-   - Reject reserved names
-   - Add validation tests
+**Solution**: Add pagination support with `PageSize` and `PageToken`.
 
-7. **Add Pagination to ListServices/ListProtos** (3-4 hours)
-   - Add page_size and page_token fields
-   - Implement cursor-based pagination
-   - Update tests
+---
 
-### Priority 3: Low Impact or High Effort
+## 🎯 ACTIONABLE RECOMMENDATIONS
 
-8. **Add Versioning Support** (2-3 days)
-   - Add version field to proto
-   - Support multiple versions
-   - Implement version negotiation
+### Immediate (Sprint 1)
 
-9. **Add Metadata Support** (1 day)
-   - Allow custom metadata in registrations
-   - Support search by metadata
-   - Add metadata validation
+1. **Add Logging & Metrics** 🔴
+   - Log all registration attempts (success/failure)
+   - Add prometheus metrics for monitoring
+   - Emit structured logs for audit trail
 
-10. **Add Audit Trail** (2-3 days)
-    - Track registration history
-    - Store who/when for each change
-    - Add audit log queries
+2. **Add Race Condition Tests** 🔴
+   - Test concurrent RegisterProto
+   - Test concurrent LookupProto + RegisterProto
+   - Verify Collection RWMutex behavior
 
-## 🎯 Use Cases Not Yet Supported
+3. **Fix Type Registrar Error Handling** 🔴
+   - Change to logged errors with metrics
+   - Add alerting on type registrar failures
+   - Document inconsistency risk
 
-1. **Service Deprecation**: Mark services as deprecated, warn on use
-2. **Access Control**: Restrict which namespaces can call which services
-3. **Rate Limiting**: Per-service or per-namespace rate limits
-4. **Analytics**: Track service usage, popular methods
-5. **Documentation**: Attach documentation to services/methods
-6. **Schema Evolution**: Track breaking vs non-breaking changes
-7. **Service Dependencies**: Track which services depend on which
-8. **Health Checks**: Verify registered services are actually available
-9. **Service Discovery**: Find services by capability or tag
-10. **Migration Support**: Mark old services for migration to new versions
+### Short Term (Sprint 2-3)
 
-## 📊 Performance Characteristics
+4. **Implement Delete Operations** 🔴
+   - Add DeleteProto/DeleteService with cascade checks
+   - Implement FindDependents query
+   - Add tests for dependency orphan prevention
 
-### Known Performance
-- ✅ 100k services: ListServices completes in ~290s (registration time)
-- ✅ 100k protos: ListProtos completes in ~292s (registration time)
-- ✅ DB-level filtering: No in-memory overhead
+5. **Implement Update Operations** 🔴
+   - Add UpdateProto/UpdateService
+   - Validate dependency changes
+   - Add tests for update scenarios
 
-### Unknown Performance
-- ❓ Validation interceptor latency (per RPC)
-- ❓ Memory usage with 1M+ registrations
-- ❓ Concurrent registration throughput
-- ❓ Search performance with multiple label filters
-- ❓ Impact of large FileDescriptorProto (1MB+ proto files)
+6. **Add Reverse Dependency Index** 🔴
+   - Maintain inverse dependency map
+   - Implement FindDependents efficiently
+   - Add dependency graph visualization
 
-## 🐛 Potential Bugs
+### Medium Term (Sprint 4-6)
 
-1. **Type Registration Silent Failure** (line 100)
-   - Types may not be available even if proto registration succeeds
-   - No error returned to caller
+7. **Add Schema Versioning** 🟡
+   - Extend ID format to include version
+   - Support parallel v1/v2 registration
+   - Add version query APIs
 
-2. **Label Overwrites**
-   - If user sets "namespace" label, it overwrites system label
-   - Should reserve certain label keys
+8. **Add Export/Import** 🟡
+   - Implement RegistrySnapshot format
+   - Add export/import operations
+   - Add cross-instance migration tools
 
-3. **No Atomic Multi-Register**
-   - Cannot register service + proto atomically
-   - Could end up with service registered but proto failed
+9. **Add Pagination to List Operations** 🟡
+   - Replace Limit:0 with PageSize/PageToken
+   - Stream results to prevent OOM
+   - Add cursor-based pagination
 
-## 💡 Design Considerations
+10. **Add Deprecation Support** 🟡
+    - Add Deprecated/SunsetAt fields
+    - Add deprecation queries
+    - Add deprecation warnings in responses
 
-### Good Design Decisions
-- ✅ Helper functions separate from RPC layer (testable)
-- ✅ Label-based filtering (flexible, efficient)
-- ✅ Namespace isolation (multi-tenancy ready)
-- ✅ TypeRegistrar abstraction (no circular deps)
-- ✅ Validation interceptors (automatic, transparent)
+### Long Term (Future)
 
-### Questionable Design Decisions
-- ⚠️ RegisterProtoRequest has unused dependencies field
-- ⚠️ RegisterServiceRequest has unused file_descriptor field
-- ⚠️ No versioning in ID format (limits upgrade scenarios)
-- ⚠️ Silent error handling (type registrar)
-- ⚠️ Accumulate-only model (no deletion)
+11. **Advanced Search** 🟢
+    - Full-text search on proto contents
+    - Search by message/method/field names
+    - Tag-based discovery
 
-## Summary Assessment
+12. **Batch Operations** 🟢
+    - BatchRegister for bulk uploads
+    - BatchLookup for dependency resolution
+    - BatchDelete for cleanup operations
 
-**Overall Grade: C+ (75%)** - Downgraded from A- due to critical security issues
+---
 
-**🔴 CRITICAL Security Issues Found:**
-1. **No namespace validation** - Can register in reserved namespaces, use path traversal
-2. **No name validation** - Can use path traversal in proto/service names
-3. **No size limits** - DoS vulnerability via large proto uploads
+## 📈 FINAL ASSESSMENT
 
-**Strengths:**
-- Core functionality (service validation) is well-designed
-- Scales to 100k+ registrations
-- ✅ Dependency validation with hierarchical namespace resolution
-- ✅ Well-known type support (Google + Collector types)
-- ✅ Circular dependency detection
-- Clean architecture with good separation of concerns
-- Good test coverage (42 tests) for implemented features
+| Category | Grade | Notes |
+|----------|-------|-------|
+| **Security** | A (95%) | Excellent validation, size limits, defense-in-depth |
+| **Core Features** | B+ (85%) | Registration and lookup solid; missing lifecycle management |
+| **Operational** | D (60%) | No logging, metrics, export/import, debugging tools |
+| **Performance** | B (80%) | Good for normal use; concerns at scale (10k deps, 100k protos) |
+| **Testing** | A- (90%) | Strong coverage; missing concurrency and stress tests |
+| **API Completeness** | C+ (75%) | Read-only after write; no update/delete/versioning |
 
-**Critical Weaknesses:**
-- 🔴 **No input validation** - namespace, name, size (SECURITY ISSUE)
-- 🔴 **DoS vulnerabilities** - No rate limiting, no size limits
-- 🟡 Missing lifecycle management (delete, update)
-- 🟡 Missing proto query RPCs (LookupProto, ListProtos as RPCs)
-- 🟡 No versioning support
-- 🟡 Silent errors in optional features (TypeRegistrar)
-- 🟡 No concurrency testing
-- 🟡 Interceptor performance issues (DB query per RPC)
-- 🟡 TOCTOU race in dependency validation
+**Overall Grade**: **B+ (85%)** → Production-ready for immutable schema registration, but critically incomplete for real-world schema evolution and operations.
 
-**Recommendation:**
-- For **development/testing**: OK with caution ⚠️
-- For **production without validation**: ❌ **NOT READY** - Security issues
-- For **production with validation fixes**: Add validation, then ready for service validation use case
+---
 
-**IMMEDIATE Action Required (Before Production):**
-1. 🔴 **ADD NAMESPACE VALIDATION** (1 hour)
-   ```go
-   if err := collection.ValidateNamespace(req.Namespace); err != nil {
-       return nil, status.Errorf(codes.InvalidArgument, "invalid namespace: %v", err)
-   }
-   ```
+## 🔗 RELATED DOCUMENTS
 
-2. 🔴 **ADD NAME VALIDATION** (1 hour)
-   ```go
-   if err := collection.ValidateName(req.FileDescriptor.GetName(), "proto name"); err != nil {
-       return nil, status.Errorf(codes.InvalidArgument, "invalid proto name: %v", err)
-   }
-   ```
-
-3. 🔴 **ADD SIZE LIMITS** (2 hours)
-   ```go
-   const MaxProtoSize = 10 * 1024 * 1024 // 10MB
-   const MaxMessageTypes = 10000
-   if proto.Size(req.FileDescriptor) > MaxProtoSize {
-       return nil, status.Errorf(codes.InvalidArgument, "proto exceeds size limit")
-   }
-   ```
-
-4. 🔴 **ADD VALIDATION TESTS** (2 hours)
-   - Test reserved namespaces
-   - Test path traversal attempts
-   - Test size limits
-
-**Next Steps (Post-Security):**
-1. Add rate limiting (DoS protection)
-2. Add delete operations (lifecycle management)
-3. Expose LookupProto/ListProtos as RPCs
-4. Add interceptor caching (performance)
-5. Add concurrency tests
-6. Fix TOCTOU race (transactions)
-7. Add pagination
+- Initial security audit downgraded registry from A- to C+ due to missing validation
+- Recent fixes upgraded to B+ with validation and size limits implemented
+- Remaining gaps primarily in lifecycle management (update/delete/version)
