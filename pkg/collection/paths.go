@@ -59,29 +59,6 @@ func (pc *PathConfig) BackupsMetadataPath() string {
 	return filepath.Join(pc.DataDir, "backups", "metadata.db")
 }
 
-// OldCollectionDBPath returns the path for a collection in the old structure.
-// Used for migration detection and compatibility.
-// Format: {DataDir}/collections/{namespace}/{name}/data.db
-func (pc *PathConfig) OldCollectionDBPath(namespace, name string) (string, error) {
-	if err := ValidateNamespace(namespace); err != nil {
-		return "", err
-	}
-	if err := ValidateCollectionName(name); err != nil {
-		return "", err
-	}
-	return filepath.Join(pc.DataDir, "collections", namespace, name, "data.db"), nil
-}
-
-// HasOldStructure checks if a collection exists in the old directory structure.
-func (pc *PathConfig) HasOldStructure(namespace, name string) (bool, error) {
-	oldPath, err := pc.OldCollectionDBPath(namespace, name)
-	if err != nil {
-		return false, err
-	}
-	_, statErr := os.Stat(oldPath)
-	return statErr == nil, nil
-}
-
 // BackupDir returns the base backup directory.
 // Format: {DataDir}/.backup
 func (pc *PathConfig) BackupDir() string {

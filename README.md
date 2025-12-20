@@ -228,9 +228,6 @@ func main() {
 - `Namespace` - Default namespace for this collector (default: `"shared"`)
 - `CollectorID` - Unique identifier for this collector (default: random UUID7)
 - `Logger` - Custom logger (default: `log.Default()`)
-- `DisableMigration` - Skip automatic database migration (default: `false`)
-  - Migration converts old flat database structures to namespace-organized layout
-  - Only disable if you want to manually control migration timing
 
 **Reserved Namespaces:**
 - `system` - Reserved for internal collections (types, collections, connections, audit, logs)

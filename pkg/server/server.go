@@ -53,11 +53,6 @@ type Config struct {
 
 	// Logger is the logger to use (default: log.Default())
 	Logger *log.Logger
-
-	// DisableMigration disables automatic database migration on startup (default: false)
-	// Migration converts old flat database structures to namespace-organized layout.
-	// Only disable if you want to manually control migration timing.
-	DisableMigration bool
 }
 
 // Server represents a fully configured Collector server with all services.
@@ -214,44 +209,6 @@ func New(config Config) (*Server, error) {
 		return nil, fmt.Errorf("failed to init registry store: %w", err)
 	}
 	s.registryStore = registryStore
-
-	// Migration check
-	if !config.DisableMigration {
-		migrator := collection.NewMigrator(pathConfig, registryStore)
-		needsMigration, err := migrator.NeedsMigration(ctx)
-		if err != nil {
-			s.logger.Printf("Warning: failed to check migration status: %v", err)
-		}
-
-		if needsMigration {
-			s.logger.Println("========================================")
-			s.logger.Println("Detecting old database structure")
-			s.logger.Println("Starting automatic migration...")
-			s.logger.Println("========================================")
-
-			report, err := migrator.MigrateAll(ctx)
-			if err != nil {
-				s.logger.Printf("Warning: migration had errors: %v", err)
-			}
-
-			s.logger.Printf("Migration completed:")
-			s.logger.Printf("  - Migrated: %d collections", report.Migrated)
-			s.logger.Printf("  - Failed: %d collections", report.Failed)
-			s.logger.Printf("  - Duration: %v", report.EndTime.Sub(report.StartTime))
-
-			if len(report.Errors) > 0 {
-				s.logger.Println("  Migration errors:")
-				for _, e := range report.Errors {
-					s.logger.Printf("    - %s", e)
-				}
-			}
-
-			if report.Migrated > 0 {
-				s.logger.Println("  Old directories renamed to *.old")
-			}
-			s.logger.Println("========================================")
-		}
-	}
 
 	// Create repo with PathConfig and registry store
 	dummyStore, err := sqlite.NewSqliteStore(":memory:", collection.Options{})
