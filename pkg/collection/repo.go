@@ -125,6 +125,103 @@ func (r *DefaultCollectionRepo) CreateCollection(ctx context.Context, collection
 	return r.service.CreateCollection(ctx, collection)
 }
 
+// DeleteCollection deletes a collection and all its data.
+func (r *DefaultCollectionRepo) DeleteCollection(ctx context.Context, req *pb.DeleteCollectionRequest) (*pb.DeleteCollectionResponse, error) {
+	if req == nil || req.Collection == nil {
+		return nil, fmt.Errorf("request and collection cannot be nil")
+	}
+
+	namespace := req.Collection.Namespace
+	name := req.Collection.Name
+
+	// Validate namespace and collection name
+	if err := ValidateNamespace(namespace); err != nil {
+		return nil, fmt.Errorf("invalid namespace: %w", err)
+	}
+	if err := ValidateCollectionName(name); err != nil {
+		return nil, fmt.Errorf("invalid collection name: %w", err)
+	}
+
+	// Get the collection to check for active operations
+	collection, err := r.GetCollection(ctx, namespace, name)
+	if err != nil {
+		return nil, fmt.Errorf("collection not found: %w", err)
+	}
+
+	// Check for active operations (backup, restore, clone)
+	if err := CheckOperationConflict(collection.Meta); err != nil {
+		return nil, fmt.Errorf("cannot delete: %w", err)
+	}
+
+	// Register delete operation
+	deleteURI := fmt.Sprintf("delete:%s/%s", namespace, name)
+	if err := StartOperation(ctx, r, namespace, name, "delete", deleteURI, r.pathConfig.DataDir, DeleteTimeout); err != nil {
+		return nil, fmt.Errorf("failed to register delete operation: %w", err)
+	}
+
+	// Ensure operation state is cleared on completion
+	defer func() {
+		if err := CompleteOperation(ctx, r, namespace, name); err != nil {
+			fmt.Printf("Warning: failed to clear delete operation state: %v\n", err)
+		}
+	}()
+
+	// Calculate bytes to be freed
+	var bytesFreed int64
+
+	// Get database path and size
+	dbPath, err := r.pathConfig.CollectionDBPath(namespace, name)
+	if err != nil {
+		return nil, fmt.Errorf("invalid collection path: %w", err)
+	}
+	if info, err := os.Stat(dbPath); err == nil {
+		bytesFreed += info.Size()
+	}
+
+	// Get files path and calculate directory size
+	filesPath, err := r.pathConfig.CollectionFilesPath(namespace, name)
+	if err != nil {
+		return nil, fmt.Errorf("invalid collection files path: %w", err)
+	}
+	if info, err := os.Stat(filesPath); err == nil && info.IsDir() {
+		// Calculate directory size recursively
+		filepath.Walk(filesPath, func(path string, info os.FileInfo, err error) error {
+			if err == nil && !info.IsDir() {
+				bytesFreed += info.Size()
+			}
+			return nil
+		})
+	}
+
+	// Close the collection's store before deleting files
+	if err := collection.Close(); err != nil {
+		return nil, fmt.Errorf("failed to close collection: %w", err)
+	}
+
+	// Delete the database file
+	if err := os.Remove(dbPath); err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("failed to delete database file: %w", err)
+	}
+
+	// Delete the files directory
+	if err := os.RemoveAll(filesPath); err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("failed to delete files directory: %w", err)
+	}
+
+	// Remove metadata from registry
+	if err := r.service.registryStore.DeleteCollection(ctx, namespace, name); err != nil {
+		return nil, fmt.Errorf("failed to remove from registry: %w", err)
+	}
+
+	return &pb.DeleteCollectionResponse{
+		Status: &pb.Status{
+			Code:    pb.Status_OK,
+			Message: "collection deleted successfully",
+		},
+		BytesFreed: bytesFreed,
+	}, nil
+}
+
 // Discover finds collections based on the provided criteria.
 func (r *DefaultCollectionRepo) Discover(ctx context.Context, req *pb.DiscoverRequest) (*pb.DiscoverResponse, error) {
 	return r.service.Discover(ctx, req)

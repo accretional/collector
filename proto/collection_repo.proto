@@ -25,6 +25,15 @@ message CreateCollectionResponse {
   string server_endpoint = 3;
 }
 
+message DeleteCollectionRequest {
+  NamespacedName collection = 1;
+}
+
+message DeleteCollectionResponse {
+  Status status = 1;
+  int64 bytes_freed = 2;  // Total bytes freed (DB + files)
+}
+
 message DiscoverRequest {
   string namespace = 1;  // Empty for all
   map<string, string> label_filter = 2;
@@ -238,6 +247,7 @@ message VerifyBackupResponse {
 
 service CollectionRepo {
   rpc CreateCollection(CreateCollectionRequest) returns (CreateCollectionResponse);
+  rpc DeleteCollection(DeleteCollectionRequest) returns (DeleteCollectionResponse);
   rpc Discover(DiscoverRequest) returns (DiscoverResponse);
   rpc Route(RouteRequest) returns (RouteResponse);
   rpc SearchCollections(SearchCollectionsRequest) returns (SearchCollectionsResponse);

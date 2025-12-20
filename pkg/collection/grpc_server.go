@@ -39,6 +39,11 @@ func (s *GrpcServer) CreateCollection(ctx context.Context, req *pb.CreateCollect
 	return s.repo.CreateCollection(ctx, req.Collection)
 }
 
+// DeleteCollection forwards the request to the underlying repository.
+func (s *GrpcServer) DeleteCollection(ctx context.Context, req *pb.DeleteCollectionRequest) (*pb.DeleteCollectionResponse, error) {
+	return s.repo.DeleteCollection(ctx, req)
+}
+
 // Discover forwards the request to the underlying repository.
 func (s *GrpcServer) Discover(ctx context.Context, req *pb.DiscoverRequest) (*pb.DiscoverResponse, error) {
 	return s.repo.Discover(ctx, req)

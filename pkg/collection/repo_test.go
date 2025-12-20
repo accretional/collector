@@ -524,3 +524,211 @@ func TestCollectionRepoService_CreateCollection(t *testing.T) {
 		t.Errorf("expected status 200, got %d: %s", resp.Status.Code, resp.Status.Message)
 	}
 }
+
+// TestCollectionRepo_DeleteCollection tests deleting a collection
+func TestCollectionRepo_DeleteCollection(t *testing.T) {
+	repo, cleanup := setupTestRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Create a collection
+	coll := &pb.Collection{
+		Namespace: "test-ns",
+		Name:      "test-delete",
+		MessageType: &pb.MessageTypeRef{
+			MessageName: "TestMessage",
+		},
+	}
+
+	_, err := repo.CreateCollection(ctx, coll)
+	if err != nil {
+		t.Fatalf("CreateCollection failed: %v", err)
+	}
+
+	// Verify collection exists
+	collInstance, err := repo.GetCollection(ctx, "test-ns", "test-delete")
+	if err != nil {
+		t.Fatalf("GetCollection failed: %v", err)
+	}
+	if collInstance == nil {
+		t.Fatal("expected collection instance")
+	}
+
+	// Delete the collection
+	delReq := &pb.DeleteCollectionRequest{
+		Collection: &pb.NamespacedName{
+			Namespace: "test-ns",
+			Name:      "test-delete",
+		},
+	}
+
+	delResp, err := repo.DeleteCollection(ctx, delReq)
+	if err != nil {
+		t.Fatalf("DeleteCollection failed: %v", err)
+	}
+
+	if delResp.Status.Code != pb.Status_OK {
+		t.Errorf("expected status OK, got %d: %s", delResp.Status.Code, delResp.Status.Message)
+	}
+
+	if delResp.BytesFreed <= 0 {
+		t.Logf("Warning: expected bytes_freed > 0, got %d", delResp.BytesFreed)
+	}
+
+	// Verify collection no longer exists
+	_, err = repo.GetCollection(ctx, "test-ns", "test-delete")
+	if err == nil {
+		t.Error("expected error when getting deleted collection")
+	}
+}
+
+// TestCollectionRepo_DeleteCollection_NonExistent tests deleting a non-existent collection
+func TestCollectionRepo_DeleteCollection_NonExistent(t *testing.T) {
+	repo, cleanup := setupTestRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Try to delete a collection that doesn't exist
+	delReq := &pb.DeleteCollectionRequest{
+		Collection: &pb.NamespacedName{
+			Namespace: "nonexistent",
+			Name:      "missing",
+		},
+	}
+
+	_, err := repo.DeleteCollection(ctx, delReq)
+	if err == nil {
+		t.Error("expected error when deleting non-existent collection")
+	}
+}
+
+// TestCollectionRepo_DeleteCollection_InvalidRequest tests invalid delete requests
+func TestCollectionRepo_DeleteCollection_InvalidRequest(t *testing.T) {
+	repo, cleanup := setupTestRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	tests := []struct {
+		name string
+		req  *pb.DeleteCollectionRequest
+	}{
+		{
+			name: "nil request",
+			req:  nil,
+		},
+		{
+			name: "nil collection",
+			req:  &pb.DeleteCollectionRequest{Collection: nil},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := repo.DeleteCollection(ctx, tt.req)
+			if err == nil {
+				t.Errorf("expected error for %s", tt.name)
+			}
+		})
+	}
+}
+
+// TestCollectionRepo_DeleteCollection_WithActiveOperation tests that deletion is blocked during active operations
+func TestCollectionRepo_DeleteCollection_WithActiveOperation(t *testing.T) {
+	repo, cleanup := setupTestRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Create a collection
+	coll := &pb.Collection{
+		Namespace: "test-ns",
+		Name:      "active-op",
+	}
+
+	_, err := repo.CreateCollection(ctx, coll)
+	if err != nil {
+		t.Fatalf("CreateCollection failed: %v", err)
+	}
+
+	// Simulate an active backup operation by setting operation metadata
+	collInstance, err := repo.GetCollection(ctx, "test-ns", "active-op")
+	if err != nil {
+		t.Fatalf("GetCollection failed: %v", err)
+	}
+
+	// Add operation label
+	if collInstance.Meta.Metadata == nil {
+		collInstance.Meta.Metadata = &pb.Metadata{}
+	}
+	if collInstance.Meta.Metadata.Labels == nil {
+		collInstance.Meta.Metadata.Labels = make(map[string]string)
+	}
+	collInstance.Meta.Metadata.Labels["_operation"] = "backup:test-backup"
+
+	// Update metadata
+	err = repo.UpdateCollectionMetadata(ctx, "test-ns", "active-op", collInstance.Meta)
+	if err != nil {
+		t.Fatalf("UpdateCollectionMetadata failed: %v", err)
+	}
+
+	// Try to delete - should fail due to active operation
+	delReq := &pb.DeleteCollectionRequest{
+		Collection: &pb.NamespacedName{
+			Namespace: "test-ns",
+			Name:      "active-op",
+		},
+	}
+
+	_, err = repo.DeleteCollection(ctx, delReq)
+	if err == nil {
+		t.Error("expected error when deleting collection with active operation")
+	}
+}
+
+// TestCollectionRepo_DeleteCollection_Multiple tests deleting multiple collections
+func TestCollectionRepo_DeleteCollection_Multiple(t *testing.T) {
+	repo, cleanup := setupTestRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Create multiple collections
+	collections := []*pb.Collection{
+		{Namespace: "ns1", Name: "coll1"},
+		{Namespace: "ns1", Name: "coll2"},
+		{Namespace: "ns2", Name: "coll1"},
+	}
+
+	for _, coll := range collections {
+		_, err := repo.CreateCollection(ctx, coll)
+		if err != nil {
+			t.Fatalf("CreateCollection failed for %s/%s: %v", coll.Namespace, coll.Name, err)
+		}
+	}
+
+	// Delete each collection
+	for _, coll := range collections {
+		delReq := &pb.DeleteCollectionRequest{
+			Collection: &pb.NamespacedName{
+				Namespace: coll.Namespace,
+				Name:      coll.Name,
+			},
+		}
+
+		delResp, err := repo.DeleteCollection(ctx, delReq)
+		if err != nil {
+			t.Errorf("DeleteCollection failed for %s/%s: %v", coll.Namespace, coll.Name, err)
+			continue
+		}
+
+		if delResp.Status.Code != pb.Status_OK {
+			t.Errorf("expected status OK for %s/%s, got %d", coll.Namespace, coll.Name, delResp.Status.Code)
+		}
+	}
+
+	// Verify all collections are deleted
+	for _, coll := range collections {
+		_, err := repo.GetCollection(ctx, coll.Namespace, coll.Name)
+		if err == nil {
+			t.Errorf("collection %s/%s still exists after deletion", coll.Namespace, coll.Name)
+		}
+	}
+}

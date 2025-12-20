@@ -19,6 +19,7 @@ type FileSystem interface {
 // CollectionRepo defines the interface for a collection repository.
 type CollectionRepo interface {
 	CreateCollection(ctx context.Context, collection *pb.Collection) (*pb.CreateCollectionResponse, error)
+	DeleteCollection(ctx context.Context, req *pb.DeleteCollectionRequest) (*pb.DeleteCollectionResponse, error)
 	Discover(ctx context.Context, req *pb.DiscoverRequest) (*pb.DiscoverResponse, error)
 	Route(ctx context.Context, req *pb.RouteRequest) (*pb.RouteResponse, error)
 	SearchCollections(ctx context.Context, req *pb.SearchCollectionsRequest) (*pb.SearchCollectionsResponse, error)

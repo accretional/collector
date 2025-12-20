@@ -557,6 +557,18 @@ func (m *MockCollectionRepo) CreateCollection(ctx context.Context, collection *p
 	}, nil
 }
 
+func (m *MockCollectionRepo) DeleteCollection(ctx context.Context, req *pb.DeleteCollectionRequest) (*pb.DeleteCollectionResponse, error) {
+	key := req.Collection.Namespace + "/" + req.Collection.Name
+	delete(m.collections, key)
+	return &pb.DeleteCollectionResponse{
+		Status: &pb.Status{
+			Code:    pb.Status_OK,
+			Message: "deleted",
+		},
+		BytesFreed: 1024,
+	}, nil
+}
+
 func (m *MockCollectionRepo) Discover(ctx context.Context, req *pb.DiscoverRequest) (*pb.DiscoverResponse, error) {
 	return &pb.DiscoverResponse{
 		Status: &pb.Status{Code: pb.Status_OK},
