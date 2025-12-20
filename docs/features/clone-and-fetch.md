@@ -107,8 +107,8 @@ type Transport interface {
 
 **SqliteTransport Implementation:**
 - `Clone()`: Uses SQLite `VACUUM INTO` for consistent snapshots
-- `Pack()`: Prepares collection for network transport
-- `Unpack()`: Receives and reconstructs collection
+- `Pack()`: Creates tar archive with database and files (if includeFiles=true)
+- `Unpack()`: Extracts tar archive or handles raw database files (backward compatible)
 
 **Helper Functions:**
 - `CloneCollectionFiles()`: Copies filesystem data between filesystems
@@ -417,28 +417,52 @@ All writes use atomic patterns:
 3. Atomic rename to final location
 4. Cleanup on error
 
+### Tar Archive Format
+
+Pack() creates tar archives containing both database and files:
+
+**Archive Structure:**
+```
+collection.tar
+├── collection.db          # SQLite database
+└── files/                 # Filesystem data (if includeFiles=true)
+    ├── path/to/file1
+    └── path/to/file2
+```
+
+**Unpack() Behavior:**
+- Auto-detects tar format vs raw database
+- Extracts database to specified destPath
+- Extracts files to `files/` directory alongside database
+- Backward compatible with raw database format (for legacy support)
+
+**Implementation Details:**
+- Tar creation: `archive/tar` package
+- Chunk size: 1MB for streaming
+- File paths: Stored with `files/` prefix in tar
+- Database: Stored as `collection.db` in tar root
+
 ## Limitations and Future Work
 
 ### Current Limitations
 
 1. **Progress Reporting**: Streaming is implemented but progress callbacks not exposed in RPC
-2. **Compression**: No compression during transfer
-3. **File-level streaming**: Files are packed into the database stream, not streamed separately
-4. **Metadata propagation**: MessageType not fully propagated in push operations
+2. **Compression**: No compression during transfer (tar archives are uncompressed)
+3. **Metadata propagation**: MessageType not fully propagated in push operations
 
 ### Future Enhancements
 
 - [x] Streaming RPC for large collections
 - [x] Chunked transfer for better progress tracking
+- [x] File inclusion in Pack/Unpack (tar format with database + files)
 - [ ] Progress reporting callbacks exposed in RPC responses
-- [ ] Compression during transfer (gzip, zstd)
+- [ ] Compression during transfer (gzip, zstd) - tar archives currently uncompressed
 - [ ] Incremental sync (only changed records)
 - [ ] Bandwidth throttling
 - [ ] Resume support for interrupted transfers
-- [ ] Verification checksums (SHA256)
-- [ ] Parallel file transfer
+- [ ] Verification checksums (SHA256) for tar contents
+- [ ] Parallel file transfer within tar stream
 - [ ] Delta sync (rsync-like)
-- [ ] Separate file streaming (not bundled with database)
 
 ## Integration
 
@@ -513,18 +537,21 @@ These can be used for:
 - Local collection cloning
 - Remote collection cloning (streaming)
 - Remote collection fetching (streaming)
-- Database transport layer
+- Database transport layer (SQLite VACUUM INTO)
+- Tar archive format (database + files)
 - Filesystem abstraction
-- File cloning
+- File cloning and inclusion in archives
 - gRPC streaming RPCs (PushCollection, PullCollection)
 - Chunked data transfer (1MB chunks)
 - Request validation
 - Error handling
 - Atomic operations (temp file + rename)
+- Operation state protection (prevents concurrent operations)
 - Test coverage
 
 📋 **Ready for:**
-- Production use (local and remote cloning/fetching)
+- Production use (local and remote cloning/fetching with files)
 - Integration testing
 - Performance optimization
 - Large-scale deployments
+- Disaster recovery scenarios

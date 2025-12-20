@@ -169,6 +169,7 @@ Services communicate via **gRPC loopback** even when co-located:
 
 **Key RPCs:**
 - `CreateCollection` - Create new collection
+- **🆕 `DeleteCollection`** - Delete collection and all data
 - `Discover` - Find collections
 - `Route` - Get collection endpoint
 - `SearchCollections` - Cross-collection search
