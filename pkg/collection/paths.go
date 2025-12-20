@@ -91,6 +91,33 @@ func (pc *PathConfig) BackupFilesPath(namespace, name string, timestamp int64) (
 	return filepath.Join(pc.BackupDir(), namespace, filename), nil
 }
 
+// BackupPathMicro generates a backup file path using microsecond precision.
+// Format: {DataDir}/.backup/{namespace}/{collectionname}-{timestampmicroseconds}.db
+// This prevents filesystem path collisions when multiple backups occur rapidly.
+func (pc *PathConfig) BackupPathMicro(namespace, name string, timestampMicro int64) (string, error) {
+	if err := ValidateNamespace(namespace); err != nil {
+		return "", err
+	}
+	if err := ValidateCollectionName(name); err != nil {
+		return "", err
+	}
+	filename := fmt.Sprintf("%s-%d.db", name, timestampMicro)
+	return filepath.Join(pc.BackupDir(), namespace, filename), nil
+}
+
+// BackupFilesPathMicro generates a backup files directory path using microsecond precision.
+// Format: {DataDir}/.backup/{namespace}/{collectionname}-{timestampmicroseconds}.files
+func (pc *PathConfig) BackupFilesPathMicro(namespace, name string, timestampMicro int64) (string, error) {
+	if err := ValidateNamespace(namespace); err != nil {
+		return "", err
+	}
+	if err := ValidateCollectionName(name); err != nil {
+		return "", err
+	}
+	filename := fmt.Sprintf("%s-%d.files", name, timestampMicro)
+	return filepath.Join(pc.BackupDir(), namespace, filename), nil
+}
+
 // ListBackupPaths lists all backup database files for a collection.
 // Returns sorted list (oldest to newest).
 func (pc *PathConfig) ListBackupPaths(namespace, name string) ([]string, error) {

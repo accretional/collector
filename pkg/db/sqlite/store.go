@@ -453,9 +453,11 @@ func (s *SqliteStore) BackupOnline(ctx context.Context, destPath string, pagesBa
 			return fmt.Errorf("failed to get schema for %s: %w", table, err)
 		}
 
-		// Create table in backup
-		if _, err := destDB.ExecContext(ctx, sql); err != nil {
-			// Table might already exist, continue
+		// Create table in backup database using attached database syntax
+		// Replace the table name with backup.tablename in the CREATE statement
+		createSQL := strings.Replace(sql, fmt.Sprintf("CREATE TABLE %s", table), fmt.Sprintf("CREATE TABLE backup.%s", table), 1)
+		if _, err := s.db.ExecContext(ctx, createSQL); err != nil {
+			// Table might already exist, ignore error
 		}
 
 		// Copy data in batches (for large tables)

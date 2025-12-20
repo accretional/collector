@@ -361,9 +361,12 @@ func (bm *BackupManager) BackupCollection(ctx context.Context, req *pb.BackupCol
 	}
 
 	// Generate backup ID and path (auto-generated, not user-specified)
-	timestamp := time.Now().Unix()
-	backupID := generateBackupID(req.Collection.Namespace, req.Collection.Name, timestamp)
-	backupPath, err := bm.pathConfig.BackupPath(req.Collection.Namespace, req.Collection.Name, timestamp)
+	// Use microsecond timestamp to prevent collisions
+	now := time.Now()
+	timestamp := now.Unix()
+	timestampMicro := now.UnixMicro()
+	backupID := generateBackupID(req.Collection.Namespace, req.Collection.Name, timestampMicro)
+	backupPath, err := bm.pathConfig.BackupPathMicro(req.Collection.Namespace, req.Collection.Name, timestampMicro)
 	if err != nil {
 		return &pb.BackupCollectionResponse{
 			Status: &pb.Status{
@@ -412,7 +415,7 @@ func (bm *BackupManager) BackupCollection(ctx context.Context, req *pb.BackupCol
 	// Backup files if requested
 	var fileCount int64
 	if req.IncludeFiles && sourceCollection.FS != nil {
-		filesDir, err := bm.pathConfig.BackupFilesPath(req.Collection.Namespace, req.Collection.Name, timestamp)
+		filesDir, err := bm.pathConfig.BackupFilesPathMicro(req.Collection.Namespace, req.Collection.Name, timestampMicro)
 		if err != nil {
 			os.Remove(dbBackupPath)
 			return &pb.BackupCollectionResponse{
@@ -489,7 +492,7 @@ func (bm *BackupManager) BackupCollection(ctx context.Context, req *pb.BackupCol
 		// Clean up backup files
 		os.Remove(dbBackupPath)
 		if req.IncludeFiles {
-			filesDir, pathErr := bm.pathConfig.BackupFilesPath(req.Collection.Namespace, req.Collection.Name, timestamp)
+			filesDir, pathErr := bm.pathConfig.BackupFilesPathMicro(req.Collection.Namespace, req.Collection.Name, timestampMicro)
 			if pathErr == nil {
 				os.RemoveAll(filesDir)
 			}
