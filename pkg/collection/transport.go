@@ -1,11 +1,13 @@
 package collection
 
 import (
+	"archive/tar"
 	"context"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Transport defines how a Collection is moved between collectors.
@@ -75,51 +77,178 @@ func (t *SqliteTransport) Pack(ctx context.Context, c *Collection, includeFiles 
 		return nil, 0, fmt.Errorf("failed to clone database: %w", err)
 	}
 
-	// TODO: If includeFiles, copy filesystem data
-	// This would involve walking the filesystem and adding to tarball
-
-	// For now, just return the database file
-	file, err := os.Open(dbPath)
+	// Create tar archive
+	tarPath := filepath.Join(tmpDir, "collection.tar")
+	tarFile, err := os.Create(tarPath)
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to open packed database: %w", err)
+		return nil, 0, fmt.Errorf("failed to create tar file: %w", err)
+	}
+
+	tw := tar.NewWriter(tarFile)
+
+	// Add database to tar
+	if err := addFileToTar(tw, dbPath, "collection.db"); err != nil {
+		tw.Close()
+		tarFile.Close()
+		return nil, 0, fmt.Errorf("failed to add database to tar: %w", err)
+	}
+
+	// Add files if requested
+	if includeFiles && c.FS != nil {
+		files, err := c.FS.List(ctx, "")
+		if err != nil {
+			tw.Close()
+			tarFile.Close()
+			return nil, 0, fmt.Errorf("failed to list files: %w", err)
+		}
+
+		for _, filePath := range files {
+			content, err := c.FS.Load(ctx, filePath)
+			if err != nil {
+				tw.Close()
+				tarFile.Close()
+				return nil, 0, fmt.Errorf("failed to load file %s: %w", filePath, err)
+			}
+
+			// Add file to tar with "files/" prefix
+			tarPath := filepath.Join("files", filePath)
+			if err := addContentToTar(tw, content, tarPath); err != nil {
+				tw.Close()
+				tarFile.Close()
+				return nil, 0, fmt.Errorf("failed to add file %s to tar: %w", filePath, err)
+			}
+		}
+	}
+
+	// Close tar writer to flush
+	if err := tw.Close(); err != nil {
+		tarFile.Close()
+		return nil, 0, fmt.Errorf("failed to close tar writer: %w", err)
+	}
+
+	// Close and reopen for reading
+	if err := tarFile.Close(); err != nil {
+		return nil, 0, fmt.Errorf("failed to close tar file: %w", err)
+	}
+
+	// Open for reading
+	file, err := os.Open(tarPath)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to open tar file: %w", err)
 	}
 
 	stat, err := file.Stat()
 	if err != nil {
 		file.Close()
-		return nil, 0, fmt.Errorf("failed to stat packed database: %w", err)
+		return nil, 0, fmt.Errorf("failed to stat tar file: %w", err)
 	}
 
 	return file, stat.Size(), nil
 }
 
 // Unpack receives collection data and creates a new collection.
+// If the data is a tar archive, it extracts the database and files.
+// Otherwise, it treats the data as a raw database file.
 func (t *SqliteTransport) Unpack(ctx context.Context, reader io.Reader, destPath string) error {
 	// Ensure destination directory exists
 	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
 		return fmt.Errorf("failed to create destination directory: %w", err)
 	}
 
-	// Write to temp file first, then rename atomically
-	tmpPath := destPath + ".tmp"
-	tmpFile, err := os.Create(tmpPath)
+	// Try to read as tar archive first
+	tr := tar.NewReader(reader)
+	header, err := tr.Next()
+
+	// If not a tar archive, treat as raw database file
+	if err == io.EOF {
+		return fmt.Errorf("empty archive")
+	}
 	if err != nil {
-		return fmt.Errorf("failed to create temp file: %w", err)
-	}
-	defer os.Remove(tmpPath) // Clean up on error
+		// Not a tar archive - might be raw database
+		// Write directly to destination
+		tmpPath := destPath + ".tmp"
+		tmpFile, err := os.Create(tmpPath)
+		if err != nil {
+			return fmt.Errorf("failed to create temp file: %w", err)
+		}
+		defer os.Remove(tmpPath)
 
-	if _, err := io.Copy(tmpFile, reader); err != nil {
-		tmpFile.Close()
-		return fmt.Errorf("failed to write data: %w", err)
+		if _, err := io.Copy(tmpFile, reader); err != nil {
+			tmpFile.Close()
+			return fmt.Errorf("failed to write data: %w", err)
+		}
+
+		if err := tmpFile.Close(); err != nil {
+			return fmt.Errorf("failed to close temp file: %w", err)
+		}
+
+		if err := os.Rename(tmpPath, destPath); err != nil {
+			return fmt.Errorf("failed to rename to destination: %w", err)
+		}
+
+		return nil
 	}
 
-	if err := tmpFile.Close(); err != nil {
-		return fmt.Errorf("failed to close temp file: %w", err)
+	// It's a tar archive - extract it
+	var foundDB bool
+	filesDir := filepath.Join(filepath.Dir(destPath), "files")
+
+	for {
+		if header == nil {
+			break
+		}
+
+		targetPath := ""
+		if header.Name == "collection.db" {
+			// Extract database to destPath
+			targetPath = destPath + ".tmp"
+			foundDB = true
+		} else if strings.HasPrefix(header.Name, "files/") {
+			// Extract files to files directory
+			relPath := header.Name[6:] // Remove "files/" prefix
+			targetPath = filepath.Join(filesDir, relPath)
+
+			// Ensure parent directory exists
+			if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+				return fmt.Errorf("failed to create directory for %s: %w", header.Name, err)
+			}
+		}
+
+		if targetPath != "" {
+			// Extract the file
+			outFile, err := os.Create(targetPath)
+			if err != nil {
+				return fmt.Errorf("failed to create %s: %w", targetPath, err)
+			}
+
+			if _, err := io.Copy(outFile, tr); err != nil {
+				outFile.Close()
+				return fmt.Errorf("failed to write %s: %w", header.Name, err)
+			}
+
+			if err := outFile.Close(); err != nil {
+				return fmt.Errorf("failed to close %s: %w", targetPath, err)
+			}
+		}
+
+		// Read next header
+		header, err = tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("failed to read tar header: %w", err)
+		}
 	}
 
-	// Atomic rename
-	if err := os.Rename(tmpPath, destPath); err != nil {
-		return fmt.Errorf("failed to rename to destination: %w", err)
+	if !foundDB {
+		return fmt.Errorf("database file not found in archive")
+	}
+
+	// Rename database to final location
+	tmpDBPath := destPath + ".tmp"
+	if err := os.Rename(tmpDBPath, destPath); err != nil {
+		return fmt.Errorf("failed to rename database to destination: %w", err)
 	}
 
 	return nil
@@ -178,4 +307,54 @@ func EstimateCollectionSize(ctx context.Context, c *Collection, includeFiles boo
 	}
 
 	return totalSize, nil
+}
+
+// addFileToTar adds a file from disk to a tar archive.
+func addFileToTar(tw *tar.Writer, sourcePath, tarPath string) error {
+	file, err := os.Open(sourcePath)
+	if err != nil {
+		return fmt.Errorf("failed to open file: %w", err)
+	}
+	defer file.Close()
+
+	stat, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("failed to stat file: %w", err)
+	}
+
+	header := &tar.Header{
+		Name:    tarPath,
+		Size:    stat.Size(),
+		Mode:    int64(stat.Mode()),
+		ModTime: stat.ModTime(),
+	}
+
+	if err := tw.WriteHeader(header); err != nil {
+		return fmt.Errorf("failed to write tar header: %w", err)
+	}
+
+	if _, err := io.Copy(tw, file); err != nil {
+		return fmt.Errorf("failed to write file content: %w", err)
+	}
+
+	return nil
+}
+
+// addContentToTar adds content from memory to a tar archive.
+func addContentToTar(tw *tar.Writer, content []byte, tarPath string) error {
+	header := &tar.Header{
+		Name: tarPath,
+		Size: int64(len(content)),
+		Mode: 0644,
+	}
+
+	if err := tw.WriteHeader(header); err != nil {
+		return fmt.Errorf("failed to write tar header: %w", err)
+	}
+
+	if _, err := tw.Write(content); err != nil {
+		return fmt.Errorf("failed to write content: %w", err)
+	}
+
+	return nil
 }
