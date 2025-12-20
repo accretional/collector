@@ -73,9 +73,23 @@ func (r *DefaultCollectionRepo) CreateCollection(ctx context.Context, collection
 		return nil, fmt.Errorf("collection cannot be nil")
 	}
 
+	// Validate namespace and collection name (defense in depth - also validated in service)
+	if err := ValidateNamespace(collection.Namespace); err != nil {
+		return nil, fmt.Errorf("invalid namespace: %w", err)
+	}
+	if err := ValidateCollectionName(collection.Name); err != nil {
+		return nil, fmt.Errorf("invalid collection name: %w", err)
+	}
+
 	// Create the database file and files directory first
-	dbPath := r.pathConfig.CollectionDBPath(collection.Namespace, collection.Name)
-	filesPath := r.pathConfig.CollectionFilesPath(collection.Namespace, collection.Name)
+	dbPath, err := r.pathConfig.CollectionDBPath(collection.Namespace, collection.Name)
+	if err != nil {
+		return nil, fmt.Errorf("invalid collection path: %w", err)
+	}
+	filesPath, err := r.pathConfig.CollectionFilesPath(collection.Namespace, collection.Name)
+	if err != nil {
+		return nil, fmt.Errorf("invalid collection files path: %w", err)
+	}
 
 	// Ensure directories exist
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
@@ -123,14 +137,20 @@ func (r *DefaultCollectionRepo) GetCollection(ctx context.Context, namespace, na
 	}
 
 	// Open database at path from registry using the store factory
-	dbPath := r.pathConfig.CollectionDBPath(namespace, name)
+	dbPath, err := r.pathConfig.CollectionDBPath(namespace, name)
+	if err != nil {
+		return nil, fmt.Errorf("invalid collection path: %w", err)
+	}
 	store, err := r.storeFactory(dbPath, Options{EnableJSON: true, EnableFTS: true})
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database at %s: %w", dbPath, err)
 	}
 
 	// Create filesystem
-	filesPath := r.pathConfig.CollectionFilesPath(namespace, name)
+	filesPath, err := r.pathConfig.CollectionFilesPath(namespace, name)
+	if err != nil {
+		return nil, fmt.Errorf("invalid collection files path: %w", err)
+	}
 	fs, err := NewLocalFileSystem(filesPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create filesystem at %s: %w", filesPath, err)

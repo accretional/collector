@@ -41,6 +41,14 @@ func (s *CollectionRepoService) CreateCollection(ctx context.Context, collection
 		return nil, fmt.Errorf("collection cannot be nil")
 	}
 
+	// Validate namespace and collection name
+	if err := ValidateNamespace(collection.Namespace); err != nil {
+		return nil, fmt.Errorf("invalid namespace: %w", err)
+	}
+	if err := ValidateCollectionName(collection.Name); err != nil {
+		return nil, fmt.Errorf("invalid collection name: %w", err)
+	}
+
 	// For simplicity, we'll use the collection's name as its ID.
 	// In a real-world scenario, you'd likely generate a unique ID.
 	id := fmt.Sprintf("%s/%s", collection.Namespace, collection.Name)

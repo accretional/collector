@@ -55,8 +55,14 @@ func (cm *CloneManager) CloneLocal(ctx context.Context, req *pb.CloneRequest) (*
 	}
 
 	// Create destination paths
-	destDBPath := cm.pathConfig.CollectionDBPath(req.DestNamespace, req.DestName)
-	destFilesPath := cm.pathConfig.CollectionFilesPath(req.DestNamespace, req.DestName)
+	destDBPath, err := cm.pathConfig.CollectionDBPath(req.DestNamespace, req.DestName)
+	if err != nil {
+		return nil, fmt.Errorf("invalid destination path: %w", err)
+	}
+	destFilesPath, err := cm.pathConfig.CollectionFilesPath(req.DestNamespace, req.DestName)
+	if err != nil {
+		return nil, fmt.Errorf("invalid destination files path: %w", err)
+	}
 
 	// Clone database
 	if err := cm.transport.Clone(ctx, srcCollection, destDBPath); err != nil {
@@ -275,7 +281,10 @@ func (cm *CloneManager) FetchRemote(ctx context.Context, req *pb.FetchRequest) (
 	}
 
 	// Create temporary file for receiving data
-	destDBPath := cm.pathConfig.CollectionDBPath(req.DestNamespace, req.DestName)
+	destDBPath, err := cm.pathConfig.CollectionDBPath(req.DestNamespace, req.DestName)
+	if err != nil {
+		return nil, fmt.Errorf("invalid destination path: %w", err)
+	}
 	if err := os.MkdirAll(filepath.Dir(destDBPath), 0755); err != nil {
 		return nil, fmt.Errorf("failed to create destination directory: %w", err)
 	}
@@ -382,7 +391,10 @@ func (cm *CloneManager) ReceivePushedCollection(stream pb.CollectionRepo_PushCol
 	}
 
 	// Create destination paths
-	destDBPath := cm.pathConfig.CollectionDBPath(metadata.DestNamespace, metadata.DestName)
+	destDBPath, err := cm.pathConfig.CollectionDBPath(metadata.DestNamespace, metadata.DestName)
+	if err != nil {
+		return fmt.Errorf("invalid destination path: %w", err)
+	}
 	if err := os.MkdirAll(filepath.Dir(destDBPath), 0755); err != nil {
 		return fmt.Errorf("failed to create destination directory: %w", err)
 	}

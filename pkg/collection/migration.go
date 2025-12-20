@@ -135,8 +135,14 @@ func (m *Migrator) MigrateAll(ctx context.Context) (*MigrationReport, error) {
 
 // migrateCollection migrates a single collection.
 func (m *Migrator) migrateCollection(ctx context.Context, namespace, name string) error {
-	oldDBPath := m.pathConfig.OldCollectionDBPath(namespace, name)
-	newDBPath := m.pathConfig.CollectionDBPath(namespace, name)
+	oldDBPath, err := m.pathConfig.OldCollectionDBPath(namespace, name)
+	if err != nil {
+		return fmt.Errorf("invalid old collection path: %w", err)
+	}
+	newDBPath, err := m.pathConfig.CollectionDBPath(namespace, name)
+	if err != nil {
+		return fmt.Errorf("invalid new collection path: %w", err)
+	}
 
 	// Check if old DB exists
 	if _, err := os.Stat(oldDBPath); os.IsNotExist(err) {

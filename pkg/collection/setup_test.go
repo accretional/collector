@@ -27,7 +27,10 @@ func setupTestCollection(t *testing.T) (*collection.Collection, func()) {
 	name := "test-collection"
 
 	// 3. Initialize the REAL SQLite Store
-	dbPath := pathConfig.CollectionDBPath(namespace, name)
+	dbPath, err := pathConfig.CollectionDBPath(namespace, name)
+	if err != nil {
+		t.Fatalf("invalid collection path: %v", err)
+	}
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
 		t.Fatalf("failed to create db dir: %v", err)
 	}
@@ -42,7 +45,11 @@ func setupTestCollection(t *testing.T) (*collection.Collection, func()) {
 	}
 
 	// 4. Initialize the REAL Local Filesystem
-	filesPath := pathConfig.CollectionFilesPath(namespace, name)
+	filesPath, err := pathConfig.CollectionFilesPath(namespace, name)
+	if err != nil {
+		os.RemoveAll(tempDir)
+		t.Fatalf("invalid collection files path: %v", err)
+	}
 	fs, err := collection.NewLocalFileSystem(filesPath)
 	if err != nil {
 		os.RemoveAll(tempDir)

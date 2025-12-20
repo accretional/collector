@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // FileSystem implements file operations using the local OS filesystem.
@@ -28,9 +29,47 @@ func NewFileSystem(root string) (*FileSystem, error) {
 	return &FileSystem{Root: absRoot}, nil
 }
 
+// sanitizePath validates and cleans a user-provided path to prevent directory traversal attacks.
+// Returns error if the path attempts to escape the root directory or contains suspicious patterns.
+func (fs *FileSystem) sanitizePath(path string) (string, error) {
+	// Clean the path to remove any ".." or "." components
+	cleaned := filepath.Clean(path)
+
+	// Reject absolute paths
+	if filepath.IsAbs(cleaned) {
+		return "", fmt.Errorf("absolute paths not allowed: %s", path)
+	}
+
+	// Reject paths that still contain ".." after cleaning
+	// This catches attempts like "../../etc/passwd"
+	if strings.Contains(cleaned, "..") {
+		return "", fmt.Errorf("path traversal detected: %s", path)
+	}
+
+	// Build the full path and ensure it's within our root
+	fullPath := filepath.Join(fs.Root, cleaned)
+	absPath, err := filepath.Abs(fullPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve path: %w", err)
+	}
+
+	// Ensure the resolved path is still within our root directory
+	if !strings.HasPrefix(absPath, fs.Root+string(filepath.Separator)) && absPath != fs.Root {
+		return "", fmt.Errorf("path escapes root directory: %s", path)
+	}
+
+	return cleaned, nil
+}
+
 // Save writes content to a file at the given path.
 func (fs *FileSystem) Save(ctx context.Context, path string, content []byte) error {
-	fullPath := filepath.Join(fs.Root, path)
+	// Sanitize path to prevent directory traversal
+	cleanPath, err := fs.sanitizePath(path)
+	if err != nil {
+		return fmt.Errorf("invalid path: %w", err)
+	}
+
+	fullPath := filepath.Join(fs.Root, cleanPath)
 
 	// Ensure directory exists
 	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
@@ -53,7 +92,13 @@ func (fs *FileSystem) Save(ctx context.Context, path string, content []byte) err
 
 // Load reads content from a file at the given path.
 func (fs *FileSystem) Load(ctx context.Context, path string) ([]byte, error) {
-	fullPath := filepath.Join(fs.Root, path)
+	// Sanitize path to prevent directory traversal
+	cleanPath, err := fs.sanitizePath(path)
+	if err != nil {
+		return nil, fmt.Errorf("invalid path: %w", err)
+	}
+
+	fullPath := filepath.Join(fs.Root, cleanPath)
 	content, err := os.ReadFile(fullPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file: %w", err)
@@ -63,7 +108,13 @@ func (fs *FileSystem) Load(ctx context.Context, path string) ([]byte, error) {
 
 // Delete removes a file at the given path.
 func (fs *FileSystem) Delete(ctx context.Context, path string) error {
-	fullPath := filepath.Join(fs.Root, path)
+	// Sanitize path to prevent directory traversal
+	cleanPath, err := fs.sanitizePath(path)
+	if err != nil {
+		return fmt.Errorf("invalid path: %w", err)
+	}
+
+	fullPath := filepath.Join(fs.Root, cleanPath)
 	if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to delete file: %w", err)
 	}
@@ -72,8 +123,14 @@ func (fs *FileSystem) Delete(ctx context.Context, path string) error {
 
 // List returns all files under the given prefix.
 func (fs *FileSystem) List(ctx context.Context, prefix string) ([]string, error) {
+	// Sanitize prefix to prevent directory traversal
+	cleanPrefix, err := fs.sanitizePath(prefix)
+	if err != nil {
+		return nil, fmt.Errorf("invalid prefix: %w", err)
+	}
+
 	var files []string
-	searchPath := filepath.Join(fs.Root, prefix)
+	searchPath := filepath.Join(fs.Root, cleanPrefix)
 
 	err := filepath.Walk(searchPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -100,7 +157,13 @@ func (fs *FileSystem) List(ctx context.Context, prefix string) ([]string, error)
 
 // Stat returns the size of a file at the given path.
 func (fs *FileSystem) Stat(ctx context.Context, path string) (int64, error) {
-	fullPath := filepath.Join(fs.Root, path)
+	// Sanitize path to prevent directory traversal
+	cleanPath, err := fs.sanitizePath(path)
+	if err != nil {
+		return 0, fmt.Errorf("invalid path: %w", err)
+	}
+
+	fullPath := filepath.Join(fs.Root, cleanPath)
 	info, err := os.Stat(fullPath)
 	if err != nil {
 		return 0, fmt.Errorf("failed to stat file: %w", err)
@@ -139,6 +202,7 @@ func (fs *FileSystem) SaveDir(ctx context.Context, destPath, srcPath string) err
 
 // CopyFile copies a file from srcPath to destPath within this filesystem.
 func (fs *FileSystem) CopyFile(ctx context.Context, srcPath, destPath string) error {
+	// Path sanitization is done by Load and Save
 	content, err := fs.Load(ctx, srcPath)
 	if err != nil {
 		return fmt.Errorf("failed to load source: %w", err)
@@ -149,8 +213,18 @@ func (fs *FileSystem) CopyFile(ctx context.Context, srcPath, destPath string) er
 
 // MoveFile moves a file from srcPath to destPath within this filesystem.
 func (fs *FileSystem) MoveFile(ctx context.Context, srcPath, destPath string) error {
-	srcFull := filepath.Join(fs.Root, srcPath)
-	destFull := filepath.Join(fs.Root, destPath)
+	// Sanitize both paths to prevent directory traversal
+	cleanSrc, err := fs.sanitizePath(srcPath)
+	if err != nil {
+		return fmt.Errorf("invalid source path: %w", err)
+	}
+	cleanDest, err := fs.sanitizePath(destPath)
+	if err != nil {
+		return fmt.Errorf("invalid destination path: %w", err)
+	}
+
+	srcFull := filepath.Join(fs.Root, cleanSrc)
+	destFull := filepath.Join(fs.Root, cleanDest)
 
 	// Ensure destination directory exists
 	if err := os.MkdirAll(filepath.Dir(destFull), 0755); err != nil {
@@ -166,7 +240,13 @@ func (fs *FileSystem) MoveFile(ctx context.Context, srcPath, destPath string) er
 
 // Exists checks if a file exists at the given path.
 func (fs *FileSystem) Exists(ctx context.Context, path string) (bool, error) {
-	fullPath := filepath.Join(fs.Root, path)
+	// Sanitize path to prevent directory traversal
+	cleanPath, err := fs.sanitizePath(path)
+	if err != nil {
+		return false, fmt.Errorf("invalid path: %w", err)
+	}
+
+	fullPath := filepath.Join(fs.Root, cleanPath)
 	_, err := os.Stat(fullPath)
 	if err == nil {
 		return true, nil
@@ -179,7 +259,13 @@ func (fs *FileSystem) Exists(ctx context.Context, path string) (bool, error) {
 
 // OpenReader opens a file for reading.
 func (fs *FileSystem) OpenReader(ctx context.Context, path string) (io.ReadCloser, error) {
-	fullPath := filepath.Join(fs.Root, path)
+	// Sanitize path to prevent directory traversal
+	cleanPath, err := fs.sanitizePath(path)
+	if err != nil {
+		return nil, fmt.Errorf("invalid path: %w", err)
+	}
+
+	fullPath := filepath.Join(fs.Root, cleanPath)
 	file, err := os.Open(fullPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file: %w", err)
@@ -189,7 +275,13 @@ func (fs *FileSystem) OpenReader(ctx context.Context, path string) (io.ReadClose
 
 // OpenWriter opens a file for writing.
 func (fs *FileSystem) OpenWriter(ctx context.Context, path string) (io.WriteCloser, error) {
-	fullPath := filepath.Join(fs.Root, path)
+	// Sanitize path to prevent directory traversal
+	cleanPath, err := fs.sanitizePath(path)
+	if err != nil {
+		return nil, fmt.Errorf("invalid path: %w", err)
+	}
+
+	fullPath := filepath.Join(fs.Root, cleanPath)
 
 	// Ensure directory exists
 	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {

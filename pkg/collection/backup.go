@@ -348,7 +348,15 @@ func (bm *BackupManager) BackupCollection(ctx context.Context, req *pb.BackupCol
 	// Generate backup ID and path (auto-generated, not user-specified)
 	timestamp := time.Now().Unix()
 	backupID := generateBackupID(req.Collection.Namespace, req.Collection.Name, timestamp)
-	backupPath := bm.pathConfig.BackupPath(req.Collection.Namespace, req.Collection.Name, timestamp)
+	backupPath, err := bm.pathConfig.BackupPath(req.Collection.Namespace, req.Collection.Name, timestamp)
+	if err != nil {
+		return &pb.BackupCollectionResponse{
+			Status: &pb.Status{
+				Code:    pb.Status_INVALID_ARGUMENT,
+				Message: fmt.Sprintf("invalid backup path: %v", err),
+			},
+		}, nil
+	}
 	storageType := "local"
 
 	// Ensure namespace backup directory exists
@@ -389,7 +397,16 @@ func (bm *BackupManager) BackupCollection(ctx context.Context, req *pb.BackupCol
 	// Backup files if requested
 	var fileCount int64
 	if req.IncludeFiles && sourceCollection.FS != nil {
-		filesDir := bm.pathConfig.BackupFilesPath(req.Collection.Namespace, req.Collection.Name, timestamp)
+		filesDir, err := bm.pathConfig.BackupFilesPath(req.Collection.Namespace, req.Collection.Name, timestamp)
+		if err != nil {
+			os.Remove(dbBackupPath)
+			return &pb.BackupCollectionResponse{
+				Status: &pb.Status{
+					Code:    pb.Status_INVALID_ARGUMENT,
+					Message: fmt.Sprintf("invalid backup files path: %v", err),
+				},
+			}, nil
+		}
 		if err := os.MkdirAll(filesDir, 0755); err != nil {
 			// Clean up database backup
 			os.Remove(dbBackupPath)
@@ -457,8 +474,10 @@ func (bm *BackupManager) BackupCollection(ctx context.Context, req *pb.BackupCol
 		// Clean up backup files
 		os.Remove(dbBackupPath)
 		if req.IncludeFiles {
-			filesDir := bm.pathConfig.BackupFilesPath(req.Collection.Namespace, req.Collection.Name, timestamp)
-			os.RemoveAll(filesDir)
+			filesDir, pathErr := bm.pathConfig.BackupFilesPath(req.Collection.Namespace, req.Collection.Name, timestamp)
+			if pathErr == nil {
+				os.RemoveAll(filesDir)
+			}
 		}
 		return &pb.BackupCollectionResponse{
 			Status: &pb.Status{
