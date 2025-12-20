@@ -99,7 +99,7 @@ func NewStore(path string, opts collection.Options) (*Store, error) {
 
 		if !ftsAvailable {
 			db.Close()
-			return nil, fmt.Errorf("FTS5 is not available but EnableFTS is true. Build with -tags sqlite_fts5 or -tags fts5 to enable FTS5 support")
+			return nil, fmt.Errorf("FTS5 is not available but EnableFTS is true. Build with -tags sqlite_fts5 to enable FTS5 support")
 		}
 
 		tx, err := db.Begin()
@@ -612,7 +612,7 @@ func (b *searchQueryBuilder) buildVector(ctx context.Context) ([]*collection.Sea
 
 func (b *searchQueryBuilder) buildFTS(ctx context.Context) ([]*collection.SearchResult, error) {
 	if !b.store.ftsAvailable {
-		return nil, fmt.Errorf("full-text search requested but FTS5 is not available. Build with -tags sqlite_fts5 or -tags fts5 to enable FTS5 support")
+		return nil, fmt.Errorf("full-text search requested but FTS5 is not available. Build with -tags sqlite_fts5 to enable FTS5 support")
 	}
 
 	b.selectFields(`r.id, r.proto_data, r.data_uri, r.created_at, r.updated_at, r.labels,
