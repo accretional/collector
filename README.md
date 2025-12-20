@@ -198,10 +198,10 @@ import (
 func main() {
     // Create and start the Collector server
     srv, err := server.New(server.Config{
-        DataDir:     "./my-app-data",
-        Port:        8080,
-        Namespace:   "my-app",
-        CollectorID: "my-collector",
+        DataDir:   "./my-app-data",
+        Port:      8080,
+        Namespace: "my-app",
+        // CollectorID auto-generates a UUID7 if not specified
     })
     if err != nil {
         log.Fatalf("Failed to create server: %v", err)
@@ -225,10 +225,16 @@ func main() {
 **Configuration Options:**
 - `DataDir` - Root directory for all data storage (default: `"./data"`)
 - `Port` - gRPC server port (default: `50051`)
-- `Namespace` - Default namespace for this collector (default: `"production"`)
-- `CollectorID` - Unique identifier for this collector (default: `"collector-001"`)
+- `Namespace` - Default namespace for this collector (default: `"shared"`)
+- `CollectorID` - Unique identifier for this collector (default: random UUID7)
 - `Logger` - Custom logger (default: `log.Default()`)
 - `DisableMigration` - Skip automatic database migration (default: `false`)
+  - Migration converts old flat database structures to namespace-organized layout
+  - Only disable if you want to manually control migration timing
+
+**Reserved Namespaces:**
+- `system` - Reserved for internal collections (types, collections, connections, audit, logs)
+- Use your own namespace for application data (e.g., `"my-app"`, `"shared"`, `"production"`)
 
 **See also:** [examples/embedded/main.go](examples/embedded/main.go) for a complete example.
 

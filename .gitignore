@@ -34,5 +34,6 @@ go.work.sum
 data/
 gen/
 proto/google/
-./server
-server
+# Ignore compiled server binary in root or cmd/server
+/server
+/cmd/server/server

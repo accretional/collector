@@ -18,6 +18,7 @@ import (
 	"github.com/accretional/collector/pkg/db/sqlite"
 	"github.com/accretional/collector/pkg/dispatch"
 	"github.com/accretional/collector/pkg/registry"
+	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/proto"
@@ -25,6 +26,15 @@ import (
 )
 
 // Config holds server configuration options.
+//
+// Note: The "system" namespace is reserved for internal collections:
+//   - system/collections - Collection metadata registry
+//   - system/types - Protobuf type registry
+//   - system/connections - Collector connections
+//   - system/audit - Audit log (future)
+//   - system/logs - System logs (future)
+//
+// Use your own namespace for application data.
 type Config struct {
 	// DataDir is the root directory for all data storage (default: "./data")
 	DataDir string
@@ -32,16 +42,21 @@ type Config struct {
 	// Port is the gRPC server port (default: 50051)
 	Port int
 
-	// Namespace is the default namespace for this collector (default: "production")
+	// Namespace is the default namespace for this collector (default: "shared")
+	// This namespace is used for service registration and default collection creation.
+	// The "system" namespace is reserved for internal collections.
 	Namespace string
 
-	// CollectorID is the unique identifier for this collector (default: "collector-001")
+	// CollectorID is the unique identifier for this collector (default: random UUID7)
+	// Used for distributed system coordination and service registration.
 	CollectorID string
 
 	// Logger is the logger to use (default: log.Default())
 	Logger *log.Logger
 
-	// DisableMigration disables automatic database migration (default: false)
+	// DisableMigration disables automatic database migration on startup (default: false)
+	// Migration converts old flat database structures to namespace-organized layout.
+	// Only disable if you want to manually control migration timing.
 	DisableMigration bool
 }
 
@@ -73,10 +88,10 @@ func New(config Config) (*Server, error) {
 		config.Port = 50051
 	}
 	if config.Namespace == "" {
-		config.Namespace = "production"
+		config.Namespace = "shared"
 	}
 	if config.CollectorID == "" {
-		config.CollectorID = "collector-001"
+		config.CollectorID = uuid.Must(uuid.NewV7()).String()
 	}
 	if config.Logger == nil {
 		config.Logger = log.Default()
@@ -428,6 +443,16 @@ func (s *Server) Address() string {
 		return ""
 	}
 	return s.listener.Addr().String()
+}
+
+// CollectorID returns the unique identifier for this collector.
+func (s *Server) CollectorID() string {
+	return s.config.CollectorID
+}
+
+// Namespace returns the default namespace for this collector.
+func (s *Server) Namespace() string {
+	return s.config.Namespace
 }
 
 // grpcRegistryClientValidator wraps a gRPC Registry client to implement ServiceMethodValidator

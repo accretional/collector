@@ -15,15 +15,20 @@ import (
 func main() {
 	// Create and start the Collector server
 	srv, err := server.New(server.Config{
-		DataDir:     "./my-app-data",
-		Port:        8080,
-		Namespace:   "my-app",
-		CollectorID: "embedded-collector",
+		DataDir:   "./my-app-data",
+		Port:      8080,
+		Namespace: "my-app",
+		// CollectorID will auto-generate a UUID7 if not specified
+		// Set it explicitly if you need a stable ID across restarts
 	})
 	if err != nil {
 		log.Fatalf("Failed to create server: %v", err)
 	}
 	defer srv.Close()
+
+	log.Printf("Collector server started at %s", srv.Address())
+	log.Printf("Collector ID: %s", srv.CollectorID())
+	log.Printf("Namespace: %s", srv.Namespace())
 
 	// Server is already running, do your application initialization here
 

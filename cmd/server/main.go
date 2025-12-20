@@ -30,13 +30,11 @@ func run() error {
 
 	namespace := os.Getenv("COLLECTOR_NAMESPACE")
 	if namespace == "" {
-		namespace = "production"
+		namespace = "shared"
 	}
 
 	collectorID := os.Getenv("COLLECTOR_ID")
-	if collectorID == "" {
-		collectorID = "collector-001"
-	}
+	// If not set, server.New() will generate a random UUID7
 
 	// Create and start server
 	srv, err := server.New(server.Config{
