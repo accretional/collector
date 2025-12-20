@@ -62,10 +62,10 @@ func TestValidateNamespace(t *testing.T) {
 		{"valid simple", "production", false},
 		{"valid with dash", "prod-v2", false},
 		{"valid with underscore", "prod_env", false},
-		{"valid system", "system", false},      // system is valid - used for system collections
-		{"valid internal", "internal", false},  // internal is valid
-		{"valid admin", "admin", false},        // admin is valid
-		{"valid metadata", "metadata", false},  // metadata is valid
+		{"valid system", "system", false},     // system is valid - used for system collections
+		{"valid internal", "internal", false}, // internal is valid
+		{"valid admin", "admin", false},       // admin is valid
+		{"valid metadata", "metadata", false}, // metadata is valid
 
 		// Reserved namespaces (filesystem conflicts only)
 		{"reserved repo", "repo", true},

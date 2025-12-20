@@ -200,11 +200,11 @@ func TestSystemCollectionsUsable(t *testing.T) {
 
 	// Test that we can write to connections collection
 	connection := &pb.Connection{
-		Id:                 "test-conn-001",
-		SourceCollectorId:  "collector-1",
-		TargetCollectorId:  "collector-2",
-		Address:            "localhost:50051",
-		SharedNamespaces:   []string{"test"},
+		Id:                "test-conn-001",
+		SourceCollectorId: "collector-1",
+		TargetCollectorId: "collector-2",
+		Address:           "localhost:50051",
+		SharedNamespaces:  []string{"test"},
 	}
 
 	connBytes, err := proto.Marshal(connection)

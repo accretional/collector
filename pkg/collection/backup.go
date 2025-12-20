@@ -841,6 +841,12 @@ func (bm *BackupManager) DeleteBackup(ctx context.Context, req *pb.DeleteBackupR
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
 
+	return bm.deleteBackupUnlocked(ctx, req)
+}
+
+// deleteBackupUnlocked is the internal version that doesn't acquire the lock.
+// Used by cleanup operations that already hold the lock.
+func (bm *BackupManager) deleteBackupUnlocked(ctx context.Context, req *pb.DeleteBackupRequest) (*pb.DeleteBackupResponse, error) {
 	// Get backup metadata
 	backup, err := bm.metaStore.GetBackup(ctx, req.BackupId)
 	if err != nil {
@@ -1041,10 +1047,10 @@ func (bm *BackupManager) cleanupOldBackups(ctx context.Context, namespace, name 
 		}
 	}
 
-	// Delete old backups
+	// Delete old backups (using unlocked version since we already hold the lock)
 	for _, backup := range toDelete {
 		deleteReq := &pb.DeleteBackupRequest{BackupId: backup.BackupId}
-		_, err := bm.DeleteBackup(ctx, deleteReq)
+		_, err := bm.deleteBackupUnlocked(ctx, deleteReq)
 		if err != nil {
 			fmt.Printf("cleanup: failed to delete backup %s: %v\n", backup.BackupId, err)
 		} else {

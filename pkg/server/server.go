@@ -57,8 +57,8 @@ type Config struct {
 
 // Server represents a fully configured Collector server with all services.
 type Server struct {
-	config    Config
-	logger    *log.Logger
+	config     Config
+	logger     *log.Logger
 	grpcServer *grpc.Server
 	listener   net.Listener
 	dispatcher *dispatch.Dispatcher

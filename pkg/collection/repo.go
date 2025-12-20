@@ -48,11 +48,11 @@ type StoreFactory func(path string, opts Options) (Store, error)
 // DefaultCollectionRepo is a facade that provides a simple interface for managing collections.
 // It uses a CollectionRepoService and a Store to do the heavy lifting.
 type DefaultCollectionRepo struct {
-	service        *CollectionRepoService
-	store          Store
-	pathConfig     *PathConfig
-	storeFactory   StoreFactory
-	typeValidator  MessageTypeValidator // Optional: validates message types if set
+	service       *CollectionRepoService
+	store         Store
+	pathConfig    *PathConfig
+	storeFactory  StoreFactory
+	typeValidator MessageTypeValidator // Optional: validates message types if set
 }
 
 // NewCollectionRepo creates a new DefaultCollectionRepo with the given Store, PathConfig, RegistryStore, and StoreFactory.

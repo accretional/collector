@@ -511,8 +511,8 @@ func TestBackupValidation(t *testing.T) {
 			wantErr: true, // Will fail because collection doesn't exist, but validation passes
 		},
 		{
-			name: "missing collection",
-			req: &pb.BackupCollectionRequest{},
+			name:    "missing collection",
+			req:     &pb.BackupCollectionRequest{},
 			wantErr: true,
 		},
 		{
@@ -585,6 +585,10 @@ func (m *MockCollectionRepo) GetCollection(ctx context.Context, namespace, name 
 }
 
 func (m *MockCollectionRepo) UpdateCollectionMetadata(ctx context.Context, namespace, name string, meta *pb.Collection) error {
+	key := namespace + "/" + name
+	if coll, exists := m.collections[key]; exists {
+		coll.Meta = meta
+	}
 	return nil
 }
 
@@ -1219,6 +1223,7 @@ func TestRetentionPolicyMaxBackups(t *testing.T) {
 
 	// Create 5 backups
 	for i := 0; i < 5; i++ {
+		t.Logf("Starting backup %d", i)
 		req := &pb.BackupCollectionRequest{
 			Collection: &pb.NamespacedName{
 				Namespace: "test",
@@ -1234,13 +1239,14 @@ func TestRetentionPolicyMaxBackups(t *testing.T) {
 		if resp.Status.Code != pb.Status_OK {
 			t.Fatalf("backup %d returned error: %s", i, resp.Status.Message)
 		}
+		t.Logf("Completed backup %d", i)
 
-		// Delay to ensure different timestamps (backup paths use seconds)
-		time.Sleep(1100 * time.Millisecond)
+		// Delay to ensure different timestamps (backup paths use microseconds now)
+		time.Sleep(10 * time.Millisecond)
 	}
 
-	// Wait for async cleanup to complete
-	time.Sleep(100 * time.Millisecond)
+	// Cleanup is now synchronous, so backups should already be cleaned up
+	t.Logf("All backups completed, checking retention")
 
 	// List remaining backups
 	listResp, err := backupManager.ListBackups(ctx, &pb.ListBackupsRequest{
