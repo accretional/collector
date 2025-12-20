@@ -26,7 +26,174 @@ CollectorRegistry is **functionally complete** for its core use case (service va
 
 ## ⚠️ Missing Features & Gaps
 
-### 1. **Missing RPC Endpoints**
+### 1. **🔴 CRITICAL: Missing Namespace Validation**
+
+**Problem**: RegisterProto and RegisterService do NOT validate namespace names.
+
+**Impact**:
+- Users can register in reserved namespaces: `repo`, `backups`, `files`
+- Users can use invalid characters that break filesystem operations
+- No length limits enforced
+- Path traversal attacks possible: `../../malicious`
+- Hidden namespaces possible: `.hidden`
+
+**Current Code** (registry.go:158-160):
+```go
+if req.Namespace == "" {
+    return nil, status.Errorf(codes.InvalidArgument, "namespace is required")
+}
+// ❌ No validation.ValidateNamespace(req.Namespace) call!
+```
+
+**What should happen**:
+```go
+if req.Namespace == "" {
+    return nil, status.Errorf(codes.InvalidArgument, "namespace is required")
+}
+if err := collection.ValidateNamespace(req.Namespace); err != nil {
+    return nil, status.Errorf(codes.InvalidArgument, "invalid namespace: %v", err)
+}
+```
+
+**Tests missing**:
+- ❌ Test registering in reserved namespace "repo" (should fail)
+- ❌ Test registering with invalid chars like "../test" (should fail)
+- ❌ Test registering with dots ".hidden" (should fail)
+- ❌ Test namespace length limits
+
+**Priority**: 🔴 **CRITICAL** - Security and data integrity issue
+
+---
+
+### 2. **🔴 CRITICAL: No Proto/Service Name Validation**
+
+**Problem**: File descriptor names and service names are not validated.
+
+**Impact**:
+- Path traversal: `../../etc/passwd.proto`
+- Invalid IDs: IDs are `namespace/name`, so `/` in name breaks format
+- No length limits on names
+- Hidden files: `.hidden.proto`
+
+**Tests missing**:
+- ❌ Test proto name with path traversal
+- ❌ Test proto name with invalid characters
+- ❌ Test extremely long proto names (1000+ chars)
+- ❌ Test service name with special characters
+
+**Priority**: 🔴 **CRITICAL** - Security issue
+
+---
+
+### 3. **🔴 CRITICAL: No Size Limits**
+
+**Problem**: No validation on proto size or message count.
+
+**Impact**:
+- DoS attack: Register 1GB proto file
+- Database bloat: Unlimited FileDescriptorProto size
+- Memory exhaustion during unmarshaling
+
+**What's missing**:
+```go
+// No size checks like:
+if proto.Size(req.FileDescriptor) > 10*1024*1024 { // 10MB limit
+    return nil, status.Errorf(codes.InvalidArgument, "proto too large")
+}
+if len(req.FileDescriptor.MessageType) > 10000 {
+    return nil, status.Errorf(codes.InvalidArgument, "too many message types")
+}
+```
+
+**Tests missing**:
+- ❌ Test registering very large proto (100MB+)
+- ❌ Test registering proto with 100k+ message types
+- ❌ Test registering proto with deeply nested messages (1000+ levels)
+
+**Priority**: 🔴 **CRITICAL** - DoS vulnerability
+
+---
+
+### 4. **🟡 Race Condition in Dependency Validation**
+
+**Problem**: Time-of-check-to-time-of-use (TOCTOU) race in dependency validation.
+
+**Scenario**:
+1. Thread A validates proto B depends on proto A (A exists ✓)
+2. Thread B deletes proto A (when delete is implemented)
+3. Thread A completes registration of proto B
+4. Result: Proto B registered with missing dependency A
+
+**Current code** (registry.go:159-162):
+```go
+// Validate dependencies exist
+if err := s.validateDependencies(ctx, req.Namespace, req.FileDescriptor.GetName(), req.FileDescriptor.Dependency); err != nil {
+    return nil, err
+}
+// ❌ Gap here - dependencies could be deleted before CreateRecord
+// Validate dependencies exist
+registeredProto := &collector.RegisteredProto{...}
+// ... CreateRecord happens later
+```
+
+**Solution**: Need transactional guarantees or locking. SQLite supports transactions, but Collection interface doesn't expose them.
+
+**Priority**: 🟡 **MEDIUM** - Only matters when delete is implemented
+
+---
+
+### 5. **🟡 No Rate Limiting**
+
+**Problem**: No rate limiting on registration operations.
+
+**Impact**:
+- Spam attack: Register millions of bogus protos
+- Resource exhaustion
+- Database bloat
+
+**What's missing**:
+- Per-namespace rate limits
+- Global rate limits
+- Burst handling
+- Backpressure mechanisms
+
+**Tests missing**:
+- ❌ Test rapid registration (1000+ protos/sec)
+- ❌ Test behavior under sustained high load
+
+**Priority**: 🟡 **MEDIUM** - Production deployments need this
+
+---
+
+### 6. **🟡 Interceptor Performance Issues**
+
+**Problem**: Validation interceptor calls ValidateMethod on EVERY RPC.
+
+**Impact**:
+- Additional database query per RPC call
+- Latency overhead
+- Database load
+
+**Current behavior**:
+```
+Every RPC → ValidateMethod → LookupService → DB query → Unmarshal
+```
+
+**Missing optimization**:
+- No caching of validation results
+- No batch validation
+- No pre-computed validation map
+
+**Tests missing**:
+- ❌ Benchmark validation interceptor latency
+- ❌ Test interceptor under high concurrency
+- ❌ Test memory usage of interceptor
+
+**Priority**: 🟡 **MEDIUM** - Performance impact on every RPC
+
+---
+
+### 7. **Missing RPC Endpoints**
 
 #### Critical Missing RPCs:
 - ❌ **LookupProto** - Implementation exists as helper, not exposed as RPC
@@ -320,32 +487,72 @@ Namespace names are not validated for:
 
 ## Summary Assessment
 
-**Overall Grade: A- (90%)**
+**Overall Grade: C+ (75%)** - Downgraded from A- due to critical security issues
+
+**🔴 CRITICAL Security Issues Found:**
+1. **No namespace validation** - Can register in reserved namespaces, use path traversal
+2. **No name validation** - Can use path traversal in proto/service names
+3. **No size limits** - DoS vulnerability via large proto uploads
 
 **Strengths:**
-- Core functionality (service validation) is solid and well-tested
+- Core functionality (service validation) is well-designed
 - Scales to 100k+ registrations
 - ✅ Dependency validation with hierarchical namespace resolution
-- ✅ Well-known type support
+- ✅ Well-known type support (Google + Collector types)
 - ✅ Circular dependency detection
 - Clean architecture with good separation of concerns
-- Comprehensive test coverage (43 tests including dependency scenarios)
+- Good test coverage (42 tests) for implemented features
 
-**Weaknesses:**
-- Missing lifecycle management (delete, update)
-- Missing proto query RPCs (LookupProto, ListProtos as RPCs)
-- No versioning support
-- Silent errors in optional features
-- No concurrency testing
+**Critical Weaknesses:**
+- 🔴 **No input validation** - namespace, name, size (SECURITY ISSUE)
+- 🔴 **DoS vulnerabilities** - No rate limiting, no size limits
+- 🟡 Missing lifecycle management (delete, update)
+- 🟡 Missing proto query RPCs (LookupProto, ListProtos as RPCs)
+- 🟡 No versioning support
+- 🟡 Silent errors in optional features (TypeRegistrar)
+- 🟡 No concurrency testing
+- 🟡 Interceptor performance issues (DB query per RPC)
+- 🟡 TOCTOU race in dependency validation
 
 **Recommendation:**
-- For **service validation use case**: Production ready ✅
-- For **general-purpose type registry**: Nearly ready, add delete operations ⚠️
-- For **service catalog**: Needs versioning and metadata support ⚠️
+- For **development/testing**: OK with caution ⚠️
+- For **production without validation**: ❌ **NOT READY** - Security issues
+- For **production with validation fixes**: Add validation, then ready for service validation use case
 
-**Next Steps:**
-1. Add delete operations (critical for production)
-2. Expose LookupProto/ListProtos as RPCs
-3. Add concurrency tests
-4. Fix silent errors
-5. Add pagination
+**IMMEDIATE Action Required (Before Production):**
+1. 🔴 **ADD NAMESPACE VALIDATION** (1 hour)
+   ```go
+   if err := collection.ValidateNamespace(req.Namespace); err != nil {
+       return nil, status.Errorf(codes.InvalidArgument, "invalid namespace: %v", err)
+   }
+   ```
+
+2. 🔴 **ADD NAME VALIDATION** (1 hour)
+   ```go
+   if err := collection.ValidateName(req.FileDescriptor.GetName(), "proto name"); err != nil {
+       return nil, status.Errorf(codes.InvalidArgument, "invalid proto name: %v", err)
+   }
+   ```
+
+3. 🔴 **ADD SIZE LIMITS** (2 hours)
+   ```go
+   const MaxProtoSize = 10 * 1024 * 1024 // 10MB
+   const MaxMessageTypes = 10000
+   if proto.Size(req.FileDescriptor) > MaxProtoSize {
+       return nil, status.Errorf(codes.InvalidArgument, "proto exceeds size limit")
+   }
+   ```
+
+4. 🔴 **ADD VALIDATION TESTS** (2 hours)
+   - Test reserved namespaces
+   - Test path traversal attempts
+   - Test size limits
+
+**Next Steps (Post-Security):**
+1. Add rate limiting (DoS protection)
+2. Add delete operations (lifecycle management)
+3. Expose LookupProto/ListProtos as RPCs
+4. Add interceptor caching (performance)
+5. Add concurrency tests
+6. Fix TOCTOU race (transactions)
+7. Add pagination
