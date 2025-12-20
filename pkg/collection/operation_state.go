@@ -152,10 +152,12 @@ func StartOperation(ctx context.Context, repo CollectionRepo, namespace, name, o
 }
 
 // CompleteOperation clears the operation state after completion.
+// If the collection no longer exists (e.g., it was deleted), this is a no-op and returns nil.
 func CompleteOperation(ctx context.Context, repo CollectionRepo, namespace, name string) error {
 	collection, err := repo.GetCollection(ctx, namespace, name)
 	if err != nil {
-		return fmt.Errorf("failed to get collection: %w", err)
+		// Collection doesn't exist (likely deleted) - nothing to clean up
+		return nil
 	}
 
 	ClearOperationState(collection.Meta)
