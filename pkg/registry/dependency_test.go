@@ -323,7 +323,6 @@ func TestRegisterProto_WellKnownTypes(t *testing.T) {
 		// Collector core types
 		"collection.proto",
 		"registry.proto",
-		"common.proto",
 	}
 
 	for i, wkt := range wellKnownTypes {

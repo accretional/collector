@@ -24,14 +24,22 @@ type RegistryServer struct {
 	collector.UnimplementedCollectorRegistryServer
 	registeredProtos   *collection.Collection
 	registeredServices *collection.Collection
-	typeRegistrar      TypeRegistrar // Optional: registers types when protos are registered
+	typeRegistrar      TypeRegistrar      // Optional: registers types when protos are registered
+	sizeLimits         *ProtoSizeLimits   // Configurable size limits for proto registration
 }
 
 func NewRegistryServer(registeredProtos, registeredServices *collection.Collection) *RegistryServer {
 	return &RegistryServer{
 		registeredProtos:   registeredProtos,
 		registeredServices: registeredServices,
+		sizeLimits:         DefaultProtoSizeLimits(),
 	}
+}
+
+// SetSizeLimits sets custom size limits for proto registration.
+// This allows configuring limits different from the defaults.
+func (s *RegistryServer) SetSizeLimits(limits *ProtoSizeLimits) {
+	s.sizeLimits = limits
 }
 
 // SetTypeRegistrar sets the type registrar for this server.
@@ -56,7 +64,6 @@ func isWellKnownType(fileName string) bool {
 		"collection.proto",
 		"collection_repo.proto",
 		"collection_server.proto",
-		"common.proto",
 		"console.proto",
 		"dispatcher.proto",
 		"registry.proto",
@@ -165,6 +172,25 @@ func (s *RegistryServer) RegisterProto(ctx context.Context, req *collector.Regis
 		return nil, status.Errorf(codes.InvalidArgument, "file descriptor name is required")
 	}
 
+	// Validate namespace
+	if err := collection.ValidateNamespace(req.Namespace); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid namespace: %v", err)
+	}
+
+	// Validate proto name
+	if err := collection.ValidateProtoFileName(req.FileDescriptor.GetName(), "proto name"); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid proto name: %v", err)
+	}
+
+	// Validate size limits (marshal proto to check size)
+	marshaledProto, err := proto.Marshal(req.FileDescriptor)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to marshal proto: %v", err)
+	}
+	if err := s.sizeLimits.ValidateProtoSizeLimits(req.FileDescriptor, len(marshaledProto)); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "proto size limit validation failed: %v", err)
+	}
+
 	registeredMessages := []string{}
 	for _, msg := range req.FileDescriptor.MessageType {
 		registeredMessages = append(registeredMessages, msg.GetName())
@@ -173,7 +199,7 @@ func (s *RegistryServer) RegisterProto(ctx context.Context, req *collector.Regis
 	protoID := fmt.Sprintf("%s/%s", req.Namespace, req.FileDescriptor.GetName())
 
 	// Check for duplicates
-	_, err := s.registeredProtos.GetRecord(ctx, protoID)
+	_, err = s.registeredProtos.GetRecord(ctx, protoID)
 	if err == nil {
 		return nil, status.Errorf(codes.AlreadyExists, "proto already exists")
 	} else if err != sql.ErrNoRows {
@@ -237,6 +263,16 @@ func (s *RegistryServer) RegisterService(ctx context.Context, req *collector.Reg
 	}
 	if req.ServiceDescriptor.GetName() == "" {
 		return nil, status.Errorf(codes.InvalidArgument, "service descriptor name is required")
+	}
+
+	// Validate namespace
+	if err := collection.ValidateNamespace(req.Namespace); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid namespace: %v", err)
+	}
+
+	// Validate service name
+	if err := collection.ValidateServiceName(req.ServiceDescriptor.GetName(), "service name"); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid service name: %v", err)
 	}
 
 	methodNames := []string{}

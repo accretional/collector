@@ -9,6 +9,10 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+// MaxProtoSize is the maximum size in bytes for proto data stored in any collection.
+// This global limit prevents DoS attacks via oversized proto data.
+const MaxProtoSize = 10 * 1024 * 1024 // 10MB
+
 // Collection is the domain entity handling logic.
 type Collection struct {
 	Meta          *pb.Collection
@@ -69,6 +73,12 @@ func (c *Collection) CreateRecord(ctx context.Context, record *pb.CollectionReco
 	if record.Id == "" {
 		return fmt.Errorf("record id required")
 	}
+
+	// Validate proto data size (global limit to prevent DoS)
+	if len(record.ProtoData) > MaxProtoSize {
+		return fmt.Errorf("proto data size (%d bytes) exceeds maximum allowed size (%d bytes)", len(record.ProtoData), MaxProtoSize)
+	}
+
 	// Ensure metadata exists
 	if record.Metadata == nil {
 		record.Metadata = &pb.Metadata{}
@@ -91,6 +101,11 @@ func (c *Collection) GetRecord(ctx context.Context, id string) (*pb.CollectionRe
 func (c *Collection) UpdateRecord(ctx context.Context, record *pb.CollectionRecord) error {
 	if record.Id == "" {
 		return fmt.Errorf("record id required")
+	}
+
+	// Validate proto data size (global limit to prevent DoS)
+	if len(record.ProtoData) > MaxProtoSize {
+		return fmt.Errorf("proto data size (%d bytes) exceeds maximum allowed size (%d bytes)", len(record.ProtoData), MaxProtoSize)
 	}
 
 	// Ensure metadata exists

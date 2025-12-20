@@ -8,9 +8,14 @@ import (
 // Reserved namespaces that cannot be used by users
 // These are reserved because they conflict with internal directory structure
 var reservedNamespaces = map[string]bool{
-	"repo":    true, // Used for ./data/repo/collections.db
-	"backups": true, // Used for ./data/backups/metadata.db
-	"files":   true, // Used for ./data/files/{namespace}/{name}
+	"repo":     true, // Used for ./data/repo/collections.db
+	"backups":  true, // Used for ./data/backups/metadata.db
+	"files":    true, // Used for ./data/files/{namespace}/{name}
+	"system":   true, // Reserved for system collections
+	"internal": true, // Reserved for internal use
+	"admin":    true, // Reserved for admin operations
+	"metadata": true, // Reserved for metadata storage
+	// Note: .backup is blocked by the "no leading dot" rule in ValidateName
 }
 
 // Maximum length for namespace and collection names
@@ -88,6 +93,62 @@ func ValidateNamespace(namespace string) error {
 // ValidateCollectionName validates a collection name.
 func ValidateCollectionName(name string) error {
 	return ValidateName(name, "collection name")
+}
+
+// ValidateServiceName validates a service name (rejects slashes which break ID format).
+func ValidateServiceName(name string, fieldName string) error {
+	// First apply standard validation
+	if err := ValidateName(name, fieldName); err != nil {
+		return err
+	}
+
+	// Reject slash (breaks namespace/servicename ID format)
+	if strings.Contains(name, "/") {
+		return fmt.Errorf("%s cannot contain '/' (breaks ID format)", fieldName)
+	}
+
+	return nil
+}
+
+// ValidateProtoFileName validates a proto file name (allows dots for .proto extension).
+func ValidateProtoFileName(name string, fieldName string) error {
+	// Check length
+	if len(name) < MinNameLength {
+		return fmt.Errorf("%s cannot be empty", fieldName)
+	}
+	if len(name) > MaxNameLength {
+		return fmt.Errorf("%s exceeds maximum length of %d characters", fieldName, MaxNameLength)
+	}
+
+	// Invalid characters for proto names (allow dots for .proto extension)
+	const invalidProtoChars = `\:*?"<>|`
+	for _, char := range invalidProtoChars {
+		if strings.ContainsRune(name, char) {
+			return fmt.Errorf("%s contains invalid character '%c'", fieldName, char)
+		}
+	}
+
+	// Reject names starting with dot (hidden files)
+	if strings.HasPrefix(name, ".") {
+		return fmt.Errorf("%s cannot start with '.'", fieldName)
+	}
+
+	// Check for path traversal patterns
+	if strings.Contains(name, "..") {
+		return fmt.Errorf("%s contains path traversal pattern '..'", fieldName)
+	}
+
+	// Reject slash (breaks namespace/name ID format)
+	if strings.Contains(name, "/") {
+		return fmt.Errorf("%s cannot contain '/' (breaks ID format)", fieldName)
+	}
+
+	// Reject whitespace-only names
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("%s cannot be whitespace-only", fieldName)
+	}
+
+	return nil
 }
 
 // IsReservedNamespace checks if a namespace is reserved.
