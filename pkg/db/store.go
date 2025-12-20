@@ -11,8 +11,8 @@ import (
 type DBType string
 
 const (
-	DBTypeSQLite   DBType = "sqlite"
-	DBTypePostgres DBType = "postgres" // Future
+	DBTypeSQLite DBType = "sqlite"
+	// DBTypePostgres DBType = "postgres" // Future
 )
 
 type Config struct {
@@ -22,12 +22,9 @@ type Config struct {
 	SQLitePath string
 
 	// PostgreSQL-specific (future)
-	PostgresHost     string
-	PostgresPort     int
-	PostgresUser     string
-	PostgresPassword string
-	PostgresDatabase string
-	PostgresSSLMode  string
+	// PostgresHost     string
+	// PostgresPort     int
+	// ...
 
 	// Common
 	Options collection.Options
@@ -41,8 +38,6 @@ func NewStore(ctx context.Context, config Config) (collection.Store, error) {
 	switch config.Type {
 	case DBTypeSQLite:
 		return newSQLiteStore(ctx, config)
-	case DBTypePostgres:
-		return newPostgresStore(ctx, config)
 	default:
 		return nil, fmt.Errorf("unsupported database type: %s", config.Type)
 	}
@@ -54,9 +49,4 @@ func newSQLiteStore(ctx context.Context, config Config) (collection.Store, error
 	}
 
 	return sqlite.NewStore(config.SQLitePath, config.Options)
-}
-
-// Future: Implement PostgreSQL store
-func newPostgresStore(ctx context.Context, config Config) (collection.Store, error) {
-	return nil, fmt.Errorf("postgres backend not yet supported")
 }
