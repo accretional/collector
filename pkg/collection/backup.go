@@ -363,7 +363,6 @@ func (bm *BackupManager) BackupCollection(ctx context.Context, req *pb.BackupCol
 	// Generate backup ID and path (auto-generated, not user-specified)
 	// Use microsecond timestamp to prevent collisions
 	now := time.Now()
-	timestamp := now.Unix()
 	timestampMicro := now.UnixMicro()
 	backupID := generateBackupID(req.Collection.Namespace, req.Collection.Name, timestampMicro)
 	backupPath, err := bm.pathConfig.BackupPathMicro(req.Collection.Namespace, req.Collection.Name, timestampMicro)
@@ -514,7 +513,7 @@ func (bm *BackupManager) BackupCollection(ctx context.Context, req *pb.BackupCol
 			Namespace: req.Collection.Namespace,
 			Name:      req.Collection.Name,
 		},
-		Timestamp:     timestamp,
+		Timestamp:     timestampMicro,
 		SizeBytes:     sizeBytes,
 		RecordCount:   recordCount,
 		FileCount:     fileCount,
