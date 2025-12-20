@@ -183,6 +183,55 @@ Services communicate via **gRPC loopback** even when co-located:
 - **🆕 [Backup API Guide](docs/features/backup-api.md)** - Complete backup documentation
 - **🆕 [Clone & Fetch Guide](docs/features/clone-and-fetch.md)** - Replication and migration
 
+## Using Collector as a Library
+
+Collector can be easily embedded in your own Go applications. Instead of copying boilerplate code from `main.go`, use the `pkg/server` package:
+
+```go
+package main
+
+import (
+    "log"
+    "github.com/accretional/collector/pkg/server"
+)
+
+func main() {
+    // Create and start the Collector server
+    srv, err := server.New(server.Config{
+        DataDir:     "./my-app-data",
+        Port:        8080,
+        Namespace:   "my-app",
+        CollectorID: "my-collector",
+    })
+    if err != nil {
+        log.Fatalf("Failed to create server: %v", err)
+    }
+    defer srv.Close()
+
+    // Server is now running with all services available:
+    // - CollectorRegistry
+    // - CollectionService
+    // - CollectiveDispatcher
+    // - CollectionRepo
+
+    // Your application logic here...
+    // Connect to srv.Address() to use the services
+
+    // Wait for shutdown signal (Ctrl+C)
+    srv.WaitForShutdown()
+}
+```
+
+**Configuration Options:**
+- `DataDir` - Root directory for all data storage (default: `"./data"`)
+- `Port` - gRPC server port (default: `50051`)
+- `Namespace` - Default namespace for this collector (default: `"production"`)
+- `CollectorID` - Unique identifier for this collector (default: `"collector-001"`)
+- `Logger` - Custom logger (default: `log.Default()`)
+- `DisableMigration` - Skip automatic database migration (default: `false`)
+
+**See also:** [examples/embedded/main.go](examples/embedded/main.go) for a complete example.
+
 ## Quick Start
 
 ### Running a Collector
