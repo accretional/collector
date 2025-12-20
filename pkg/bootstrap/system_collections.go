@@ -11,6 +11,8 @@ import (
 	"github.com/accretional/collector/pkg/collection"
 	"github.com/accretional/collector/pkg/db/sqlite"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protodesc"
+	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -19,8 +21,11 @@ type SystemCollections struct {
 	// Self-referential collection registry
 	CollectionRegistry *collection.Collection
 
-	// Type registry for validation
-	TypeRegistry *collection.Collection
+	// Type registry collection (raw)
+	TypeRegistryCollection *collection.Collection
+
+	// Type registry with validation logic
+	TypeRegistry *TypeRegistry
 
 	// Connection tracking
 	Connections *collection.Collection
@@ -230,15 +235,22 @@ func (sc *SystemCollections) bootstrapTypeRegistry(ctx context.Context) error {
 		return fmt.Errorf("create collection: %w", err)
 	}
 
-	sc.TypeRegistry = coll
+	sc.TypeRegistryCollection = coll
+
+	// Create TypeRegistry wrapper with validation logic
+	sc.TypeRegistry = NewTypeRegistry(coll)
 
 	// Register this collection in the collection registry
 	if err := sc.registerCollection(ctx, collectionMeta); err != nil {
 		return fmt.Errorf("register type collection: %w", err)
 	}
 
-	// TODO: Add validation interceptor that checks all requests against registered types
-	// TODO: Register core collector types (Collection, CollectionRecord, etc.)
+	// Register core collector types
+	if err := sc.registerCoreTypes(ctx); err != nil {
+		return fmt.Errorf("register core types: %w", err)
+	}
+
+	log.Println("✓ Core collector types registered")
 
 	return nil
 }
@@ -486,6 +498,36 @@ func (sc *SystemCollections) registerCollection(ctx context.Context, collectionM
 	return nil
 }
 
+// registerCoreTypes registers the core collector message types
+func (sc *SystemCollections) registerCoreTypes(ctx context.Context) error {
+	// Get the file descriptors for collector proto messages
+	// These are the core types that all collections use
+
+	protoFiles := []struct {
+		name string
+		file protoreflect.FileDescriptor
+	}{
+		{"collection.proto", pb.File_collection_proto},
+		{"common.proto", pb.File_common_proto},
+		{"system.proto", pb.File_system_proto},
+		{"registry.proto", pb.File_registry_proto},
+		{"dispatcher.proto", pb.File_dispatcher_proto},
+		{"collection_repo.proto", pb.File_collection_repo_proto},
+	}
+
+	for _, pf := range protoFiles {
+		// Convert FileDescriptor to FileDescriptorProto
+		fileDescProto := protodesc.ToFileDescriptorProto(pf.file)
+
+		if err := sc.TypeRegistry.RegisterFileDescriptor(ctx, "collector", fileDescProto); err != nil {
+			return fmt.Errorf("register %s types: %w", pf.name, err)
+		}
+	}
+
+	log.Printf("Registered core collector types from %d proto files", len(protoFiles))
+	return nil
+}
+
 // Close closes all system collections
 func (sc *SystemCollections) Close() error {
 	var lastErr error
@@ -511,8 +553,8 @@ func (sc *SystemCollections) Close() error {
 		}
 	}
 
-	if sc.TypeRegistry != nil {
-		if err := sc.TypeRegistry.Close(); err != nil {
+	if sc.TypeRegistryCollection != nil {
+		if err := sc.TypeRegistryCollection.Close(); err != nil {
 			lastErr = err
 			log.Printf("Error closing type registry: %v", err)
 		}

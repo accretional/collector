@@ -329,6 +329,179 @@ func verifyDBExists(t *testing.T, pathConfig *collection.PathConfig, namespace, 
 	}
 }
 
+func TestTypeRegistryCoreTypesRegistered(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	pathConfig := collection.NewPathConfig(tmpDir)
+
+	sc, err := BootstrapSystemCollections(ctx, pathConfig)
+	if err != nil {
+		t.Fatalf("BootstrapSystemCollections failed: %v", err)
+	}
+	defer sc.Close()
+
+	// Verify core types are registered
+	coreTypes := []struct {
+		namespace   string
+		messageName string
+	}{
+		{"collector", "Collection"},
+		{"collector", "CollectionRecord"},
+		{"collector", "CollectionData"},
+		{"collector", "Metadata"},
+		{"collector", "AuditEvent"},
+		{"collector", "SystemLog"},
+		{"collector", "Connection"},
+		{"collector", "RegisteredProto"},
+		{"collector", "RegisteredService"},
+	}
+
+	for _, ct := range coreTypes {
+		if err := sc.TypeRegistry.ValidateMessageType(ctx, ct.namespace, ct.messageName); err != nil {
+			t.Errorf("Core type %s/%s not registered: %v", ct.namespace, ct.messageName, err)
+		}
+	}
+
+	// Count total registered types
+	count, err := sc.TypeRegistry.CountMessageTypes(ctx)
+	if err != nil {
+		t.Fatalf("CountMessageTypes failed: %v", err)
+	}
+	if count < 9 {
+		t.Errorf("Expected at least 9 types registered, got %d", count)
+	}
+}
+
+func TestTypeRegistryValidation(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	pathConfig := collection.NewPathConfig(tmpDir)
+
+	sc, err := BootstrapSystemCollections(ctx, pathConfig)
+	if err != nil {
+		t.Fatalf("BootstrapSystemCollections failed: %v", err)
+	}
+	defer sc.Close()
+
+	// Test valid collection type
+	validColl := &pb.Collection{
+		Namespace: "test",
+		Name:      "test-coll",
+		MessageType: &pb.MessageTypeRef{
+			Namespace:   "collector",
+			MessageName: "Collection",
+		},
+	}
+
+	if err := sc.TypeRegistry.ValidateCollectionMessageType(ctx, validColl); err != nil {
+		t.Errorf("Valid collection type should pass validation: %v", err)
+	}
+
+	// Test invalid collection type
+	invalidColl := &pb.Collection{
+		Namespace: "test",
+		Name:      "test-coll",
+		MessageType: &pb.MessageTypeRef{
+			Namespace:   "collector",
+			MessageName: "NonExistentType",
+		},
+	}
+
+	if err := sc.TypeRegistry.ValidateCollectionMessageType(ctx, invalidColl); err == nil {
+		t.Error("Invalid collection type should fail validation")
+	}
+
+	// Test collection without message type (should pass)
+	untypedColl := &pb.Collection{
+		Namespace:   "test",
+		Name:        "untyped",
+		MessageType: nil,
+	}
+
+	if err := sc.TypeRegistry.ValidateCollectionMessageType(ctx, untypedColl); err != nil {
+		t.Errorf("Untyped collection should pass validation: %v", err)
+	}
+}
+
+func TestTypeRegistryListTypes(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	pathConfig := collection.NewPathConfig(tmpDir)
+
+	sc, err := BootstrapSystemCollections(ctx, pathConfig)
+	if err != nil {
+		t.Fatalf("BootstrapSystemCollections failed: %v", err)
+	}
+	defer sc.Close()
+
+	// List all types
+	allTypes, err := sc.TypeRegistry.ListMessageTypes(ctx, "")
+	if err != nil {
+		t.Fatalf("ListMessageTypes failed: %v", err)
+	}
+
+	if len(allTypes) == 0 {
+		t.Error("Expected at least some types to be registered")
+	}
+
+	// List collector namespace types
+	collectorTypes, err := sc.TypeRegistry.ListMessageTypes(ctx, "collector")
+	if err != nil {
+		t.Fatalf("ListMessageTypes(collector) failed: %v", err)
+	}
+
+	if len(collectorTypes) != len(allTypes) {
+		t.Errorf("All registered types should be in collector namespace, got %d/%d", len(collectorTypes), len(allTypes))
+	}
+
+	// Verify types have proper structure
+	for _, rule := range collectorTypes {
+		if rule.Id == "" {
+			t.Error("ValidationRule should have non-empty ID")
+		}
+		if rule.Namespace != "collector" {
+			t.Errorf("ValidationRule namespace = %s, want collector", rule.Namespace)
+		}
+		if rule.MessageName == "" {
+			t.Error("ValidationRule should have non-empty MessageName")
+		}
+	}
+}
+
+func TestTypeRegistryGetMessageType(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	pathConfig := collection.NewPathConfig(tmpDir)
+
+	sc, err := BootstrapSystemCollections(ctx, pathConfig)
+	if err != nil {
+		t.Fatalf("BootstrapSystemCollections failed: %v", err)
+	}
+	defer sc.Close()
+
+	// Get a known type
+	rule, err := sc.TypeRegistry.GetMessageType(ctx, "collector", "Collection")
+	if err != nil {
+		t.Fatalf("GetMessageType(Collection) failed: %v", err)
+	}
+
+	if rule.Namespace != "collector" {
+		t.Errorf("Rule namespace = %s, want collector", rule.Namespace)
+	}
+	if rule.MessageName != "Collection" {
+		t.Errorf("Rule message name = %s, want Collection", rule.MessageName)
+	}
+	if len(rule.FieldRules) == 0 {
+		t.Error("Collection type should have field rules")
+	}
+
+	// Try to get non-existent type
+	_, err = sc.TypeRegistry.GetMessageType(ctx, "collector", "NonExistentType")
+	if err == nil {
+		t.Error("GetMessageType for non-existent type should return error")
+	}
+}
+
 func BenchmarkBootstrap(b *testing.B) {
 	ctx := context.Background()
 
