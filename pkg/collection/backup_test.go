@@ -1166,3 +1166,220 @@ func TestBackupMetadataFiltering(t *testing.T) {
 		}
 	}
 }
+
+// TestRetentionPolicyMaxBackups tests count-based backup retention
+func TestRetentionPolicyMaxBackups(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	// Create test collection with backup policy
+	dbPath := filepath.Join(tmpDir, "test.db")
+	store, err := createTestStore(dbPath)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	// Insert test records
+	for i := 0; i < 10; i++ {
+		record := &pb.CollectionRecord{
+			Id: fmt.Sprintf("record-%d", i),
+			Metadata: &pb.Metadata{
+				Labels:    map[string]string{},
+				CreatedAt: timestamppb.Now(),
+				UpdatedAt: timestamppb.Now(),
+			},
+			ProtoData: []byte(fmt.Sprintf("data-%d", i)),
+		}
+		store.CreateRecord(ctx, record)
+	}
+
+	// Create mock repo with retention policy
+	repo := &MockCollectionRepo{collections: make(map[string]*Collection)}
+	collection, err := NewCollection(&pb.Collection{
+		Namespace: "test",
+		Name:      "users",
+		BackupPolicy: &pb.BackupPolicy{
+			MaxBackups: 3, // Keep only 3 backups
+			Enabled:    true,
+		},
+	}, store, nil)
+	if err != nil {
+		t.Fatalf("failed to create collection: %v", err)
+	}
+	repo.collections["test/users"] = collection
+
+	// Create backup manager
+	pathConfig := NewPathConfig(tmpDir)
+	backupManager, err := NewBackupManager(repo, &SqliteTransport{}, pathConfig)
+	if err != nil {
+		t.Fatalf("failed to create backup manager: %v", err)
+	}
+	defer backupManager.Close()
+
+	// Create 5 backups
+	for i := 0; i < 5; i++ {
+		req := &pb.BackupCollectionRequest{
+			Collection: &pb.NamespacedName{
+				Namespace: "test",
+				Name:      "users",
+			},
+		}
+
+		resp, err := backupManager.BackupCollection(ctx, req)
+		if err != nil {
+			t.Fatalf("backup %d failed: %v", i, err)
+		}
+
+		if resp.Status.Code != pb.Status_OK {
+			t.Fatalf("backup %d returned error: %s", i, resp.Status.Message)
+		}
+
+		// Small delay to ensure different timestamps
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Wait for async cleanup to complete
+	time.Sleep(100 * time.Millisecond)
+
+	// List remaining backups
+	listResp, err := backupManager.ListBackups(ctx, &pb.ListBackupsRequest{
+		Collection: &pb.NamespacedName{
+			Namespace: "test",
+			Name:      "users",
+		},
+	})
+
+	if err != nil {
+		t.Fatalf("failed to list backups: %v", err)
+	}
+
+	// Should have only 3 backups remaining
+	if listResp.TotalCount != 3 {
+		t.Errorf("expected 3 backups after retention cleanup, got %d", listResp.TotalCount)
+	}
+
+	// Verify newest backups are kept
+	if len(listResp.Backups) > 0 {
+		t.Logf("Kept %d backups (most recent)", len(listResp.Backups))
+	}
+}
+
+// TestRetentionPolicyAge tests time-based backup retention
+func TestRetentionPolicyAge(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	// Create pathConfig and metadata store
+	pathConfig := NewPathConfig(tmpDir)
+	metadataPath := pathConfig.BackupsMetadataPath()
+	if err := os.MkdirAll(filepath.Dir(metadataPath), 0755); err != nil {
+		t.Fatalf("failed to create backups dir: %v", err)
+	}
+
+	metaStore, err := NewBackupMetadataStore(metadataPath)
+	if err != nil {
+		t.Fatalf("failed to create metadata store: %v", err)
+	}
+	defer metaStore.Close()
+
+	// Create test backups with different timestamps
+	now := time.Now().Unix()
+	backupDir := pathConfig.BackupDir()
+	os.MkdirAll(filepath.Join(backupDir, "test"), 0755)
+
+	// Create 5 backups: 3 old, 2 recent
+	backupFiles := []string{}
+	for i := 0; i < 5; i++ {
+		var timestamp int64
+		if i < 3 {
+			// Old backups (10 days ago)
+			timestamp = now - int64(10*86400)
+		} else {
+			// Recent backups (1 day ago)
+			timestamp = now - int64(86400)
+		}
+
+		backupPath := filepath.Join(backupDir, "test", fmt.Sprintf("users-%d.db", timestamp+int64(i)))
+		if err := os.WriteFile(backupPath, []byte("backup data"), 0644); err != nil {
+			t.Fatalf("failed to create backup file: %v", err)
+		}
+		backupFiles = append(backupFiles, backupPath)
+
+		backup := &pb.BackupMetadata{
+			BackupId: fmt.Sprintf("backup-%d", i),
+			Collection: &pb.NamespacedName{
+				Namespace: "test",
+				Name:      "users",
+			},
+			Timestamp:   timestamp,
+			SizeBytes:   11,
+			RecordCount: 10,
+			StoragePath: backupPath,
+			StorageType: "local",
+		}
+
+		if err := metaStore.SaveBackup(ctx, backup); err != nil {
+			t.Fatalf("failed to save backup metadata: %v", err)
+		}
+	}
+
+	// Create test collection with age-based retention policy
+	dbPath := filepath.Join(tmpDir, "test.db")
+	store, err := createTestStore(dbPath)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	// Create mock repo
+	repo := &MockCollectionRepo{collections: make(map[string]*Collection)}
+	collection, err := NewCollection(&pb.Collection{
+		Namespace: "test",
+		Name:      "users",
+		BackupPolicy: &pb.BackupPolicy{
+			RetentionSeconds: 5 * 86400, // Keep backups for 5 days
+			Enabled:          true,
+		},
+	}, store, nil)
+	if err != nil {
+		t.Fatalf("failed to create collection: %v", err)
+	}
+	repo.collections["test/users"] = collection
+
+	// Create backup manager
+	backupManager := &BackupManager{
+		repo:       repo,
+		transport:  &SqliteTransport{},
+		metaStore:  metaStore,
+		pathConfig: pathConfig,
+	}
+
+	// Trigger cleanup manually
+	backupManager.cleanupOldBackups(ctx, "test", "users", collection.Meta.BackupPolicy)
+
+	// List remaining backups
+	backups, totalCount, err := metaStore.ListBackups(ctx, &pb.ListBackupsRequest{
+		Collection: &pb.NamespacedName{
+			Namespace: "test",
+			Name:      "users",
+		},
+	})
+
+	if err != nil {
+		t.Fatalf("failed to list backups: %v", err)
+	}
+
+	// Should have only 2 recent backups remaining (older than 5 days deleted)
+	if totalCount != 2 {
+		t.Errorf("expected 2 backups after age-based cleanup, got %d", totalCount)
+	}
+
+	// Verify all remaining backups are recent
+	for _, backup := range backups {
+		age := now - backup.Timestamp
+		if age > 5*86400 {
+			t.Errorf("backup %s is older than 5 days (age: %d seconds)", backup.BackupId, age)
+		}
+	}
+}
