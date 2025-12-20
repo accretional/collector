@@ -1235,8 +1235,8 @@ func TestRetentionPolicyMaxBackups(t *testing.T) {
 			t.Fatalf("backup %d returned error: %s", i, resp.Status.Message)
 		}
 
-		// Small delay to ensure different timestamps
-		time.Sleep(10 * time.Millisecond)
+		// Delay to ensure different timestamps (backup paths use seconds)
+		time.Sleep(1100 * time.Millisecond)
 	}
 
 	// Wait for async cleanup to complete
