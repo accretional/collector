@@ -82,6 +82,11 @@ func (s *RegistryServer) RegisterProto(ctx context.Context, req *collector.Regis
 	err = s.registeredProtos.CreateRecord(ctx, &collector.CollectionRecord{
 		Id:        protoID,
 		ProtoData: data,
+		Metadata: &collector.Metadata{
+			Labels: map[string]string{
+				"namespace": req.Namespace,
+			},
+		},
 	})
 	if err != nil {
 		return nil, err
@@ -146,6 +151,11 @@ func (s *RegistryServer) RegisterService(ctx context.Context, req *collector.Reg
 	err = s.registeredServices.CreateRecord(ctx, &collector.CollectionRecord{
 		Id:        serviceID,
 		ProtoData: data,
+		Metadata: &collector.Metadata{
+			Labels: map[string]string{
+				"namespace": req.Namespace,
+			},
+		},
 	})
 	if err != nil {
 		return nil, err
@@ -279,23 +289,28 @@ func (s *RegistryServer) ValidateMethod(ctx context.Context, req *collector.Vali
 
 // ListProtos returns all registered protos, optionally filtered by namespace
 func (s *RegistryServer) ListProtos(ctx context.Context, namespace string) ([]*collector.RegisteredProto, error) {
-	// TODO: Implement filtering when Collection supports prefix queries
-	// For now, we'll get all records and filter manually
-	records, err := s.registeredProtos.ListRecords(ctx, 0, 10000)
+	// Use Search with LabelFilters for DB-level filtering (no limit)
+	query := &collection.SearchQuery{
+		LabelFilters: make(map[string]string),
+		Limit:        0, // No limit - get all matching records
+	}
+
+	if namespace != "" {
+		query.LabelFilters["namespace"] = namespace
+	}
+
+	searchResults, err := s.registeredProtos.Search(ctx, query)
 	if err != nil {
 		return nil, err
 	}
 
 	var protos []*collector.RegisteredProto
-	for _, record := range records {
+	for _, result := range searchResults {
 		registeredProto := &collector.RegisteredProto{}
-		if err := proto.Unmarshal(record.ProtoData, registeredProto); err != nil {
+		if err := proto.Unmarshal(result.Record.ProtoData, registeredProto); err != nil {
 			return nil, err
 		}
-
-		if namespace == "" || registeredProto.Namespace == namespace {
-			protos = append(protos, registeredProto)
-		}
+		protos = append(protos, registeredProto)
 	}
 
 	return protos, nil
@@ -303,9 +318,17 @@ func (s *RegistryServer) ListProtos(ctx context.Context, namespace string) ([]*c
 
 // ListServices returns all registered services, optionally filtered by namespace
 func (s *RegistryServer) ListServices(ctx context.Context, req *collector.ListServicesRequest) (*collector.ListServicesResponse, error) {
-	// TODO: Implement filtering when Collection supports prefix queries
-	// For now, we'll get all records and filter manually
-	records, err := s.registeredServices.ListRecords(ctx, 0, 10000)
+	// Use Search with LabelFilters for DB-level filtering (no limit)
+	query := &collection.SearchQuery{
+		LabelFilters: make(map[string]string),
+		Limit:        0, // No limit - get all matching records
+	}
+
+	if req.Namespace != "" {
+		query.LabelFilters["namespace"] = req.Namespace
+	}
+
+	searchResults, err := s.registeredServices.Search(ctx, query)
 	if err != nil {
 		return &collector.ListServicesResponse{
 			Status: &collector.Status{
@@ -316,9 +339,9 @@ func (s *RegistryServer) ListServices(ctx context.Context, req *collector.ListSe
 	}
 
 	var services []*collector.RegisteredService
-	for _, record := range records {
+	for _, result := range searchResults {
 		registeredService := &collector.RegisteredService{}
-		if err := proto.Unmarshal(record.ProtoData, registeredService); err != nil {
+		if err := proto.Unmarshal(result.Record.ProtoData, registeredService); err != nil {
 			return &collector.ListServicesResponse{
 				Status: &collector.Status{
 					Code:    collector.Status_INTERNAL,
@@ -326,10 +349,7 @@ func (s *RegistryServer) ListServices(ctx context.Context, req *collector.ListSe
 				},
 			}, nil
 		}
-
-		if req.Namespace == "" || registeredService.Namespace == req.Namespace {
-			services = append(services, registeredService)
-		}
+		services = append(services, registeredService)
 	}
 
 	return &collector.ListServicesResponse{

@@ -296,6 +296,15 @@ func (s *SqliteStore) Search(ctx context.Context, q *collection.SearchQuery) ([]
 		}
 	}
 
+	// Label filters (from CollectionRecord.Metadata.Labels)
+	for key, value := range q.LabelFilters {
+		// Labels are stored as JSON in labels column: {"key":"value"}
+		// Use json_extract to filter by label key-value pairs
+		labelPath := `$.` + key
+		whereClauses = append(whereClauses, `json_extract(r.labels, ?) = ?`)
+		args = append(args, labelPath, value)
+	}
+
 	// Append WHERE clauses
 	if len(whereClauses) > 0 {
 		query.WriteString("WHERE " + strings.Join(whereClauses, " AND "))
