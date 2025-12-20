@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"github.com/accretional/collector/gen/collector"
 	"github.com/accretional/collector/pkg/collection"
@@ -39,6 +40,95 @@ func (s *RegistryServer) SetTypeRegistrar(registrar TypeRegistrar) {
 	s.typeRegistrar = registrar
 }
 
+// isWellKnownType checks if a proto file is a well-known Google protobuf type
+func isWellKnownType(fileName string) bool {
+	// Well-known types that don't require registration
+	wellKnownPrefixes := []string{
+		"google/protobuf/",
+		"google/api/",
+	}
+
+	for _, prefix := range wellKnownPrefixes {
+		if strings.HasPrefix(fileName, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// getNamespaceHierarchy returns a namespace and all its parent namespaces
+// For example, "team/project/service" returns ["team/project/service", "team/project", "team", ""]
+func getNamespaceHierarchy(namespace string) []string {
+	if namespace == "" {
+		return []string{""}
+	}
+
+	var hierarchy []string
+	current := namespace
+	hierarchy = append(hierarchy, current)
+
+	// Walk up the hierarchy by removing segments after the last "/"
+	for strings.Contains(current, "/") {
+		lastSlash := strings.LastIndex(current, "/")
+		current = current[:lastSlash]
+		hierarchy = append(hierarchy, current)
+	}
+
+	// Add root namespace
+	hierarchy = append(hierarchy, "")
+
+	return hierarchy
+}
+
+// validateDependencies checks that all dependencies exist and there are no circular dependencies
+// Dependencies are resolved by searching the current namespace and walking up the namespace hierarchy
+func (s *RegistryServer) validateDependencies(ctx context.Context, namespace string, fileName string, dependencies []string) error {
+	if len(dependencies) == 0 {
+		return nil
+	}
+
+	var missingDeps []string
+
+	for _, dep := range dependencies {
+		// Skip well-known types
+		if isWellKnownType(dep) {
+			continue
+		}
+
+		// Check for self-reference (circular dependency)
+		if dep == fileName {
+			return status.Errorf(codes.InvalidArgument, "circular dependency detected: proto %s depends on itself", fileName)
+		}
+
+		// Try to find dependency in current namespace and parent namespaces
+		found := false
+		namespaceHierarchy := getNamespaceHierarchy(namespace)
+
+		for _, ns := range namespaceHierarchy {
+			_, err := s.LookupProto(ctx, ns, dep)
+			if err == nil {
+				found = true
+				break
+			}
+			// Continue to parent namespace if not found
+			if status.Code(err) != codes.NotFound {
+				return err // Return other errors immediately
+			}
+		}
+
+		if !found {
+			missingDeps = append(missingDeps, dep)
+		}
+	}
+
+	if len(missingDeps) > 0 {
+		return status.Errorf(codes.InvalidArgument, "missing dependencies (searched namespace %s and parents): %s",
+			namespace, strings.Join(missingDeps, ", "))
+	}
+
+	return nil
+}
+
 func (s *RegistryServer) RegisterProto(ctx context.Context, req *collector.RegisterProtoRequest) (*collector.RegisterProtoResponse, error) {
 	if req.Namespace == "" {
 		return nil, status.Errorf(codes.InvalidArgument, "namespace is required")
@@ -63,6 +153,11 @@ func (s *RegistryServer) RegisterProto(ctx context.Context, req *collector.Regis
 		return nil, status.Errorf(codes.AlreadyExists, "proto already exists")
 	} else if err != sql.ErrNoRows {
 		// If it's not a "not found" error, return the error
+		return nil, err
+	}
+
+	// Validate dependencies exist
+	if err := s.validateDependencies(ctx, req.Namespace, req.FileDescriptor.GetName(), req.FileDescriptor.Dependency); err != nil {
 		return nil, err
 	}
 

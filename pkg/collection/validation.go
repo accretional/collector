@@ -20,7 +20,8 @@ const (
 )
 
 // Invalid characters in names (filesystem-unsafe characters)
-const invalidChars = `./\:*?"<>|`
+// Note: "/" is allowed in namespaces to support hierarchical namespaces (e.g., "team/project")
+const invalidChars = `.\:*?"<>|`
 
 // ValidateName validates a namespace or collection name.
 // Returns an error if the name is invalid.
@@ -59,14 +60,26 @@ func ValidateName(name string, fieldName string) error {
 }
 
 // ValidateNamespace validates a namespace name and checks if it's reserved.
+// For hierarchical namespaces (e.g., "team/project"), this also checks that
+// the root namespace and all parent namespaces are not reserved.
 func ValidateNamespace(namespace string) error {
 	if err := ValidateName(namespace, "namespace"); err != nil {
 		return err
 	}
 
-	// Check if namespace is reserved
-	if reservedNamespaces[namespace] {
-		return fmt.Errorf("namespace '%s' is reserved and cannot be used", namespace)
+	// Check if namespace or any parent namespace is reserved
+	// For "team/project/service", check: "team", "team/project", "team/project/service"
+	segments := strings.Split(namespace, "/")
+	current := ""
+	for i, segment := range segments {
+		if i > 0 {
+			current += "/"
+		}
+		current += segment
+
+		if reservedNamespaces[current] {
+			return fmt.Errorf("namespace '%s' is reserved and cannot be used (in path '%s')", current, namespace)
+		}
 	}
 
 	return nil

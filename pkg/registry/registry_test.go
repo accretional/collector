@@ -373,6 +373,24 @@ func TestRegisterService_MultipleNamespaces(t *testing.T) {
 func TestRegisterProto_WithDependencies(t *testing.T) {
 	server, registeredProtos, _ := setupTestServer(t)
 
+	// First register the dependency
+	commonReq := &collector.RegisterProtoRequest{
+		Namespace: "test",
+		FileDescriptor: &descriptorpb.FileDescriptorProto{
+			Name: proto.String("common.proto"),
+			MessageType: []*descriptorpb.DescriptorProto{
+				{
+					Name: proto.String("CommonMessage"),
+				},
+			},
+		},
+	}
+	_, err := server.RegisterProto(context.Background(), commonReq)
+	if err != nil {
+		t.Fatalf("RegisterProto for common.proto failed: %v", err)
+	}
+
+	// Now register the dependent proto
 	req := &collector.RegisterProtoRequest{
 		Namespace: "test",
 		FileDescriptor: &descriptorpb.FileDescriptorProto{
