@@ -1,10 +1,19 @@
 # Backup API
 
-Comprehensive backup functionality for collections, distinct from Clone operations.
+Comprehensive backup functionality for collections with automatic path management and retention policies.
 
 ## Overview
 
 The Backup API provides point-in-time snapshots of collections **without creating collection metadata entries**. This is different from Clone, which creates a new active collection.
+
+### Key Features
+
+- ✅ **Auto-generated paths** - No manual path management
+- ✅ **Retention policies** - Automatic cleanup based on age and count
+- ✅ **Fixed backup directory** - Organized by namespace
+- ✅ **Near-zero downtime** - 6-14ms lock duration during backup
+- ✅ **Comprehensive metadata** - Track size, records, files, timestamps
+- ✅ **Integrity verification** - SQLite PRAGMA checks
 
 ### Backup vs Clone
 
@@ -13,9 +22,10 @@ The Backup API provides point-in-time snapshots of collections **without creatin
 | **Purpose** | Disaster recovery, archival | Create working copy |
 | **Creates Collection Metadata** | ❌ No | ✅ Yes |
 | **Shows in Discover()** | ❌ No | ✅ Yes |
-| **Storage Location** | Dedicated backup directory | Normal collection directory |
+| **Storage Location** | Fixed `.backup/` directory | Normal collection directory |
+| **Path Management** | ✅ Auto-generated | ❌ Manual |
 | **Metadata Tracking** | Separate backup database | Collection registry |
-| **Retention Management** | ✅ Yes (list, delete) | ❌ No |
+| **Retention Management** | ✅ Automatic cleanup | ❌ No |
 | **Verification** | ✅ Integrity checks | ❌ No |
 | **External Storage** | 🚧 Future (S3, GCS) | ❌ No |
 
@@ -23,7 +33,7 @@ The Backup API provides point-in-time snapshots of collections **without creatin
 
 ### 1. BackupCollection
 
-Creates a point-in-time snapshot of a collection.
+Creates a point-in-time snapshot of a collection with **automatically generated paths**.
 
 **RPC:**
 ```protobuf
@@ -33,10 +43,9 @@ rpc BackupCollection(BackupCollectionRequest) returns (BackupCollectionResponse)
 **Request:**
 ```protobuf
 message BackupCollectionRequest {
-  NamespacedName collection = 1;  // Collection to backup
-  string dest_path = 2;            // Local path or URI (s3://, gcs://)
-  bool include_files = 3;          // Include filesystem data
-  map<string, string> metadata = 4; // Optional metadata (tags, notes)
+  NamespacedName collection = 1;    // Collection to backup
+  bool include_files = 3;            // Include filesystem data
+  map<string, string> metadata = 4;  // Optional metadata (tags, notes)
 }
 ```
 
@@ -49,6 +58,13 @@ message BackupCollectionResponse {
 }
 ```
 
+**Path Generation:**
+Backups are automatically stored at:
+```
+{DataDir}/.backup/{namespace}/{collectionname}-{timestampseconds}.db
+{DataDir}/.backup/{namespace}/{collectionname}-{timestampseconds}.files  (if include_files=true)
+```
+
 **Example:**
 ```go
 resp, err := client.BackupCollection(ctx, &pb.BackupCollectionRequest{
@@ -56,20 +72,24 @@ resp, err := client.BackupCollection(ctx, &pb.BackupCollectionRequest{
         Namespace: "prod",
         Name:      "users",
     },
-    DestPath:     "/backups/users-2025-11-22.db",
     IncludeFiles: true,
     Metadata: map[string]string{
-        "retention": "30d",
-        "type":      "daily",
-        "note":      "Pre-migration backup",
+        "type": "daily",
+        "note": "Pre-migration backup",
     },
 })
 
 if resp.Status.Code == pb.Status_OK {
     fmt.Printf("Backup ID: %s\n", resp.Backup.BackupId)
+    fmt.Printf("Storage Path: %s\n", resp.Backup.StoragePath)  // Auto-generated!
     fmt.Printf("Size: %d bytes\n", resp.BytesTransferred)
     fmt.Printf("Records: %d\n", resp.Backup.RecordCount)
 }
+// Example output:
+// Backup ID: backup-a1b2c3d4e5f6g7h8
+// Storage Path: /data/.backup/prod/users-1732233600.db
+// Size: 1048576 bytes
+// Records: 1000
 ```
 
 ### 2. ListBackups
@@ -250,6 +270,106 @@ if resp.IsValid {
 }
 ```
 
+## Retention Policies
+
+Collections can define **automatic retention policies** to manage backup lifecycle.
+
+### BackupPolicy Configuration
+
+```protobuf
+message BackupPolicy {
+  int32 max_backups = 1;          // Maximum number of backups to retain (0 = unlimited)
+  int64 retention_seconds = 2;    // Delete backups older than this (0 = unlimited)
+  bool enabled = 3;               // Enable automatic cleanup
+}
+
+message Collection {
+  string namespace = 1;
+  string name = 2;
+  MessageTypeRef message_type = 3;
+  repeated string indexed_fields = 4;
+  string server_endpoint = 5;
+  Metadata metadata = 6;
+  BackupPolicy backup_policy = 7;  // Optional retention policy
+}
+```
+
+### Setting Retention Policy
+
+```go
+// Create collection with retention policy
+_, err := repoClient.CreateCollection(ctx, &pb.CreateCollectionRequest{
+    Collection: &pb.Collection{
+        Namespace:   "prod",
+        Name:        "users",
+        MessageType: &pb.MessageTypeRef{MessageName: "User"},
+        BackupPolicy: &pb.BackupPolicy{
+            MaxBackups:       7,              // Keep last 7 backups
+            RetentionSeconds: 30 * 24 * 3600, // 30 days
+            Enabled:          true,
+        },
+    },
+})
+```
+
+### How Retention Works
+
+**Automatic Cleanup Trigger:**
+- Runs **asynchronously** after each successful backup
+- Only if `BackupPolicy.Enabled = true`
+- Non-blocking (goroutine) with error logging
+
+**Retention Rules (applied in order):**
+1. **Age-based retention**: Delete backups older than `retention_seconds`
+2. **Count-based retention**: Keep only the `max_backups` newest backups
+
+**Example Scenarios:**
+
+```go
+// Scenario 1: Keep only last 3 backups
+BackupPolicy{
+    MaxBackups: 3,
+    Enabled:    true,
+}
+// Result: After 4th backup, oldest is deleted automatically
+
+// Scenario 2: Keep backups for 7 days
+BackupPolicy{
+    RetentionSeconds: 7 * 24 * 3600,
+    Enabled:          true,
+}
+// Result: Backups older than 7 days are deleted
+
+// Scenario 3: Keep 10 backups AND max 30 days old
+BackupPolicy{
+    MaxBackups:       10,
+    RetentionSeconds: 30 * 24 * 3600,
+    Enabled:          true,
+}
+// Result: Deletes if age > 30 days OR keeping more than 10 backups
+```
+
+### Retention Safety Features
+
+- ✅ **Opt-in**: Must explicitly set `Enabled = true`
+- ✅ **Non-blocking**: Cleanup runs in background
+- ✅ **Conservative**: Both conditions evaluated independently
+- ✅ **Logged**: Cleanup actions logged for audit
+- ✅ **Idempotent**: Safe to run multiple times
+
+### Disabling Retention
+
+```go
+// Update collection to disable retention
+err := collectionRepo.UpdateCollectionMetadata(ctx, "prod", "users", &pb.Collection{
+    Namespace: "prod",
+    Name:      "users",
+    BackupPolicy: &pb.BackupPolicy{
+        Enabled: false,  // Disable automatic cleanup
+    },
+})
+```
+
 ## Backup Metadata
 
 All backup operations track comprehensive metadata:
@@ -274,13 +394,27 @@ message BackupMetadata {
 ### Backup Storage Structure
 
 ```
-./data/backups/
-├── metadata.db              # Backup metadata SQLite database
-├── users-2025-11-22.db      # Backup database file
-├── users-2025-11-22.db.files/  # Optional: filesystem data
-├── orders-2025-11-21.db
-└── ...
+./data/
+├── backups/
+│   └── metadata.db           # Backup metadata SQLite database
+│
+└── .backup/                  # Fixed backup directory
+    ├── prod/                 # Namespace-based organization
+    │   ├── users-1732233600.db
+    │   ├── users-1732233600.files/
+    │   ├── users-1732320000.db
+    │   ├── orders-1732233600.db
+    │   └── ...
+    │
+    └── staging/
+        ├── test-data-1732233600.db
+        └── ...
 ```
+
+**Path Pattern:**
+- Database: `{DataDir}/.backup/{namespace}/{name}-{timestamp}.db`
+- Files: `{DataDir}/.backup/{namespace}/{name}-{timestamp}.files/`
+- Metadata: `{DataDir}/backups/metadata.db`
 
 ### Metadata Database Schema
 
@@ -359,51 +493,62 @@ Example: `backup-a1b2c3d4e5f6g7h8`
 
 ## Use Cases
 
-### 1. Daily Automated Backups
+### 1. Daily Automated Backups with Retention
 
 ```go
-// Cron job or scheduled task
-func dailyBackup() {
-    timestamp := time.Now().Format("2006-01-02")
+// Step 1: Create collection with retention policy (one-time setup)
+_, err := repoClient.CreateCollection(ctx, &pb.CreateCollectionRequest{
+    Collection: &pb.Collection{
+        Namespace:   "prod",
+        Name:        "users",
+        MessageType: &pb.MessageTypeRef{MessageName: "User"},
+        BackupPolicy: &pb.BackupPolicy{
+            MaxBackups:       7,              // Keep last 7 backups
+            RetentionSeconds: 30 * 24 * 3600, // 30 days
+            Enabled:          true,           // Enable automatic cleanup
+        },
+    },
+})
 
+// Step 2: Scheduled backup (cron job or task)
+func dailyBackup() {
     _, err := client.BackupCollection(ctx, &pb.BackupCollectionRequest{
         Collection: &pb.NamespacedName{
             Namespace: "prod",
             Name:      "users",
         },
-        DestPath:     fmt.Sprintf("/backups/users-%s.db", timestamp),
         IncludeFiles: true,
         Metadata: map[string]string{
-            "type":      "automated",
-            "schedule":  "daily",
-            "retention": "30d",
+            "type":     "automated",
+            "schedule": "daily",
         },
     })
+    // Old backups are automatically cleaned up based on policy!
 }
 ```
 
-### 2. Pre-Migration Backup
+### 2. Pre-Migration Backup (Manual, No Retention)
 
 ```go
+// For critical operations, create collection without retention policy
 _, err := client.BackupCollection(ctx, &pb.BackupCollectionRequest{
     Collection: &pb.NamespacedName{
         Namespace: "prod",
         Name:      "users",
     },
-    DestPath:     "/backups/users-pre-migration.db",
     IncludeFiles: true,
     Metadata: map[string]string{
         "type": "manual",
         "note": "Before schema migration v2.0",
-        "retention": "permanent",
     },
 })
+// Backup is kept indefinitely (no retention policy configured)
 ```
 
-### 3. Retention Policy Management
+### 3. Manual Retention Management (Optional)
 
 ```go
-// Delete backups older than 30 days
+// If you prefer manual cleanup instead of automatic retention:
 func cleanupOldBackups() {
     thirtyDaysAgo := time.Now().AddDate(0, 0, -30).Unix()
 
@@ -412,11 +557,9 @@ func cleanupOldBackups() {
     })
 
     for _, backup := range resp.Backups {
-        // Check retention policy
-        if retention, ok := backup.Metadata["retention"]; ok {
-            if retention == "permanent" {
-                continue
-            }
+        // Check custom metadata
+        if retention, ok := backup.Metadata["permanent"]; ok && retention == "true" {
+            continue
         }
 
         // Delete if old
@@ -468,34 +611,32 @@ if latestBackup != nil {
 
 Comprehensive test coverage in `pkg/collection/backup_test.go`:
 
+**Core Functionality:**
 - ✅ **TestBackupCollection_Simple**: Basic backup functionality
 - ✅ **TestListBackups**: Listing with filters
 - ✅ **TestDeleteBackup**: Backup deletion
 - ✅ **TestVerifyBackup**: Integrity verification
 - ✅ **TestVerifyBackup_Missing**: Missing file detection
 - ✅ **TestBackupValidation**: Request validation
+- ✅ **TestBackupWithFiles**: Filesystem backup
+- ✅ **TestBackupConcurrent**: Concurrent backup operations
+- ✅ **TestBackupLargeDataset**: Large collection backup (10k records)
+- ✅ **TestBackupEmptyCollection**: Empty collection handling
+- ✅ **TestBackupWithSpecialCharacters**: Unicode and special chars
+- ✅ **TestBackupMetadataFiltering**: Metadata filtering
+- ✅ **TestRestoreWithOverwrite**: Restore with overwrite
+
+**Retention Policy Tests:**
+- ✅ **TestRetentionPolicyMaxBackups**: Count-based retention (keeps newest N)
+- ✅ **TestRetentionPolicyAge**: Time-based retention (deletes older than X)
 
 **Run tests:**
 ```bash
+# All backup tests
 go test ./pkg/collection -run "Test.*Backup" -v
-```
 
-**Test results:**
-```
-=== RUN   TestBackupCollection_Simple
---- PASS: TestBackupCollection_Simple (0.42s)
-=== RUN   TestListBackups
---- PASS: TestListBackups (0.03s)
-=== RUN   TestDeleteBackup
---- PASS: TestDeleteBackup (0.02s)
-=== RUN   TestVerifyBackup
---- PASS: TestVerifyBackup (0.02s)
-=== RUN   TestVerifyBackup_Missing
---- PASS: TestVerifyBackup_Missing (0.02s)
-=== RUN   TestBackupValidation
---- PASS: TestBackupValidation (0.01s)
-PASS
-ok      github.com/accretional/collector/pkg/collection        0.519s
+# Retention policy tests only
+go test ./pkg/collection -run "TestRetentionPolicy" -v
 ```
 
 ## Performance
@@ -569,26 +710,30 @@ _, err := client.BackupCollection(ctx, &pb.BackupCollectionRequest{
 ## Summary
 
 ✅ **Fully Implemented:**
-- BackupCollection (local storage)
-- ListBackups (with filtering)
-- RestoreBackup (with overwrite support)
-- DeleteBackup (with storage cleanup)
-- VerifyBackup (integrity checks)
-- Backup metadata tracking (SQLite database)
-- Comprehensive test coverage (6 tests, all passing)
-- Near-zero downtime during backups (proven)
+- **Auto-generated paths** - No manual path management
+- **Fixed backup directory** - `{DataDir}/.backup/{namespace}/`
+- **Retention policies** - Automatic cleanup (age and count-based)
+- **BackupCollection** - Point-in-time snapshots
+- **ListBackups** - Filtering by collection/namespace/timestamp
+- **RestoreBackup** - With overwrite support
+- **DeleteBackup** - Storage cleanup
+- **VerifyBackup** - Integrity checks (SQLite PRAGMA)
+- **Backup metadata** - Comprehensive tracking in SQLite
+- **Test coverage** - 15 tests including retention policy tests
+- **Near-zero downtime** - 6-14ms lock duration (proven)
 
 🚧 **Future Work:**
 - External storage (S3, GCS, Azure)
 - Incremental backups
-- Compression
+- Compression (zstd)
 - Encryption at rest
-- Backup streaming (large backups)
+- Backup streaming for large backups
 - Scheduled backups API
-- Retention policy enforcement
+- Multi-destination backups
 
 📋 **Ready for:**
 - Production use (local backups)
-- Disaster recovery
-- Compliance requirements
-- Automated backup workflows
+- Disaster recovery scenarios
+- Compliance requirements (retention)
+- Automated backup workflows with cleanup
+- Zero-touch backup management

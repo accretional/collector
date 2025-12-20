@@ -17,8 +17,23 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// BackupManager manages backup operations for collections.
+// BackupManager manages backup operations for collections with automatic retention.
+//
+// Key Features:
+//   - Auto-generated paths: {DataDir}/.backup/{namespace}/{name}-{timestamp}.db
+//   - Retention policies: Automatic cleanup based on age and count
+//   - Point-in-time snapshots without collection metadata pollution
+//   - Near-zero downtime: 6-14ms lock duration during backup
+//
 // Unlike Clone, backups create snapshots without registering them as active collections.
+//
+// Retention Policy:
+// Collections can configure a BackupPolicy with automatic cleanup:
+//   - max_backups: Keep only the N newest backups
+//   - retention_seconds: Delete backups older than X seconds
+//   - enabled: Must be true for automatic cleanup
+//
+// Cleanup runs asynchronously after each backup and logs all actions.
 type BackupManager struct {
 	repo       CollectionRepo
 	transport  Transport

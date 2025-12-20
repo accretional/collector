@@ -171,10 +171,14 @@ message BackupMetadata {
   map<string, string> metadata = 10; // Additional metadata (tags, notes)
 }
 
+// Request to create a point-in-time backup of a collection.
+// Backups are stored automatically at:
+//   {DataDir}/.backup/{namespace}/{collectionname}-{timestampseconds}.db
+//
+// Automatic Cleanup: If the collection has a BackupPolicy configured with
+// enabled=true, old backups are automatically deleted based on retention rules.
 message BackupCollectionRequest {
   NamespacedName collection = 1;
-  // dest_path REMOVED - backups now stored automatically at:
-  // {DataDir}/.backup/{namespace}/{collectionname}-{timestampseconds}.db
   bool include_files = 3;         // Include filesystem data
   map<string, string> metadata = 4; // Optional metadata (tags, notes)
 }

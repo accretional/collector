@@ -370,19 +370,33 @@ fmt.Printf("Executed by: %s\n", resp.HandledByCollectorId)
 
 ### Backup and Replication 🆕
 
-**Point-in-time backups** without collection metadata pollution:
+**Point-in-time backups** with automatic retention management:
 
 ```go
-// Create backup
+// Step 1: Create collection with retention policy (one-time setup)
+_, _ = repoClient.CreateCollection(ctx, &pb.CreateCollectionRequest{
+    Collection: &pb.Collection{
+        Namespace:   "prod",
+        Name:        "users",
+        MessageType: &pb.MessageTypeRef{MessageName: "User"},
+        BackupPolicy: &pb.BackupPolicy{
+            MaxBackups:       7,              // Keep last 7 backups
+            RetentionSeconds: 30 * 24 * 3600, // 30 days
+            Enabled:          true,           // Enable automatic cleanup
+        },
+    },
+})
+
+// Step 2: Create backup (path is auto-generated)
 backupResp, _ := client.BackupCollection(ctx, &pb.BackupCollectionRequest{
     Collection: &pb.NamespacedName{
         Namespace: "prod",
         Name:      "users",
     },
-    DestPath:     "/backups/users-2025-11-22.db",
     IncludeFiles: true,
-    Metadata:     map[string]string{"retention": "30d"},
+    Metadata:     map[string]string{"type": "daily"},
 })
+// Old backups are automatically deleted based on retention policy!
 
 // List backups
 listResp, _ := client.ListBackups(ctx, &pb.ListBackupsRequest{
