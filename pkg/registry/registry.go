@@ -40,19 +40,44 @@ func (s *RegistryServer) SetTypeRegistrar(registrar TypeRegistrar) {
 	s.typeRegistrar = registrar
 }
 
-// isWellKnownType checks if a proto file is a well-known Google protobuf type
+// isWellKnownType checks if a proto file is a well-known type that doesn't require registration
 func isWellKnownType(fileName string) bool {
-	// Well-known types that don't require registration
+	// Well-known types that don't require registration:
+	// - Google protobuf standard types (google/protobuf/*)
+	// - Google API types (google/api/*)
+	// - Collector core types (collection.proto, registry.proto, etc.)
 	wellKnownPrefixes := []string{
 		"google/protobuf/",
 		"google/api/",
 	}
 
+	// Collector core proto files (in root proto/ directory)
+	collectorCoreTypes := []string{
+		"collection.proto",
+		"collection_repo.proto",
+		"collection_server.proto",
+		"common.proto",
+		"console.proto",
+		"dispatcher.proto",
+		"registry.proto",
+		"system.proto",
+		"worker.proto",
+	}
+
+	// Check prefixes
 	for _, prefix := range wellKnownPrefixes {
 		if strings.HasPrefix(fileName, prefix) {
 			return true
 		}
 	}
+
+	// Check collector core types
+	for _, coreType := range collectorCoreTypes {
+		if fileName == coreType {
+			return true
+		}
+	}
+
 	return false
 }
 

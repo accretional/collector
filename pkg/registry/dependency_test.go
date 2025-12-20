@@ -312,6 +312,7 @@ func TestRegisterProto_WellKnownTypes(t *testing.T) {
 
 	// These should be allowed without registration
 	wellKnownTypes := []string{
+		// Google protobuf types
 		"google/protobuf/any.proto",
 		"google/protobuf/timestamp.proto",
 		"google/protobuf/duration.proto",
@@ -319,6 +320,10 @@ func TestRegisterProto_WellKnownTypes(t *testing.T) {
 		"google/protobuf/wrappers.proto",
 		"google/protobuf/struct.proto",
 		"google/protobuf/field_mask.proto",
+		// Collector core types
+		"collection.proto",
+		"registry.proto",
+		"common.proto",
 	}
 
 	for i, wkt := range wellKnownTypes {
