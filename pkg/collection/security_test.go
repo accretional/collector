@@ -298,26 +298,3 @@ func TestCreateCollectionValidation(t *testing.T) {
 		})
 	}
 }
-
-// mockStore is a minimal Store implementation for testing
-type mockStore struct{}
-
-func (m *mockStore) Close() error                                                    { return nil }
-func (m *mockStore) Path() string                                                    { return ":memory:" }
-func (m *mockStore) CreateRecord(ctx context.Context, record *pb.CollectionRecord) error { return nil }
-func (m *mockStore) GetRecord(ctx context.Context, id string) (*pb.CollectionRecord, error) {
-	return nil, nil
-}
-func (m *mockStore) UpdateRecord(ctx context.Context, record *pb.CollectionRecord) error { return nil }
-func (m *mockStore) DeleteRecord(ctx context.Context, id string) error                   { return nil }
-func (m *mockStore) ListRecords(ctx context.Context, offset, limit int) ([]*pb.CollectionRecord, error) {
-	return nil, nil
-}
-func (m *mockStore) CountRecords(ctx context.Context) (int64, error) { return 0, nil }
-func (m *mockStore) Search(ctx context.Context, query *SearchQuery) ([]*SearchResult, error) {
-	return nil, nil
-}
-func (m *mockStore) Checkpoint(ctx context.Context) error          { return nil }
-func (m *mockStore) ReIndex(ctx context.Context) error             { return nil }
-func (m *mockStore) Backup(ctx context.Context, destPath string) error { return nil }
-func (m *mockStore) ExecuteRaw(query string, args ...interface{}) error { return nil }

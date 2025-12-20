@@ -26,10 +26,10 @@ func NewPathConfig(dataDir string) *PathConfig {
 // CollectionDBPath returns the path for a collection's database file.
 // Format: {DataDir}/{namespace}/{name}.db
 func (pc *PathConfig) CollectionDBPath(namespace, name string) (string, error) {
-	if err := ValidateName(namespace, "namespace"); err != nil {
+	if err := ValidateNamespace(namespace); err != nil {
 		return "", err
 	}
-	if err := ValidateName(name, "name"); err != nil {
+	if err := ValidateCollectionName(name); err != nil {
 		return "", err
 	}
 	return filepath.Join(pc.DataDir, namespace, name+".db"), nil
@@ -38,10 +38,10 @@ func (pc *PathConfig) CollectionDBPath(namespace, name string) (string, error) {
 // CollectionFilesPath returns the path for a collection's file storage.
 // Format: {DataDir}/files/{namespace}/{name}
 func (pc *PathConfig) CollectionFilesPath(namespace, name string) (string, error) {
-	if err := ValidateName(namespace, "namespace"); err != nil {
+	if err := ValidateNamespace(namespace); err != nil {
 		return "", err
 	}
-	if err := ValidateName(name, "name"); err != nil {
+	if err := ValidateCollectionName(name); err != nil {
 		return "", err
 	}
 	return filepath.Join(pc.DataDir, "files", namespace, name), nil
@@ -63,10 +63,10 @@ func (pc *PathConfig) BackupsMetadataPath() string {
 // Used for migration detection and compatibility.
 // Format: {DataDir}/collections/{namespace}/{name}/data.db
 func (pc *PathConfig) OldCollectionDBPath(namespace, name string) (string, error) {
-	if err := ValidateName(namespace, "namespace"); err != nil {
+	if err := ValidateNamespace(namespace); err != nil {
 		return "", err
 	}
-	if err := ValidateName(name, "name"); err != nil {
+	if err := ValidateCollectionName(name); err != nil {
 		return "", err
 	}
 	return filepath.Join(pc.DataDir, "collections", namespace, name, "data.db"), nil
@@ -91,10 +91,10 @@ func (pc *PathConfig) BackupDir() string {
 // BackupPath generates a backup file path for a collection.
 // Format: {DataDir}/.backup/{namespace}/{collectionname}-{timestampseconds}.db
 func (pc *PathConfig) BackupPath(namespace, name string, timestamp int64) (string, error) {
-	if err := ValidateName(namespace, "namespace"); err != nil {
+	if err := ValidateNamespace(namespace); err != nil {
 		return "", err
 	}
-	if err := ValidateName(name, "name"); err != nil {
+	if err := ValidateCollectionName(name); err != nil {
 		return "", err
 	}
 	filename := fmt.Sprintf("%s-%d.db", name, timestamp)
@@ -104,10 +104,10 @@ func (pc *PathConfig) BackupPath(namespace, name string, timestamp int64) (strin
 // BackupFilesPath generates a backup files directory path.
 // Format: {DataDir}/.backup/{namespace}/{collectionname}-{timestampseconds}.files
 func (pc *PathConfig) BackupFilesPath(namespace, name string, timestamp int64) (string, error) {
-	if err := ValidateName(namespace, "namespace"); err != nil {
+	if err := ValidateNamespace(namespace); err != nil {
 		return "", err
 	}
-	if err := ValidateName(name, "name"); err != nil {
+	if err := ValidateCollectionName(name); err != nil {
 		return "", err
 	}
 	filename := fmt.Sprintf("%s-%d.files", name, timestamp)
@@ -117,10 +117,10 @@ func (pc *PathConfig) BackupFilesPath(namespace, name string, timestamp int64) (
 // ListBackupPaths lists all backup database files for a collection.
 // Returns sorted list (oldest to newest).
 func (pc *PathConfig) ListBackupPaths(namespace, name string) ([]string, error) {
-	if err := ValidateName(namespace, "namespace"); err != nil {
+	if err := ValidateNamespace(namespace); err != nil {
 		return nil, err
 	}
-	if err := ValidateName(name, "name"); err != nil {
+	if err := ValidateCollectionName(name); err != nil {
 		return nil, err
 	}
 

@@ -581,8 +581,24 @@ func (bm *BackupManager) RestoreBackup(ctx context.Context, req *pb.RestoreBacku
 	}
 
 	// If overwriting, remove existing database and files
-	destDBPath := bm.pathConfig.CollectionDBPath(req.DestNamespace, req.DestName)
-	destFilesDir := bm.pathConfig.CollectionFilesPath(req.DestNamespace, req.DestName)
+	destDBPath, err := bm.pathConfig.CollectionDBPath(req.DestNamespace, req.DestName)
+	if err != nil {
+		return &pb.RestoreBackupResponse{
+			Status: &pb.Status{
+				Code:    pb.Status_INVALID_ARGUMENT,
+				Message: fmt.Sprintf("invalid destination path: %v", err),
+			},
+		}, nil
+	}
+	destFilesDir, err := bm.pathConfig.CollectionFilesPath(req.DestNamespace, req.DestName)
+	if err != nil {
+		return &pb.RestoreBackupResponse{
+			Status: &pb.Status{
+				Code:    pb.Status_INVALID_ARGUMENT,
+				Message: fmt.Sprintf("invalid destination files path: %v", err),
+			},
+		}, nil
+	}
 	if existingCollection != nil && req.Overwrite {
 		// Close the existing collection's store if possible
 		if existingCollection.Store != nil {
@@ -702,7 +718,9 @@ func (bm *BackupManager) RestoreBackup(ctx context.Context, req *pb.RestoreBacku
 		// Clean up
 		os.Remove(destDBPath)
 		if backup.IncludesFiles {
-			os.RemoveAll(bm.pathConfig.CollectionFilesPath(req.DestNamespace, req.DestName))
+			if filesPath, err := bm.pathConfig.CollectionFilesPath(req.DestNamespace, req.DestName); err == nil {
+				os.RemoveAll(filesPath)
+			}
 		}
 		return &pb.RestoreBackupResponse{
 			Status: &pb.Status{

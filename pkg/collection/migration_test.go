@@ -59,7 +59,10 @@ func TestMigration_OldToNewStructure(t *testing.T) {
 	}
 
 	// Check new structure exists
-	newDBPath := pathConfig.CollectionDBPath("ns1", "coll1")
+	newDBPath, err := pathConfig.CollectionDBPath("ns1", "coll1")
+	if err != nil {
+		t.Fatalf("failed to get collection path: %v", err)
+	}
 	if _, err := os.Stat(newDBPath); os.IsNotExist(err) {
 		t.Errorf("New database not found at %s", newDBPath)
 	}
@@ -130,7 +133,10 @@ func TestMigration_MultipleCollections(t *testing.T) {
 
 	// Verify each collection
 	for _, c := range collections {
-		newDBPath := pathConfig.CollectionDBPath(c.ns, c.name)
+		newDBPath, err := pathConfig.CollectionDBPath(c.ns, c.name)
+		if err != nil {
+			t.Fatalf("failed to get collection path: %v", err)
+		}
 		if _, err := os.Stat(newDBPath); os.IsNotExist(err) {
 			t.Errorf("Missing migrated DB: %s", newDBPath)
 		}

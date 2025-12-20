@@ -49,7 +49,12 @@ type mockStore struct {
 	path string
 }
 
-func (m *mockStore) Close() error { return m.db.Close() }
+func (m *mockStore) Close() error {
+	if m.db != nil {
+		return m.db.Close()
+	}
+	return nil
+}
 func (m *mockStore) Path() string { return m.path }
 
 func (m *mockStore) CreateRecord(ctx context.Context, r *pb.CollectionRecord) error {
@@ -665,7 +670,10 @@ func TestBackupWithFiles(t *testing.T) {
 	namespace := req.Collection.Namespace
 	name := req.Collection.Name
 	timestamp := resp.Backup.Timestamp
-	filesDir := pathConfig.BackupFilesPath(namespace, name, timestamp)
+	filesDir, err := pathConfig.BackupFilesPath(namespace, name, timestamp)
+	if err != nil {
+		t.Fatalf("failed to get backup files path: %v", err)
+	}
 	if _, err := os.Stat(filesDir); err != nil {
 		t.Errorf("files directory not created: %v", err)
 	}

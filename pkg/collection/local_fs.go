@@ -41,3 +41,7 @@ func (l *LocalFileSystem) List(ctx context.Context, prefix string) ([]string, er
 func (l *LocalFileSystem) Stat(ctx context.Context, path string) (int64, error) {
 	return l.fs.Stat(ctx, path)
 }
+
+func (l *LocalFileSystem) Exists(ctx context.Context, path string) (bool, error) {
+	return l.fs.Exists(ctx, path)
+}

@@ -132,7 +132,7 @@ func (fs *FileSystem) List(ctx context.Context, prefix string) ([]string, error)
 	var files []string
 	searchPath := filepath.Join(fs.Root, cleanPrefix)
 
-	err := filepath.Walk(searchPath, func(path string, info os.FileInfo, err error) error {
+	err = filepath.Walk(searchPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			// Skip errors for individual files/dirs
 			return nil
@@ -247,7 +247,7 @@ func (fs *FileSystem) Exists(ctx context.Context, path string) (bool, error) {
 	}
 
 	fullPath := filepath.Join(fs.Root, cleanPath)
-	_, err := os.Stat(fullPath)
+	_, err = os.Stat(fullPath)
 	if err == nil {
 		return true, nil
 	}
