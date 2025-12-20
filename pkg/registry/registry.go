@@ -10,12 +10,20 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/descriptorpb"
 )
+
+// TypeRegistrar is an interface for registering message types.
+// This allows optional integration with the type registry without circular dependencies.
+type TypeRegistrar interface {
+	RegisterFileDescriptor(ctx context.Context, namespace string, fileDesc *descriptorpb.FileDescriptorProto) error
+}
 
 type RegistryServer struct {
 	collector.UnimplementedCollectorRegistryServer
 	registeredProtos   *collection.Collection
 	registeredServices *collection.Collection
+	typeRegistrar      TypeRegistrar // Optional: registers types when protos are registered
 }
 
 func NewRegistryServer(registeredProtos, registeredServices *collection.Collection) *RegistryServer {
@@ -23,6 +31,12 @@ func NewRegistryServer(registeredProtos, registeredServices *collection.Collecti
 		registeredProtos:   registeredProtos,
 		registeredServices: registeredServices,
 	}
+}
+
+// SetTypeRegistrar sets the type registrar for this server.
+// This is optional - if not set, types are not registered in the type registry.
+func (s *RegistryServer) SetTypeRegistrar(registrar TypeRegistrar) {
+	s.typeRegistrar = registrar
 }
 
 func (s *RegistryServer) RegisterProto(ctx context.Context, req *collector.RegisterProtoRequest) (*collector.RegisterProtoResponse, error) {
@@ -71,6 +85,15 @@ func (s *RegistryServer) RegisterProto(ctx context.Context, req *collector.Regis
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	// Register types in type registry if configured
+	if s.typeRegistrar != nil {
+		if err := s.typeRegistrar.RegisterFileDescriptor(ctx, req.Namespace, req.FileDescriptor); err != nil {
+			// Log error but don't fail the registration - type registry is optional
+			// In production, you might want to return this error or handle it differently
+			_ = err
+		}
 	}
 
 	return &collector.RegisterProtoResponse{

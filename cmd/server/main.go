@@ -124,7 +124,10 @@ func run() error {
 
 	// Create registry server
 	registryServer := registry.NewRegistryServer(registeredProtos, registeredServices)
-	log.Println("✓ Registry server created")
+
+	// Wire type registry into registry server for automatic type registration
+	registryServer.SetTypeRegistrar(systemCollections.TypeRegistry)
+	log.Println("✓ Registry server created with type registration")
 
 	// Register all services in the registry
 	if err := registry.RegisterCollectionService(ctx, registryServer, namespace); err != nil {
@@ -208,7 +211,10 @@ func run() error {
 	}
 
 	collectionRepo := collection.NewCollectionRepo(dummyStore, pathConfig, registryStore, storeFactory)
-	log.Println("✓ Collection repository created")
+
+	// Wire type registry into collection repo for type validation
+	collectionRepo.SetTypeValidator(systemCollections.TypeRegistry)
+	log.Println("✓ Collection repository created with type validation")
 
 	// ========================================================================
 	// 3. Create Single gRPC Server with ALL Services

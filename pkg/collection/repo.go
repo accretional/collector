@@ -48,10 +48,11 @@ type StoreFactory func(path string, opts Options) (Store, error)
 // DefaultCollectionRepo is a facade that provides a simple interface for managing collections.
 // It uses a CollectionRepoService and a Store to do the heavy lifting.
 type DefaultCollectionRepo struct {
-	service      *CollectionRepoService
-	store        Store
-	pathConfig   *PathConfig
-	storeFactory StoreFactory
+	service        *CollectionRepoService
+	store          Store
+	pathConfig     *PathConfig
+	storeFactory   StoreFactory
+	typeValidator  MessageTypeValidator // Optional: validates message types if set
 }
 
 // NewCollectionRepo creates a new DefaultCollectionRepo with the given Store, PathConfig, RegistryStore, and StoreFactory.
@@ -64,6 +65,12 @@ func NewCollectionRepo(store Store, pathConfig *PathConfig, registryStore Regist
 		pathConfig:   pathConfig,
 		storeFactory: storeFactory,
 	}
+}
+
+// SetTypeValidator sets the message type validator for this repo.
+// This is optional - if not set, type validation is skipped.
+func (r *DefaultCollectionRepo) SetTypeValidator(validator MessageTypeValidator) {
+	r.typeValidator = validator
 }
 
 // CreateCollection creates a new collection.
@@ -79,6 +86,13 @@ func (r *DefaultCollectionRepo) CreateCollection(ctx context.Context, collection
 	}
 	if err := ValidateCollectionName(collection.Name); err != nil {
 		return nil, fmt.Errorf("invalid collection name: %w", err)
+	}
+
+	// Validate message type if validator is configured
+	if r.typeValidator != nil {
+		if err := r.typeValidator.ValidateCollectionMessageType(ctx, collection); err != nil {
+			return nil, fmt.Errorf("invalid message type: %w", err)
+		}
 	}
 
 	// Create the database file and files directory first
