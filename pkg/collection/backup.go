@@ -635,6 +635,45 @@ func (bm *BackupManager) RestoreBackup(ctx context.Context, req *pb.RestoreBacku
 		}, nil
 	}
 
+	// If destination exists, check for operation conflicts
+	if existingCollection != nil {
+		if err := CheckOperationConflict(existingCollection.Meta); err != nil {
+			if _, ok := err.(ErrOperationInProgress); ok {
+				return &pb.RestoreBackupResponse{
+					Status: &pb.Status{
+						Code:    pb.Status_ABORTED,
+						Message: fmt.Sprintf("cannot restore: %v", err),
+					},
+				}, nil
+			}
+			return &pb.RestoreBackupResponse{
+				Status: &pb.Status{
+					Code:    pb.Status_INTERNAL,
+					Message: fmt.Sprintf("failed to check operation state: %v", err),
+				},
+			}, nil
+		}
+
+		// Register restore operation
+		restoreURI := fmt.Sprintf("restore:%s->%s/%s", req.BackupId, req.DestNamespace, req.DestName)
+		if err := StartOperation(ctx, bm.repo, req.DestNamespace, req.DestName,
+			"restore", restoreURI, bm.pathConfig.DataDir, RestoreTimeout); err != nil {
+			return &pb.RestoreBackupResponse{
+				Status: &pb.Status{
+					Code:    pb.Status_INTERNAL,
+					Message: fmt.Sprintf("failed to register operation: %v", err),
+				},
+			}, nil
+		}
+
+		// Ensure operation state is cleared on completion
+		defer func() {
+			if err := CompleteOperation(ctx, bm.repo, req.DestNamespace, req.DestName); err != nil {
+				fmt.Printf("Warning: failed to clear restore operation state: %v\n", err)
+			}
+		}()
+	}
+
 	// If overwriting, remove existing database and files
 	destDBPath, err := bm.pathConfig.CollectionDBPath(req.DestNamespace, req.DestName)
 	if err != nil {
