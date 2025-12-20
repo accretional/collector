@@ -375,6 +375,43 @@ func (bm *BackupManager) BackupCollection(ctx context.Context, req *pb.BackupCol
 			},
 		}, nil
 	}
+
+	// Check for operation conflicts and register this operation
+	if err := StartOperation(ctx, bm.repo, req.Collection.Namespace, req.Collection.Name,
+		"backup", backupPath, bm.pathConfig.DataDir, BackupTimeout); err != nil {
+		if _, ok := err.(ErrOperationInProgress); ok {
+			return &pb.BackupCollectionResponse{
+				Status: &pb.Status{
+					Code:    pb.Status_ABORTED,
+					Message: err.Error(),
+				},
+			}, nil
+		}
+		return &pb.BackupCollectionResponse{
+			Status: &pb.Status{
+				Code:    pb.Status_INTERNAL,
+				Message: fmt.Sprintf("failed to register operation: %v", err),
+			},
+		}, nil
+	}
+
+	// Ensure operation state is cleared on completion (success or failure)
+	defer func() {
+		if err := CompleteOperation(ctx, bm.repo, req.Collection.Namespace, req.Collection.Name); err != nil {
+			fmt.Printf("Warning: failed to clear operation state: %v\n", err)
+		}
+	}()
+
+	// Re-fetch collection to get fresh state after operation registration
+	sourceCollection, err = bm.repo.GetCollection(ctx, req.Collection.Namespace, req.Collection.Name)
+	if err != nil {
+		return &pb.BackupCollectionResponse{
+			Status: &pb.Status{
+				Code:    pb.Status_INVALID_ARGUMENT,
+				Message: fmt.Sprintf("invalid backup path: %v", err),
+			},
+		}, nil
+	}
 	storageType := "local"
 
 	// Ensure namespace backup directory exists

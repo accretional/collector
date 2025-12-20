@@ -210,6 +210,14 @@ func New(config Config) (*Server, error) {
 	}
 	s.registryStore = registryStore
 
+	// Clean up any timed-out operations from previous crashes
+	s.logger.Println("Checking for timed-out operations...")
+	if cleaned, err := collection.CleanupTimedOutOperations(ctx, registryStore); err != nil {
+		s.logger.Printf("Warning: failed to cleanup timed-out operations: %v", err)
+	} else if cleaned > 0 {
+		s.logger.Printf("✓ Cleaned up %d timed-out operation(s)", cleaned)
+	}
+
 	// Create repo with PathConfig and registry store
 	dummyStore, err := sqlite.NewSqliteStore(":memory:", collection.Options{})
 	if err != nil {
