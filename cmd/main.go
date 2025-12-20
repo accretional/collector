@@ -40,7 +40,10 @@ func run() error {
 	// 4. Initialize Dependencies (The "Glue")
 
 	// A. SQLite Store
-	dbPath := pathConfig.CollectionDBPath(namespace, name)
+	dbPath, err := pathConfig.CollectionDBPath(namespace, name)
+	if err != nil {
+		return fmt.Errorf("invalid collection path: %w", err)
+	}
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
 		return fmt.Errorf("create db dir: %w", err)
 	}
@@ -56,7 +59,10 @@ func run() error {
 	defer store.Close()
 
 	// B. Local Filesystem
-	filesPath := pathConfig.CollectionFilesPath(namespace, name)
+	filesPath, err := pathConfig.CollectionFilesPath(namespace, name)
+	if err != nil {
+		return fmt.Errorf("invalid collection files path: %w", err)
+	}
 	fs, err := collection.NewLocalFileSystem(filesPath)
 	if err != nil {
 		log.Fatalf("Failed to create filesystem: %v", err)
