@@ -11,13 +11,30 @@ import (
 
 // Collection is the domain entity handling logic.
 type Collection struct {
-	Meta  *pb.Collection
-	Store Store
-	FS    FileSystem
+	Meta          *pb.Collection
+	Store         Store
+	FS            FileSystem
+	bootstrapMode bool // Skip validation during system bootstrap
+}
+
+// CollectionOption is a functional option for Collection construction
+type CollectionOption func(*Collection) error
+
+// WithBootstrap allows skipping validation during bootstrap
+func WithBootstrap(bootstrap bool) CollectionOption {
+	return func(c *Collection) error {
+		c.bootstrapMode = bootstrap
+		return nil
+	}
 }
 
 // NewCollection initializes a Collection.
 func NewCollection(meta *pb.Collection, store Store, fs FileSystem) (*Collection, error) {
+	return NewCollectionWithOptions(meta, store, fs)
+}
+
+// NewCollectionWithOptions initializes a Collection with functional options.
+func NewCollectionWithOptions(meta *pb.Collection, store Store, fs FileSystem, opts ...CollectionOption) (*Collection, error) {
 	if meta.Namespace == "" || meta.Name == "" {
 		return nil, fmt.Errorf("namespace and name are required")
 	}
@@ -30,11 +47,20 @@ func NewCollection(meta *pb.Collection, store Store, fs FileSystem) (*Collection
 		}
 	}
 
-	return &Collection{
+	coll := &Collection{
 		Meta:  meta,
 		Store: store,
 		FS:    fs,
-	}, nil
+	}
+
+	// Apply options
+	for _, opt := range opts {
+		if err := opt(coll); err != nil {
+			return nil, fmt.Errorf("apply option: %w", err)
+		}
+	}
+
+	return coll, nil
 }
 
 // --- Store Delegates ---

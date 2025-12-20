@@ -6,15 +6,11 @@ import (
 )
 
 // Reserved namespaces that cannot be used by users
+// These are reserved because they conflict with internal directory structure
 var reservedNamespaces = map[string]bool{
-	"repo":     true,
-	"backups":  true,
-	".backup":  true,
-	"files":    true,
-	"system":   true,
-	"internal": true,
-	"admin":    true,
-	"metadata": true,
+	"repo":    true, // Used for ./data/repo/collections.db
+	"backups": true, // Used for ./data/backups/metadata.db
+	"files":   true, // Used for ./data/files/{namespace}/{name}
 }
 
 // Maximum length for namespace and collection names

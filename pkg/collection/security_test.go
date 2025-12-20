@@ -62,19 +62,19 @@ func TestValidateNamespace(t *testing.T) {
 		{"valid simple", "production", false},
 		{"valid with dash", "prod-v2", false},
 		{"valid with underscore", "prod_env", false},
+		{"valid system", "system", false},      // system is valid - used for system collections
+		{"valid internal", "internal", false},  // internal is valid
+		{"valid admin", "admin", false},        // admin is valid
+		{"valid metadata", "metadata", false},  // metadata is valid
 
-		// Reserved namespaces
+		// Reserved namespaces (filesystem conflicts only)
 		{"reserved repo", "repo", true},
 		{"reserved backups", "backups", true},
-		{"reserved .backup", ".backup", true},
 		{"reserved files", "files", true},
-		{"reserved system", "system", true},
-		{"reserved internal", "internal", true},
-		{"reserved admin", "admin", true},
-		{"reserved metadata", "metadata", true},
 
 		// Invalid patterns
 		{"dot prefix", ".config", true},
+		{"reserved .backup", ".backup", true}, // .backup is both dot-prefix AND reserved
 		{"path traversal", "../etc", true},
 		{"forward slash", "prod/staging", true},
 	}
@@ -100,9 +100,12 @@ func TestPathConfigValidation(t *testing.T) {
 		wantError bool
 	}{
 		{"valid", "test", "collection", false},
+		{"valid system namespace", "system", "collection", false},
 		{"invalid namespace", "../etc", "collection", true},
 		{"invalid collection", "test", "../passwd", true},
-		{"reserved namespace", "system", "collection", true},
+		{"reserved namespace repo", "repo", "collection", true},
+		{"reserved namespace backups", "backups", "collection", true},
+		{"reserved namespace files", "files", "collection", true},
 		{"dot prefix namespace", ".hidden", "collection", true},
 		{"dot prefix collection", "test", ".secret", true},
 		{"slash in namespace", "test/prod", "collection", true},
@@ -274,10 +277,12 @@ func TestCreateCollectionValidation(t *testing.T) {
 		wantError bool
 	}{
 		{"valid", "test", "mycollection", false},
+		{"valid system namespace", "system", "mycollection", false},
 		{"invalid namespace traversal", "../etc", "collection", true},
 		{"invalid name traversal", "test", "../passwd", true},
-		{"reserved namespace", "system", "collection", true},
 		{"reserved namespace repo", "repo", "collection", true},
+		{"reserved namespace backups", "backups", "collection", true},
+		{"reserved namespace files", "files", "collection", true},
 		{"invalid namespace slash", "test/prod", "collection", true},
 		{"invalid name slash", "test", "coll/name", true},
 		{"dot prefix namespace", ".hidden", "collection", true},

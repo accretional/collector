@@ -14,6 +14,7 @@ import (
 	"time"
 
 	pb "github.com/accretional/collector/gen/collector"
+	"github.com/accretional/collector/pkg/bootstrap"
 	"github.com/accretional/collector/pkg/collection"
 	"github.com/accretional/collector/pkg/db/sqlite"
 	"github.com/accretional/collector/pkg/dispatch"
@@ -46,6 +47,37 @@ func run() error {
 	}
 
 	log.Printf("Starting Collector (ID: %s, Namespace: %s)", collectorID, namespace)
+
+	// ========================================================================
+	// 0. Bootstrap System Collections
+	// ========================================================================
+
+	// Get configurable data directory
+	dataDir := os.Getenv("COLLECTOR_DATA_DIR")
+	if dataDir == "" {
+		dataDir = "./data"
+	}
+	pathConfig := collection.NewPathConfig(dataDir)
+	log.Printf("Data directory: %s", dataDir)
+	log.Printf("Backup directory: %s", pathConfig.BackupDir())
+
+	// Bootstrap self-referential system collections
+	log.Println("========================================")
+	log.Println("Bootstrapping system collections...")
+	log.Println("========================================")
+	systemCollections, err := bootstrap.BootstrapSystemCollections(ctx, pathConfig)
+	if err != nil {
+		return fmt.Errorf("bootstrap system collections: %w", err)
+	}
+	defer systemCollections.Close()
+
+	log.Println("✓ System collections ready:")
+	log.Printf("  - Collection Registry: system/collections")
+	log.Printf("  - Type Registry: system/types")
+	log.Printf("  - Connections: system/connections")
+	log.Printf("  - Audit: system/audit")
+	log.Printf("  - Logs: system/logs (stub)")
+	log.Println("========================================")
 
 	// ========================================================================
 	// 1. Setup Registry Collections
@@ -113,15 +145,6 @@ func run() error {
 	// ========================================================================
 	// 2. Setup Collection Repository
 	// ========================================================================
-
-	// Get configurable data directory
-	dataDir := os.Getenv("COLLECTOR_DATA_DIR")
-	if dataDir == "" {
-		dataDir = "./data"
-	}
-	pathConfig := collection.NewPathConfig(dataDir)
-	log.Printf("Data directory: %s", dataDir)
-	log.Printf("Backup directory: %s", pathConfig.BackupDir())
 
 	// Create registry store
 	registryStorePath := pathConfig.RegistryDBPath()

@@ -1,0 +1,138 @@
+// system.proto
+syntax = "proto3";
+
+package collector;
+option go_package = "github.com/accretional/collector/gen/collector";
+
+import "common.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/any.proto";
+
+// ============================================================================
+// System Collections
+// These are self-referential collections used by the collector itself
+// ============================================================================
+
+// AuditEvent tracks all operations for compliance and debugging
+// Stored in system/audit collection
+message AuditEvent {
+  string id = 1;  // Unique event ID (UUID)
+
+  // Event metadata
+  google.protobuf.Timestamp timestamp = 2;
+  string namespace = 3;
+  string collection_name = 4;
+
+  // Operation details
+  string operation = 5;  // CREATE, UPDATE, DELETE, SEARCH, BACKUP, etc.
+  string record_id = 6;  // ID of affected record (if applicable)
+
+  // Actor information
+  string actor_id = 7;  // User/service that performed the operation
+  string actor_type = 8;  // USER, SERVICE, SYSTEM
+  string source_ip = 9;
+
+  // Request/Response
+  google.protobuf.Any request_data = 10;  // Serialized request
+  google.protobuf.Any response_data = 11; // Serialized response
+
+  // Result
+  Status status = 12;
+  int64 duration_ms = 13;
+
+  // Context
+  map<string, string> context = 14;  // Additional metadata (session_id, trace_id, etc.)
+
+  Metadata metadata = 15;
+}
+
+// SystemLog represents structured log entries
+// Stored in system/logs collection
+// NOTE: This is currently a stub - full implementation pending
+message SystemLog {
+  string id = 1;  // Log entry ID (UUID)
+
+  google.protobuf.Timestamp timestamp = 2;
+
+  // Log level
+  enum Level {
+    DEBUG = 0;
+    INFO = 1;
+    WARNING = 2;
+    ERROR = 3;
+    CRITICAL = 4;
+  }
+  Level level = 3;
+
+  // Source information
+  string component = 4;  // collector, registry, dispatcher, etc.
+  string namespace = 5;  // Namespace context (if applicable)
+  string collection_name = 6;  // Collection context (if applicable)
+
+  // Message
+  string message = 7;
+  string error_message = 8;  // Detailed error if applicable
+  string stack_trace = 9;
+
+  // Structured data
+  map<string, string> fields = 10;  // Key-value pairs for structured logging
+
+  // Correlation
+  string trace_id = 11;  // For distributed tracing
+  string request_id = 12;  // Request correlation
+
+  Metadata metadata = 13;
+}
+
+// ValidationRule defines schema validation for collection records
+// Used by type registry to validate requests
+message ValidationRule {
+  string id = 1;  // namespace/message_name
+
+  string namespace = 2;
+  string message_name = 3;
+
+  // Field validation rules
+  message FieldRule {
+    string field_name = 1;
+    bool required = 2;
+    string pattern = 3;  // Regex pattern for validation
+    int64 min_length = 4;
+    int64 max_length = 5;
+    google.protobuf.Any default_value = 6;
+  }
+
+  repeated FieldRule field_rules = 4;
+
+  // Custom validation expressions (future extension)
+  repeated string validation_expressions = 5;
+
+  Metadata metadata = 6;
+}
+
+// Bootstrap status tracking
+// Used to track which system collections have been initialized
+message BootstrapStatus {
+  string id = 1;  // Always "bootstrap"
+
+  google.protobuf.Timestamp started_at = 2;
+  google.protobuf.Timestamp completed_at = 3;
+
+  enum Phase {
+    NOT_STARTED = 0;
+    COLLECTION_REGISTRY = 1;
+    TYPE_REGISTRY = 2;
+    CONNECTION_COLLECTION = 3;
+    AUDIT_COLLECTION = 4;
+    LOGS_COLLECTION = 5;
+    COMPLETE = 6;
+  }
+
+  Phase current_phase = 4;
+  repeated string completed_phases = 5;
+
+  map<string, string> phase_details = 6;  // Additional info per phase
+  Status status = 7;
+
+  Metadata metadata = 8;
+}
