@@ -32,7 +32,7 @@ Complete documentation for the Collector distributed system framework.
 
 - **[Collection Service](../pkg/collection/README.md)** - ORM for protobuf messages
   - CRUD operations with full-text search
-  - JSONB filtering and complex queries
+  - JSON filtering and complex queries
   - File attachments and hierarchical storage
 
 - **[Dispatcher](../pkg/dispatch/README.md)** - Distributed RPC routing

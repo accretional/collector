@@ -28,10 +28,11 @@ CollectorRegistry is **production-ready for basic schema registration** with str
 - ✅ **Service Registration**: RegisterService with ServiceDescriptorProto, gRPC endpoints, ID format `{namespace}/{serviceName}`
 - ✅ **Dependency Resolution**: Hierarchical namespace resolution (child can access parent protos)
 - ✅ **Well-Known Types**: Auto-skips validation for `google/protobuf/*`, `google/api/*`, collector core types
-- ✅ **Lookup Operations**: LookupProto (internal), LookupService (gRPC), both with namespace+name queries
+- ✅ **Lookup Operations**: LookupProto (by filename), LookupProtoByMessageName (by message type), LookupService (gRPC)
 - ✅ **List Operations**: ListProtos, ListServices with optional namespace filtering, DB-level filtering
 - ✅ **Validation Interceptors**: Stream and unary interceptors for method validation
 - ✅ **Type Registry Integration**: Optional TypeRegistrar interface for separate type registry
+- ✅ **JSON Conversion Support**: LookupProtoByMessageName enables dynamic proto→JSON conversion for search indexing
 
 ### Test Coverage
 - ✅ 54 test functions covering core scenarios (excluding slow scalability tests)

@@ -123,14 +123,14 @@ Services communicate via **gRPC loopback** even when co-located:
 **Capabilities:**
 - CRUD operations (Create, Get, Update, Delete, List)
 - Full-text search (SQLite FTS5)
-- JSONB filtering for complex queries
+- JSON filtering for complex queries
 - File attachments (hierarchical file storage)
 - Custom RPC handlers
 - Batch operations
 
 **Key RPCs:**
 - `Create` / `Get` / `Update` / `Delete` / `List` - CRUD
-- `Search` - Full-text + JSONB queries
+- `Search` - Full-text + JSON queries
 - `Invoke` - Custom method execution
 - `Batch` - Multi-operation transactions
 
@@ -396,7 +396,7 @@ results, _ := client.Search(ctx, &pb.SearchRequest{
     Limit:      20,
 })
 
-// Combined with JSONB filtering
+// Combined with JSON filtering
 results, _ := client.Search(ctx, &pb.SearchRequest{
     Collection: &pb.Collection{Namespace: "production", Name: "users"},
     Query:      "engineer",
@@ -525,7 +525,7 @@ Collections are like database tables for protobuf messages:
 
 ```
 Collection: production/users
-  ├─ Store: SQLite with JSONB + FTS5
+  ├─ Store: SQLite with JSON + FTS5
   │   ├─ user-123: {name: "Alice", email: "alice@example.com"}
   │   ├─ user-456: {name: "Bob", email: "bob@example.com"}
   │   └─ ...

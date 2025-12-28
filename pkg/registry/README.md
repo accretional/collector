@@ -406,7 +406,10 @@ func main() {
     // ================================================================
 
     protosStore, _ := sqlite.NewSqliteStore("./data/protos.db", collection.Options{EnableJSON: true})
+    protosStore.SetJSONConverter(collection.GetSystemTypeConverter("RegisteredProto"))
+
     servicesStore, _ := sqlite.NewSqliteStore("./data/services.db", collection.Options{EnableJSON: true})
+    servicesStore.SetJSONConverter(collection.GetSystemTypeConverter("RegisteredService"))
 
     registeredProtos, _ := collection.NewCollection(
         &pb.Collection{
@@ -538,6 +541,11 @@ func (v *grpcRegistryClientValidator) ValidateServiceMethod(
 ```go
 // LookupProto retrieves a registered proto by namespace and file name
 proto, err := registryServer.LookupProto(ctx, "production", "collection.proto")
+
+// LookupProtoByMessageName finds a proto containing a specific message type
+// This is used for JSON conversion - looking up FileDescriptor by message name
+proto, err := registryServer.LookupProtoByMessageName(ctx, "production", "User")
+// Returns the RegisteredProto containing "User" message
 
 // LookupService retrieves a registered service
 service, err := registryServer.LookupService(ctx, "production", "CollectionService")

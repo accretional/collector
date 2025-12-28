@@ -7,7 +7,7 @@ The collection package provides a powerful ORM-like system for managing protobuf
 Collections are like database tables for protobuf messages with:
 - **Type-safe storage**: Any protobuf message type can be stored
 - **Full-text search**: SQLite FTS5-powered search across message fields
-- **JSONB filtering**: Rich query capabilities using SQLite's JSONB operators
+- **JSON filtering**: Rich query capabilities using SQLite's JSON functions
 - **File attachments**: Each record can have associated files in a hierarchical structure
 - **gRPC API**: Complete CRUD + Search API for remote access
 - **Custom methods**: Define custom RPC handlers for business logic
@@ -20,7 +20,7 @@ Collections are like database tables for protobuf messages with:
 │         (gRPC API Server)                          │
 │                                                    │
 │  CRUD: Create, Get, Update, Delete, List          │
-│  Search: Full-text + JSONB filtering              │
+│  Search: Full-text + JSON filtering               │
 │  Custom: Invoke, Modify                           │
 └─────────────────┬──────────────────────────────────┘
                   │
@@ -30,7 +30,7 @@ Collections are like database tables for protobuf messages with:
 │         (Core Data Structure)                      │
 │                                                    │
 │  • Message Type: protobuf message definition      │
-│  • Store: SQLite backend with JSONB + FTS        │
+│  • Store: SQLite backend with JSON + FTS          │
 │  • FileSystem: Hierarchical file storage          │
 └─────────────────┬──────────────────────────────────┘
                   │
@@ -186,7 +186,7 @@ results, err := coll.SearchRecords(ctx, &pb.SearchRequest{
     Limit: 10,
 })
 
-// JSONB filtering
+// JSON filtering
 results, err := coll.SearchRecords(ctx, &pb.SearchRequest{
     Filters: []*pb.SearchFilter{
         {
@@ -362,7 +362,7 @@ query := `"senior engineer"`
 query := "eng*"  // Matches "engineer", "engineering", etc.
 ```
 
-### JSONB Filtering
+### JSON Filtering
 
 Rich filtering on JSON-serialized protobuf fields:
 
@@ -467,23 +467,32 @@ resp, err := client.Describe(ctx, &pb.DescribeRequest{
 
 ### Record Storage
 
-Records are stored as:
-1. **Protobuf binary**: Efficient storage and retrieval
-2. **JSON**: For JSONB filtering and indexing
-3. **FTS tokens**: For full-text search
+Records are stored with a dual representation for efficient storage and searching:
+
+1. **`proto_data` (BLOB)**: Binary protobuf - the source of truth
+2. **`jsontext` (TEXT)**: JSON derived from proto_data for search indexing
+3. **`labels` (TEXT)**: JSON object for label-based filtering
+4. **FTS tokens**: For full-text search (when EnableFTS is true)
 
 ```sql
 CREATE TABLE records (
     id TEXT PRIMARY KEY,
-    data BLOB,           -- Protobuf binary
-    json_data TEXT,      -- JSON representation
+    proto_data BLOB,     -- Binary protobuf (source of truth)
+    data_uri TEXT,       -- Optional reference to external data
     created_at INTEGER,
-    updated_at INTEGER
+    updated_at INTEGER,
+    labels TEXT          -- JSON: {"key": "value", ...}
 );
 
-CREATE INDEX idx_json ON records(json_data) WHERE json_data IS NOT NULL;
-CREATE VIRTUAL TABLE records_fts USING fts5(id, json_data);
+-- Added when EnableJSON is true:
+ALTER TABLE records ADD COLUMN jsontext TEXT;  -- JSON derived from proto_data
 ```
+
+**JSON Conversion Pipeline:**
+- When a record is created/updated, the store converts `proto_data` to JSON for the `jsontext` column
+- Conversion uses `ProtoToJSONConverter` callbacks (system types use static converters, user types use registry-based dynamic converters)
+- If no converter is available and `proto_data` isn't valid JSON, falls back to `"{}"` (record stored but JSON fields not searchable)
+- `proto_data` remains the source of truth; `jsontext` is purely for search indexing
 
 ### File Storage
 
@@ -544,7 +553,7 @@ type Store interface {
 ### SQLite Features
 
 - **WAL mode**: Better concurrency for reads/writes
-- **JSONB**: Native JSON operators for filtering
+- **JSON functions**: `json_extract()` and `json_each()` for filtering
 - **FTS5**: Full-text search with ranking
 - **Transactions**: ACID guarantees for all operations
 - **Connection pooling**: Efficient resource usage
@@ -553,13 +562,18 @@ type Store interface {
 
 ```go
 options := collection.Options{
-    EnableJSON: true,   // Enable JSONB indexing
+    EnableJSON: true,   // Enable JSON indexing (adds jsontext column)
     EnableFTS:  true,   // Enable full-text search
-    WALMode:    true,   // Enable WAL for concurrency
-    CacheSize:  10000,  // SQLite cache size in pages
 }
 
 store, err := sqlite.NewSqliteStore(dbPath, options)
+
+// For JSON search to work properly, set a converter for the collection's type:
+// System types have built-in converters
+store.SetJSONConverter(collection.GetSystemTypeConverter("Collection"))
+
+// Or use the registry-based factory for dynamic type lookup
+converterFactory := collection.NewRegistryConverterFactory(lookupFunc)
 ```
 
 ## Performance Considerations
