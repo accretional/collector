@@ -1,44 +1,59 @@
 package sqlite
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 
 	pb "github.com/accretional/collector/gen/collector"
 	"github.com/accretional/collector/pkg/collection"
+	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	_ "modernc.org/sqlite" // Using modernc.org/sqlite (cgo-free)
+	_ "github.com/mattn/go-sqlite3"
 )
 
-type SqliteStore struct {
+type Store struct {
 	db            *sql.DB
 	path          string
 	options       collection.Options
+	embedder      collection.Embedder
+	ftsAvailable  bool
 	mu            sync.RWMutex
 	jsonConverter collection.ProtoToJSONConverter // Converts binary proto to JSON for jsontext column
 }
 
-// NewSqliteStore initializes the database and applies schemas.
-func NewSqliteStore(path string, opts collection.Options) (*SqliteStore, error) {
-	// WAL mode + busy_timeout are critical for concurrent access.
+type execContext interface {
+	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
+}
+
+func NewStore(path string, opts collection.Options) (*Store, error) {
+	if opts.EnableVector && opts.Embedder == nil {
+		return nil, fmt.Errorf("embedder required when EnableVector is true")
+	}
+	if opts.EnableVector && opts.VectorDimensions <= 0 {
+		return nil, fmt.Errorf("VectorDimensions must be > 0 when EnableVector is true")
+	}
+
 	dsn := fmt.Sprintf("file:%s?_journal_mode=WAL&_busy_timeout=10000", path)
-	db, err := sql.Open("sqlite", dsn)
+	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open db: %w", err)
 	}
 
-	// Performance Pragmas
+	if opts.EnableVector {
+		sqlite_vec.Auto()
+	}
+
 	pragmas := []string{
 		"PRAGMA synchronous = NORMAL",
 		"PRAGMA foreign_keys = ON",
-		// TODO: Consider enabling auto_vacuum = INCREMENTAL for production.
-		// A background maintenance task should monitor PRAGMA freelist_count
-		// and run PRAGMA incremental_vacuum or VACUUM when bloat > 20%.
 	}
 	for _, p := range pragmas {
 		if _, err := db.Exec(p); err != nil {
@@ -47,25 +62,47 @@ func NewSqliteStore(path string, opts collection.Options) (*SqliteStore, error) 
 		}
 	}
 
-	// Apply Schemas
 	if _, err := db.Exec(collection.DefaultSchema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("default schema failed: %w", err)
 	}
 
-	if opts.EnableJSON {
-		if _, err := db.Exec(collection.JSONSchema); err != nil {
-			// Only ignore "duplicate column" errors (idempotent schema application)
-			// Any other error indicates a real problem that should be surfaced
-			if !strings.Contains(err.Error(), "duplicate column") {
-				db.Close()
-				return nil, fmt.Errorf("json schema failed: %w", err)
-			}
-			// Column already exists - this is fine (idempotent)
+	if _, err := db.Exec(collection.JSONSchema); err != nil {
+		log.Println("JSONSchema already exists")
+	}
+
+	if opts.EnableVector {
+		if _, err := db.Exec(collection.VectorSchema); err != nil {
+			log.Println("VectorSchema already exists")
+		}
+
+		stmt := fmt.Sprintf(`CREATE VIRTUAL TABLE IF NOT EXISTS records_vec USING vec0(vector FLOAT[%d]);`, opts.VectorDimensions)
+		if _, err := db.Exec(stmt); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("create vec0 table: %w", err)
 		}
 	}
 
+	ftsAvailable := false
 	if opts.EnableFTS {
+		// Check if FTS5 is available by trying to create a test table
+		testTx, testErr := db.Begin()
+		if testErr == nil {
+			_, testErr = testTx.Exec("CREATE VIRTUAL TABLE IF NOT EXISTS _fts5_test USING fts5(test)")
+			if testErr == nil {
+				testTx.Exec("DROP TABLE IF EXISTS _fts5_test")
+				testTx.Commit()
+				ftsAvailable = true
+			} else {
+				testTx.Rollback()
+			}
+		}
+
+		if !ftsAvailable {
+			db.Close()
+			return nil, fmt.Errorf("FTS5 is not available but EnableFTS is true. Build with -tags sqlite_fts5 to enable FTS5 support")
+		}
+
 		tx, err := db.Begin()
 		if err != nil {
 			db.Close()
@@ -102,48 +139,64 @@ func NewSqliteStore(path string, opts collection.Options) (*SqliteStore, error) 
 		}
 	}
 
-	return &SqliteStore{db: db, path: path, options: opts}, nil
+	return &Store{
+		db:           db,
+		path:         path,
+		options:      opts,
+		embedder:     opts.Embedder,
+		ftsAvailable: ftsAvailable,
+	}, nil
 }
 
-func (s *SqliteStore) Close() error { return s.db.Close() }
-func (s *SqliteStore) Path() string { return s.path }
+func (s *Store) Close() error {
+	return s.db.Close()
+}
+func (s *Store) Path() string { return s.path }
 
 // SetJSONConverter sets the function used to convert binary proto_data to JSON for the jsontext column.
 // This must be called before CreateRecord/UpdateRecord if EnableJSON is true and proto_data contains binary protobuf.
-func (s *SqliteStore) SetJSONConverter(conv collection.ProtoToJSONConverter) {
+func (s *Store) SetJSONConverter(conv collection.ProtoToJSONConverter) {
 	s.jsonConverter = conv
 }
 
-func (s *SqliteStore) CreateRecord(ctx context.Context, r *pb.CollectionRecord) error {
+func (s *Store) CreateRecord(ctx context.Context, r *pb.CollectionRecord) error {
+	labelsJSON, _ := json.Marshal(r.Metadata.Labels)
+
+	// Determine JSON representation for the jsontext column
+	var jsonText string
+	if s.jsonConverter != nil {
+		converted, err := s.jsonConverter(r.ProtoData)
+		if err != nil {
+			return fmt.Errorf("convert proto to JSON: %w", err)
+		}
+		jsonText = converted
+	} else if json.Valid(r.ProtoData) {
+		jsonText = string(r.ProtoData)
+	} else {
+		jsonText = "{}"
+	}
+
+	var vectorBlob interface{}
+	rawVector, vectorBlob, err := s.reuseOrGenerateVector(ctx, r.Id, jsonText)
+	if err != nil {
+		return err
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	labelsJSON, _ := json.Marshal(r.Metadata.Labels)
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 
-	// If EnableJSON, include jsontext column; otherwise use simpler query
-	if s.options.EnableJSON {
-		// Determine JSON representation for the jsontext column.
-		// Priority:
-		//   1. Use jsonConverter if set (converts binary protobuf to JSON)
-		//   2. Use proto_data directly if it's already valid JSON
-		//   3. Fallback to "{}" - record is stored but JSON field searches won't find it
-		//      (label searches still work since labels column is separate)
-		var jsonText string
-		if s.jsonConverter != nil {
-			converted, err := s.jsonConverter(r.ProtoData)
-			if err != nil {
-				return fmt.Errorf("convert proto to JSON: %w", err)
-			}
-			jsonText = converted
-		} else if json.Valid(r.ProtoData) {
-			jsonText = string(r.ProtoData)
-		} else {
-			jsonText = "{}"
-		}
-
-		query := `INSERT INTO records (id, proto_data, data_uri, created_at, updated_at, labels, jsontext)
-                  VALUES (?, ?, ?, ?, ?, ?, ?)`
-		_, err := s.db.ExecContext(ctx, query,
+	var query string
+	var args []interface{}
+	if s.options.EnableVector {
+		query = `INSERT INTO records (id, proto_data, data_uri, created_at, updated_at, labels, jsontext, vector)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+		args = []interface{}{
 			r.Id,
 			r.ProtoData,
 			r.DataUri,
@@ -151,25 +204,36 @@ func (s *SqliteStore) CreateRecord(ctx context.Context, r *pb.CollectionRecord) 
 			r.Metadata.UpdatedAt.Seconds,
 			string(labelsJSON),
 			jsonText,
-		)
+			vectorBlob,
+		}
+	} else {
+		query = `INSERT INTO records (id, proto_data, data_uri, created_at, updated_at, labels, jsontext)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)`
+		args = []interface{}{
+			r.Id,
+			r.ProtoData,
+			r.DataUri,
+			r.Metadata.CreatedAt.Seconds,
+			r.Metadata.UpdatedAt.Seconds,
+			string(labelsJSON),
+			jsonText,
+		}
+	}
+
+	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
 		return err
 	}
 
-	// Without EnableJSON, don't use jsontext column
-	query := `INSERT INTO records (id, proto_data, data_uri, created_at, updated_at, labels)
-              VALUES (?, ?, ?, ?, ?, ?)`
-	_, err := s.db.ExecContext(ctx, query,
-		r.Id,
-		r.ProtoData,
-		r.DataUri,
-		r.Metadata.CreatedAt.Seconds,
-		r.Metadata.UpdatedAt.Seconds,
-		string(labelsJSON),
-	)
-	return err
+	if s.options.EnableVector && len(rawVector) > 0 {
+		if err := s.upsertVecTable(ctx, tx, r.Id, rawVector); err != nil {
+			return fmt.Errorf("update vector index: %w", err)
+		}
+	}
+
+	return tx.Commit()
 }
 
-func (s *SqliteStore) GetRecord(ctx context.Context, id string) (*pb.CollectionRecord, error) {
+func (s *Store) GetRecord(ctx context.Context, id string) (*pb.CollectionRecord, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -206,7 +270,29 @@ func (s *SqliteStore) GetRecord(ctx context.Context, id string) (*pb.CollectionR
 	return r, nil
 }
 
-func (s *SqliteStore) UpdateRecord(ctx context.Context, r *pb.CollectionRecord) error {
+func (s *Store) UpdateRecord(ctx context.Context, r *pb.CollectionRecord) error {
+	labelsJSON, _ := json.Marshal(r.Metadata.Labels)
+
+	// Determine JSON representation for the jsontext column
+	var jsonText string
+	if s.jsonConverter != nil {
+		converted, err := s.jsonConverter(r.ProtoData)
+		if err != nil {
+			return fmt.Errorf("convert proto to JSON: %w", err)
+		}
+		jsonText = converted
+	} else if json.Valid(r.ProtoData) {
+		jsonText = string(r.ProtoData)
+	} else {
+		jsonText = "{}"
+	}
+
+	var vectorBlob interface{}
+	rawVector, vectorBlob, err := s.reuseOrGenerateVector(ctx, r.Id, jsonText)
+	if err != nil {
+		return err
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -216,43 +302,30 @@ func (s *SqliteStore) UpdateRecord(ctx context.Context, r *pb.CollectionRecord) 
 	}
 	defer tx.Rollback()
 
-	labelsJSON, _ := json.Marshal(r.Metadata.Labels)
-
-	var res sql.Result
-	if s.options.EnableJSON {
-		// Determine JSON representation for the jsontext column (same logic as CreateRecord)
-		var jsonText string
-		if s.jsonConverter != nil {
-			converted, err := s.jsonConverter(r.ProtoData)
-			if err != nil {
-				return fmt.Errorf("convert proto to JSON: %w", err)
-			}
-			jsonText = converted
-		} else if json.Valid(r.ProtoData) {
-			jsonText = string(r.ProtoData)
-		} else {
-			jsonText = "{}"
+	var query string
+	var args []interface{}
+	if s.options.EnableVector {
+		query = `UPDATE records SET proto_data=?, updated_at=?, labels=?, jsontext=?, vector=? WHERE id=?`
+		args = []interface{}{
+			r.ProtoData,
+			r.Metadata.UpdatedAt.Seconds,
+			string(labelsJSON),
+			jsonText,
+			vectorBlob,
+			r.Id,
 		}
-
-		query := `UPDATE records SET proto_data=?, updated_at=?, labels=?, jsontext=? WHERE id=?`
-		res, err = tx.ExecContext(ctx, query,
+	} else {
+		query = `UPDATE records SET proto_data=?, updated_at=?, labels=?, jsontext=? WHERE id=?`
+		args = []interface{}{
 			r.ProtoData,
 			r.Metadata.UpdatedAt.Seconds,
 			string(labelsJSON),
 			jsonText,
 			r.Id,
-		)
-	} else {
-		// Without EnableJSON, don't update jsontext column
-		query := `UPDATE records SET proto_data=?, updated_at=?, labels=? WHERE id=?`
-		res, err = tx.ExecContext(ctx, query,
-			r.ProtoData,
-			r.Metadata.UpdatedAt.Seconds,
-			string(labelsJSON),
-			r.Id,
-		)
+		}
 	}
 
+	res, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
 		return err
 	}
@@ -265,18 +338,46 @@ func (s *SqliteStore) UpdateRecord(ctx context.Context, r *pb.CollectionRecord) 
 		return fmt.Errorf("record not found")
 	}
 
+	if s.options.EnableVector {
+		if len(rawVector) > 0 {
+			if err := s.upsertVecTable(ctx, tx, r.Id, rawVector); err != nil {
+				return fmt.Errorf("update vector index: %w", err)
+			}
+		} else {
+			if err := s.deleteVecEntry(ctx, tx, r.Id); err != nil {
+				return fmt.Errorf("clear vector index: %w", err)
+			}
+		}
+	}
+
 	return tx.Commit()
 }
 
-func (s *SqliteStore) DeleteRecord(ctx context.Context, id string) error {
+func (s *Store) DeleteRecord(ctx context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	_, err := s.db.ExecContext(ctx, "DELETE FROM records WHERE id=?", id)
-	return err
+	// Delete from vec0 and main records table in a transaction
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if s.options.EnableVector {
+		if err := s.deleteVecEntry(ctx, tx, id); err != nil {
+			return fmt.Errorf("delete vector index entry: %w", err)
+		}
+	}
+
+	if _, err := tx.ExecContext(ctx, "DELETE FROM records WHERE id=?", id); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
-func (s *SqliteStore) ListRecords(ctx context.Context, offset, limit int) ([]*pb.CollectionRecord, error) {
+func (s *Store) ListRecords(ctx context.Context, offset, limit int) ([]*pb.CollectionRecord, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -308,8 +409,6 @@ func (s *SqliteStore) ListRecords(ctx context.Context, offset, limit int) ([]*pb
 		}
 		if lJSON != "" {
 			if err := json.Unmarshal([]byte(lJSON), &r.Metadata.Labels); err != nil {
-				// Log but don't fail - labels are supplementary data
-				// Record ID helps debugging
 				r.Metadata.Labels = map[string]string{"_parse_error": err.Error()}
 			}
 		}
@@ -322,134 +421,18 @@ func (s *SqliteStore) ListRecords(ctx context.Context, offset, limit int) ([]*pb
 	return items, nil
 }
 
-func (s *SqliteStore) CountRecords(ctx context.Context) (int64, error) {
+func (s *Store) CountRecords(ctx context.Context) (int64, error) {
 	var c int64
 	err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM records").Scan(&c)
 	return c, err
 }
 
-func (s *SqliteStore) Search(ctx context.Context, q *collection.SearchQuery) ([]*collection.SearchResult, error) {
-	// Validate that EnableJSON was set if JSON features are being used
-	requiresJSON := len(q.Filters) > 0 || len(q.LabelFilters) > 0 || q.OrderBy != ""
-	if requiresJSON && !s.options.EnableJSON {
-		return nil, fmt.Errorf("search with filters, label filters, or ordering requires EnableJSON option; store was created without EnableJSON")
-	}
-
-	var query strings.Builder
-	var args []interface{}
-	var whereClauses []string
-
-	// Base query
-	query.WriteString(`SELECT r.id, r.proto_data `)
-	if q.FullText != "" {
-		query.WriteString(`, bm25(records_fts) as score `)
-	}
-	query.WriteString(`FROM records r `)
-	if q.FullText != "" {
-		query.WriteString(`JOIN records_fts fts ON r.rowid = fts.rowid `)
-	}
-
-	// Full-text search
-	if q.FullText != "" {
-		whereClauses = append(whereClauses, `records_fts MATCH ?`)
-		args = append(args, q.FullText)
-	}
-
-	// JSON filters
-	for key, filter := range q.Filters {
-		// JSON path needs to be properly quoted for keys with dots.
-		path := `$.` + key
-
-		switch filter.Operator {
-		case collection.OpExists:
-			whereClauses = append(whereClauses, `json_extract(r.jsontext, ?) IS NOT NULL`)
-			args = append(args, path)
-		case collection.OpNotExists:
-			whereClauses = append(whereClauses, `json_extract(r.jsontext, ?) IS NULL`)
-			args = append(args, path)
-		case collection.OpContains:
-			whereClauses = append(whereClauses, `json_extract(r.jsontext, ?) LIKE ?`)
-			args = append(args, path, "%"+fmt.Sprintf("%v", filter.Value)+"%")
-		default:
-			whereClauses = append(whereClauses, fmt.Sprintf(`json_extract(r.jsontext, ?) %s ?`, filter.Operator))
-			args = append(args, path, filter.Value)
-		}
-	}
-
-	// Label filters (from CollectionRecord.Metadata.Labels)
-	for key, value := range q.LabelFilters {
-		// Labels are stored as JSON in labels column: {"key":"value"}
-		// Use json_each() to filter by label key-value pairs
-		// This handles all key types including those with special characters (dots, quotes, brackets)
-		whereClauses = append(whereClauses, `EXISTS (SELECT 1 FROM json_each(r.labels) WHERE key = ? AND value = ?)`)
-		args = append(args, key, value)
-	}
-
-	// Append WHERE clauses
-	if len(whereClauses) > 0 {
-		query.WriteString("WHERE " + strings.Join(whereClauses, " AND "))
-	}
-
-	// Ordering
-	if q.OrderBy != "" {
-		order := "ASC"
-		if !q.Ascending {
-			order = "DESC"
-		}
-		query.WriteString(fmt.Sprintf(` ORDER BY json_extract(r.jsontext, '$.%s') %s`, q.OrderBy, order))
-	} else if q.FullText != "" {
-		// Default to score for FTS
-		query.WriteString(" ORDER BY score")
-	}
-
-	// Pagination
-	if q.Limit > 0 {
-		query.WriteString(" LIMIT ?")
-		args = append(args, q.Limit)
-	}
-	if q.Offset > 0 {
-		query.WriteString(" OFFSET ?")
-		args = append(args, q.Offset)
-	}
-
-	rows, err := s.db.QueryContext(ctx, query.String(), args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var results []*collection.SearchResult
-	for rows.Next() {
-		var r pb.CollectionRecord
-		var score sql.NullFloat64
-
-		var scanArgs = []any{&r.Id, &r.ProtoData}
-		if q.FullText != "" {
-			scanArgs = append(scanArgs, &score)
-		}
-
-		if err := rows.Scan(scanArgs...); err != nil {
-			return nil, err
-		}
-
-		searchResult := &collection.SearchResult{Record: &r}
-		if score.Valid {
-			searchResult.Score = score.Float64
-		}
-		results = append(results, searchResult)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate search results: %w", err)
-	}
-	return results, nil
-}
-
-func (s *SqliteStore) Checkpoint(ctx context.Context) error {
+func (s *Store) Checkpoint(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)")
 	return err
 }
 
-func (s *SqliteStore) ExecuteRaw(q string, args ...interface{}) error {
+func (s *Store) ExecuteRaw(q string, args ...interface{}) error {
 	_, err := s.db.Exec(q, args...)
 	return err
 }
@@ -457,30 +440,15 @@ func (s *SqliteStore) ExecuteRaw(q string, args ...interface{}) error {
 // Backup creates an online backup of the database to the specified path.
 // This method is WAL-friendly and allows concurrent reads/writes during backup.
 // It uses SQLite's online backup mechanism through a dedicated connection.
-func (s *SqliteStore) Backup(ctx context.Context, destPath string) error {
+func (s *Store) Backup(ctx context.Context, destPath string) error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	// Open destination database
-	destDSN := fmt.Sprintf("file:%s?_journal_mode=WAL", destPath)
-	destDB, err := sql.Open("sqlite", destDSN)
-	if err != nil {
-		return fmt.Errorf("failed to open destination db: %w", err)
-	}
-	defer destDB.Close()
-
-	// Get underlying connections for backup
-	// We'll use ATTACH DATABASE and then copy the data
-	// This is a workaround since database/sql doesn't expose the backup API directly
-
-	// For modernc.org/sqlite, we can use VACUUM INTO which works well with WAL
-	// First, ensure WAL checkpoint to get a consistent state
 	if _, err := s.db.ExecContext(ctx, "PRAGMA wal_checkpoint(PASSIVE)"); err != nil {
 		// Non-fatal, continue anyway
 	}
 
 	// Use VACUUM INTO for the backup - this creates a consistent snapshot
-	// Even with WAL mode, VACUUM INTO creates a complete consistent copy
 	// Escape single quotes in path to prevent SQL injection
 	escapedPath := strings.ReplaceAll(destPath, "'", "''")
 	query := fmt.Sprintf("VACUUM INTO '%s'", escapedPath)
@@ -494,7 +462,7 @@ func (s *SqliteStore) Backup(ctx context.Context, destPath string) error {
 // BackupOnline creates an online backup using incremental page copying.
 // This minimizes lock time by copying pages in small batches.
 // Best for very large databases where VACUUM INTO might take too long.
-func (s *SqliteStore) BackupOnline(ctx context.Context, destPath string, pagesBatchSize int) error {
+func (s *Store) BackupOnline(ctx context.Context, destPath string, pagesBatchSize int) error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -502,17 +470,10 @@ func (s *SqliteStore) BackupOnline(ctx context.Context, destPath string, pagesBa
 		pagesBatchSize = 100 // Default: copy 100 pages at a time
 	}
 
-	// Open destination database
-	destDSN := fmt.Sprintf("file:%s?_journal_mode=WAL", destPath)
-	destDB, err := sql.Open("sqlite", destDSN)
-	if err != nil {
-		return fmt.Errorf("failed to open destination db: %w", err)
-	}
-	defer destDB.Close()
-
-	// Attach the destination database
 	// Escape single quotes in path to prevent SQL injection
 	escapedPath := strings.ReplaceAll(destPath, "'", "''")
+
+	// Attach the destination database (creates file if it doesn't exist)
 	attachQuery := fmt.Sprintf("ATTACH DATABASE '%s' AS backup", escapedPath)
 	if _, err := s.db.ExecContext(ctx, attachQuery); err != nil {
 		return fmt.Errorf("failed to attach backup db: %w", err)
@@ -533,12 +494,9 @@ func (s *SqliteStore) BackupOnline(ctx context.Context, destPath string, pagesBa
 	for rows.Next() {
 		var name string
 		if err := rows.Scan(&name); err != nil {
-			return fmt.Errorf("scan table name: %w", err)
+			return err
 		}
 		tables = append(tables, name)
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterate tables: %w", err)
 	}
 
 	// Copy each table
@@ -552,11 +510,10 @@ func (s *SqliteStore) BackupOnline(ctx context.Context, destPath string, pagesBa
 			return fmt.Errorf("failed to get schema for %s: %w", table, err)
 		}
 
-		// Create table in backup database using attached database syntax
-		// Replace the table name with backup.tablename in the CREATE statement
-		createSQL := strings.Replace(sql, fmt.Sprintf("CREATE TABLE %s", table), fmt.Sprintf("CREATE TABLE backup.%s", table), 1)
-		if _, err := s.db.ExecContext(ctx, createSQL); err != nil {
-			// Table might already exist, ignore error
+		// Create table in backup (modify CREATE TABLE to use backup schema)
+		backupSQL := strings.Replace(sql, "CREATE TABLE ", "CREATE TABLE IF NOT EXISTS backup.", 1)
+		if _, err := s.db.ExecContext(ctx, backupSQL); err != nil {
+			return fmt.Errorf("failed to create table %s in backup: %w", table, err)
 		}
 
 		// Copy data in batches (for large tables)
@@ -577,18 +534,318 @@ func (s *SqliteStore) BackupOnline(ctx context.Context, destPath string, pagesBa
 	defer idxRows.Close()
 
 	for idxRows.Next() {
-		var sql string
-		if err := idxRows.Scan(&sql); err != nil {
-			continue // Skip malformed index entries
+		var idxSQL string
+		if err := idxRows.Scan(&idxSQL); err != nil {
+			continue
 		}
-		destDB.ExecContext(ctx, sql) // Ignore errors, index might exist
+		// Modify index to use backup schema
+		backupIdxSQL := strings.Replace(idxSQL, " ON ", " ON backup.", 1)
+		if _, err := s.db.ExecContext(ctx, backupIdxSQL); err != nil {
+			log.Printf("failed to copy index: %v", err)
+		}
 	}
-	// Note: Not checking idxRows.Err() as index copying is best-effort
 
 	return nil
 }
 
-func (s *SqliteStore) ReIndex(ctx context.Context) error {
+func (s *Store) Search(ctx context.Context, q *collection.SearchQuery) ([]*collection.SearchResult, error) {
+	hasVector := len(q.Vector) > 0 && s.options.EnableVector
+	hasFTS := q.FullText != "" && s.ftsAvailable
+
+	builder := &searchQueryBuilder{
+		store:     s,
+		query:     q,
+		hasVector: hasVector,
+		hasFTS:    hasFTS,
+	}
+
+	switch {
+	case hasVector && hasFTS:
+		return builder.buildHybrid(ctx)
+	case hasVector:
+		return builder.buildVector(ctx)
+	case hasFTS:
+		return builder.buildFTS(ctx)
+	default:
+		return builder.buildScalar(ctx)
+	}
+}
+
+type searchQueryBuilder struct {
+	store        *Store
+	query        *collection.SearchQuery
+	hasVector    bool
+	hasFTS       bool
+	querySQL     strings.Builder
+	args         []interface{}
+	whereClauses []string
+}
+
+func (b *searchQueryBuilder) buildHybrid(ctx context.Context) ([]*collection.SearchResult, error) {
+	if len(b.query.Vector) != b.store.options.VectorDimensions {
+		return nil, fmt.Errorf("query vector dimension mismatch: got %d, expected %d",
+			len(b.query.Vector), b.store.options.VectorDimensions)
+	}
+
+	queryVector, err := sqlite_vec.SerializeFloat32(b.query.Vector)
+	if err != nil {
+		return nil, fmt.Errorf("serialize query vector: %w", err)
+	}
+
+	limit := b.getKNNLimit()
+
+	b.selectFields(`r.id, r.proto_data, r.data_uri, r.created_at, r.updated_at, r.labels,
+                    v.distance, bm25(records_fts) as fts_score`)
+	b.fromClause(`records_vec v
+                  JOIN records r ON r.rowid = v.rowid
+                  JOIN records_fts ON r.rowid = records_fts.rowid`)
+
+	b.whereClauses = []string{
+		`v.vector MATCH ?`,
+		`k = ?`,
+		`records_fts MATCH ?`,
+	}
+	b.args = append(b.args, queryVector, limit, b.query.FullText)
+
+	b.addSimilarityThreshold()
+	b.addFilters()
+	b.buildWhere()
+	b.orderBy(`v.distance, fts_score`, `json_extract(r.jsontext, '$.%s') %s, v.distance, fts_score`)
+	b.addPagination(true)
+
+	return b.store.executeSearchQuery(ctx, b.querySQL.String(), b.args, true, true)
+}
+
+func (b *searchQueryBuilder) buildVector(ctx context.Context) ([]*collection.SearchResult, error) {
+	if len(b.query.Vector) != b.store.options.VectorDimensions {
+		return nil, fmt.Errorf("query vector dimension mismatch: got %d, expected %d",
+			len(b.query.Vector), b.store.options.VectorDimensions)
+	}
+
+	queryVector, err := sqlite_vec.SerializeFloat32(b.query.Vector)
+	if err != nil {
+		return nil, fmt.Errorf("serialize query vector: %w", err)
+	}
+
+	limit := b.getKNNLimit()
+
+	b.selectFields(`r.id, r.proto_data, r.data_uri, r.created_at, r.updated_at, r.labels, v.distance`)
+	b.fromClause(`records_vec v JOIN records r ON r.rowid = v.rowid`)
+
+	b.whereClauses = []string{
+		`v.vector MATCH ?`,
+		`k = ?`,
+	}
+	b.args = append(b.args, queryVector, limit)
+
+	b.addSimilarityThreshold()
+	b.addFilters()
+	b.buildWhere()
+	b.orderBy(`v.distance`, `json_extract(r.jsontext, '$.%s') %s, v.distance`)
+	b.addPagination(true)
+
+	return b.store.executeSearchQuery(ctx, b.querySQL.String(), b.args, true, false)
+}
+
+func (b *searchQueryBuilder) buildFTS(ctx context.Context) ([]*collection.SearchResult, error) {
+	if !b.store.ftsAvailable {
+		return nil, fmt.Errorf("full-text search requested but FTS5 is not available. Build with -tags sqlite_fts5 to enable FTS5 support")
+	}
+
+	b.selectFields(`r.id, r.proto_data, r.data_uri, r.created_at, r.updated_at, r.labels,
+                    bm25(records_fts) as score`)
+	b.fromClause(`records r JOIN records_fts ON r.rowid = records_fts.rowid`)
+
+	b.whereClauses = []string{`records_fts MATCH ?`}
+	b.args = append(b.args, b.query.FullText)
+
+	b.addFilters()
+	b.buildWhere()
+	b.orderBy(`score`, `json_extract(r.jsontext, '$.%s') %s, score`)
+	b.addPagination(false)
+
+	return b.store.executeSearchQuery(ctx, b.querySQL.String(), b.args, false, true)
+}
+
+func (b *searchQueryBuilder) buildScalar(ctx context.Context) ([]*collection.SearchResult, error) {
+	b.selectFields(`r.id, r.proto_data, r.data_uri, r.created_at, r.updated_at, r.labels`)
+	b.fromClause(`records r`)
+
+	b.whereClauses = []string{}
+	b.addFilters()
+	b.buildWhere()
+	b.orderBy(`r.created_at DESC`, `json_extract(r.jsontext, '$.%s') %s`)
+	b.addPagination(false)
+
+	return b.store.executeSearchQuery(ctx, b.querySQL.String(), b.args, false, false)
+}
+
+func (b *searchQueryBuilder) selectFields(fields string) {
+	b.querySQL.WriteString("SELECT " + fields + " ")
+}
+
+func (b *searchQueryBuilder) fromClause(clause string) {
+	b.querySQL.WriteString("FROM " + clause + " ")
+}
+
+func (b *searchQueryBuilder) getKNNLimit() int {
+	limit := b.query.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	return limit
+}
+
+func (b *searchQueryBuilder) addSimilarityThreshold() {
+	if b.query.SimilarityThreshold > 0 {
+		maxDistance := (1 / float64(b.query.SimilarityThreshold)) - 1
+		b.whereClauses = append(b.whereClauses, `v.distance <= ?`)
+		b.args = append(b.args, maxDistance)
+	}
+}
+
+func (b *searchQueryBuilder) addFilters() {
+	jsonFilters, jsonArgs := b.store.buildJSONFilters(b.query.Filters)
+	b.whereClauses = append(b.whereClauses, jsonFilters...)
+	b.args = append(b.args, jsonArgs...)
+
+	labelFilters, labelArgs := b.store.buildLabelFilters(b.query.LabelFilters)
+	b.whereClauses = append(b.whereClauses, labelFilters...)
+	b.args = append(b.args, labelArgs...)
+}
+
+func (b *searchQueryBuilder) buildWhere() {
+	if len(b.whereClauses) > 0 {
+		b.querySQL.WriteString("WHERE " + strings.Join(b.whereClauses, " AND ") + " ")
+	}
+}
+
+func (b *searchQueryBuilder) orderBy(defaultOrder, customOrderFmt string) {
+	if b.query.OrderBy != "" {
+		order := "ASC"
+		if !b.query.Ascending {
+			order = "DESC"
+		}
+		b.querySQL.WriteString(fmt.Sprintf("ORDER BY "+customOrderFmt+" ", b.query.OrderBy, order))
+	} else {
+		b.querySQL.WriteString("ORDER BY " + defaultOrder + " ")
+	}
+}
+
+func (b *searchQueryBuilder) addPagination(vectorSearch bool) {
+	if vectorSearch {
+		// Vector searches: OFFSET only (LIMIT is handled by KNN k parameter)
+		if b.query.Offset > 0 {
+			b.querySQL.WriteString("OFFSET ? ")
+			b.args = append(b.args, b.query.Offset)
+		}
+	} else {
+		// Non-vector searches: LIMIT and OFFSET
+		if b.query.Limit > 0 {
+			b.querySQL.WriteString("LIMIT ? ")
+			b.args = append(b.args, b.query.Limit)
+		}
+		if b.query.Offset > 0 {
+			b.querySQL.WriteString("OFFSET ? ")
+			b.args = append(b.args, b.query.Offset)
+		}
+	}
+}
+
+func (s *Store) buildJSONFilters(filters map[string]collection.Filter) ([]string, []interface{}) {
+	var clauses []string
+	var args []interface{}
+	for key, filter := range filters {
+		path := `$.` + key
+		switch filter.Operator {
+		case collection.OpExists:
+			clauses = append(clauses, `json_extract(r.jsontext, ?) IS NOT NULL`)
+			args = append(args, path)
+		case collection.OpNotExists:
+			clauses = append(clauses, `json_extract(r.jsontext, ?) IS NULL`)
+			args = append(args, path)
+		case collection.OpContains:
+			clauses = append(clauses, `json_extract(r.jsontext, ?) LIKE ?`)
+			args = append(args, path, "%"+fmt.Sprintf("%v", filter.Value)+"%")
+		default:
+			clauses = append(clauses, fmt.Sprintf(`json_extract(r.jsontext, ?) %s ?`, filter.Operator))
+			args = append(args, path, filter.Value)
+		}
+	}
+	return clauses, args
+}
+
+func (s *Store) buildLabelFilters(labelFilters map[string]string) ([]string, []interface{}) {
+	var clauses []string
+	var args []interface{}
+	for key, value := range labelFilters {
+		clauses = append(clauses, fmt.Sprintf(`json_extract(r.labels, '$.%s') = ?`, key))
+		args = append(args, value)
+	}
+	return clauses, args
+}
+
+func (s *Store) executeSearchQuery(ctx context.Context, query string, args []interface{},
+	hasVector, hasFTS bool) ([]*collection.SearchResult, error) {
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []*collection.SearchResult
+	for rows.Next() {
+		var r pb.CollectionRecord
+		var dataURI sql.NullString
+		var createdAt, updatedAt int64
+		var labelsJSON string
+		var distance sql.NullFloat64
+		var score sql.NullFloat64
+
+		scanArgs := []interface{}{&r.Id, &r.ProtoData, &dataURI, &createdAt, &updatedAt, &labelsJSON}
+
+		if hasVector {
+			scanArgs = append(scanArgs, &distance)
+		}
+		if hasFTS {
+			scanArgs = append(scanArgs, &score)
+		}
+
+		if err := rows.Scan(scanArgs...); err != nil {
+			return nil, err
+		}
+
+		r.Metadata = &pb.Metadata{
+			CreatedAt: &timestamppb.Timestamp{Seconds: createdAt},
+			UpdatedAt: &timestamppb.Timestamp{Seconds: updatedAt},
+		}
+		if dataURI.Valid {
+			r.DataUri = dataURI.String
+		}
+		if labelsJSON != "" {
+			_ = json.Unmarshal([]byte(labelsJSON), &r.Metadata.Labels)
+		}
+
+		result := &collection.SearchResult{Record: &r}
+		if hasVector && distance.Valid {
+			result.Distance = distance.Float64
+		}
+		if hasFTS && score.Valid {
+			result.Score = score.Float64
+		}
+
+		results = append(results, result)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return results, nil
+}
+
+func (s *Store) ReIndex(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -598,13 +855,241 @@ func (s *SqliteStore) ReIndex(ctx context.Context) error {
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.ExecContext(ctx, "DELETE FROM records_fts"); err != nil {
-		return err
+	if s.ftsAvailable {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM records_fts"); err != nil {
+			return err
+		}
+
+		if _, err := tx.ExecContext(ctx, "INSERT INTO records_fts(rowid, content) SELECT rowid, jsontext FROM records"); err != nil {
+			return err
+		}
 	}
 
-	if _, err := tx.ExecContext(ctx, "INSERT INTO records_fts(rowid, content) SELECT rowid, jsontext FROM records"); err != nil {
-		return err
+	if s.options.EnableVector {
+		if err := s.rebuildVectorIndex(ctx, tx); err != nil {
+			return err
+		}
 	}
 
 	return tx.Commit()
+}
+
+// Vector helper methods
+
+func (s *Store) upsertVecTable(ctx context.Context, tx execContext, id string, vector []float32) error {
+	if !s.options.EnableVector {
+		return fmt.Errorf("vector operations not available: vectors not enabled")
+	}
+	if len(vector) != s.options.VectorDimensions {
+		return fmt.Errorf("vector dimension mismatch: got %d, expected %d", len(vector), s.options.VectorDimensions)
+	}
+
+	serialized, err := sqlite_vec.SerializeFloat32(vector)
+	if err != nil {
+		return fmt.Errorf("serialize vector: %w", err)
+	}
+
+	// vec0 virtual tables does not support INSERT OR REPLACE properly
+	// Use delete-then-insert approach
+	if tx != nil {
+		_, _ = tx.ExecContext(ctx, `DELETE FROM records_vec WHERE rowid IN (SELECT rowid FROM records WHERE id = ?)`, id)
+		_, err := tx.ExecContext(ctx, `INSERT INTO records_vec(rowid, vector) SELECT rowid, ? FROM records WHERE id = ?`, serialized, id)
+		return err
+	}
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM records_vec WHERE rowid IN (SELECT rowid FROM records WHERE id = ?)`, id)
+	_, err = s.db.ExecContext(ctx, `INSERT INTO records_vec(rowid, vector) SELECT rowid, ? FROM records WHERE id = ?`, serialized, id)
+	return err
+}
+
+func (s *Store) deleteVecEntry(ctx context.Context, tx execContext, id string) error {
+	if !s.options.EnableVector {
+		return fmt.Errorf("vector operations not available: vectors not enabled")
+	}
+	if tx != nil {
+		_, err := tx.ExecContext(ctx, `DELETE FROM records_vec WHERE rowid IN (SELECT rowid FROM records WHERE id = ?)`, id)
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `DELETE FROM records_vec WHERE rowid IN (SELECT rowid FROM records WHERE id = ?)`, id)
+	return err
+}
+
+func (s *Store) reuseOrGenerateVector(ctx context.Context, id string, jsonText string) ([]float32, interface{}, error) {
+	if !s.options.EnableVector {
+		return nil, nil, nil
+	}
+
+	var existingJSON sql.NullString
+	var existingVector []byte
+	err := s.db.QueryRowContext(ctx, "SELECT jsontext, vector FROM records WHERE id = ?", id).Scan(&existingJSON, &existingVector)
+	if err == nil && existingJSON.Valid && existingJSON.String == jsonText && len(existingVector) > 0 {
+		if v, err := deserializeVector(existingVector); err == nil && len(v) == s.options.VectorDimensions {
+			return v, existingVector, nil
+		}
+	}
+
+	return s.generateVector(ctx, jsonText)
+}
+
+func (s *Store) generateVector(ctx context.Context, jsonText string) ([]float32, interface{}, error) {
+	if !s.options.EnableVector || s.embedder == nil {
+		return nil, nil, nil
+	}
+
+	text := extractTextFromJSON(jsonText)
+	if text == "" {
+		return nil, nil, nil
+	}
+
+	vector, err := s.embedder.Embed(ctx, text)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to generate vector: %w", err)
+	}
+	if len(vector) != s.options.VectorDimensions {
+		return nil, nil, fmt.Errorf("embedder produced %d dims, expected %d", len(vector), s.options.VectorDimensions)
+	}
+
+	blob, err := serializeVector(vector)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to serialize vector: %w", err)
+	}
+
+	return vector, blob, nil
+}
+
+func serializeVector(v []float32) ([]byte, error) {
+	if len(v) == 0 {
+		return nil, fmt.Errorf("vector cannot be empty")
+	}
+
+	buf := new(bytes.Buffer)
+	if err := binary.Write(buf, binary.LittleEndian, int32(len(v))); err != nil {
+		return nil, fmt.Errorf("failed to write dimension count: %w", err)
+	}
+
+	if err := binary.Write(buf, binary.LittleEndian, v); err != nil {
+		return nil, fmt.Errorf("failed to write vector data: %w", err)
+	}
+
+	return buf.Bytes(), nil
+}
+
+func deserializeVector(blob []byte) ([]float32, error) {
+	if len(blob) < 4 {
+		return nil, fmt.Errorf("invalid vector blob: too short")
+	}
+
+	buf := bytes.NewReader(blob)
+
+	var dimCount int32
+	if err := binary.Read(buf, binary.LittleEndian, &dimCount); err != nil {
+		return nil, fmt.Errorf("failed to read dimension count: %w", err)
+	}
+
+	if dimCount <= 0 {
+		return nil, fmt.Errorf("invalid dimension count: %d", dimCount)
+	}
+
+	expectedSize := 4 + int(dimCount)*4
+	if len(blob) != expectedSize {
+		return nil, fmt.Errorf("invalid vector blob: size mismatch, expected %d bytes, got %d", expectedSize, len(blob))
+	}
+
+	vector := make([]float32, dimCount)
+	if err := binary.Read(buf, binary.LittleEndian, &vector); err != nil {
+		return nil, fmt.Errorf("failed to read vector data: %w", err)
+	}
+
+	return vector, nil
+}
+
+func (s *Store) rebuildVectorIndex(ctx context.Context, tx *sql.Tx) error {
+	if !s.options.EnableVector {
+		return fmt.Errorf("vector operations not available: vectors not enabled")
+	}
+
+	// sqlite-vec (vec0) does not build a separate ANN structure yet; this simply
+	// refreshes stored vectors and keeps the vec0 table in sync with records.
+	rows, err := tx.QueryContext(ctx, "SELECT id, jsontext FROM records WHERE jsontext IS NOT NULL")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	if _, err := tx.ExecContext(ctx, "DELETE FROM records_vec"); err != nil {
+		return fmt.Errorf("reset vector index: %w", err)
+	}
+
+	updateStmt, err := tx.PrepareContext(ctx, "UPDATE records SET vector = ? WHERE id = ?")
+	if err != nil {
+		return err
+	}
+	defer updateStmt.Close()
+
+	for rows.Next() {
+		var id string
+		var jsonText string
+		if err := rows.Scan(&id, &jsonText); err != nil {
+			return err
+		}
+		vector, vectorBlob, err := s.reuseOrGenerateVector(ctx, id, jsonText)
+		if err != nil {
+			if _, err := updateStmt.ExecContext(ctx, nil, id); err != nil {
+				return err
+			}
+			continue
+		}
+
+		if _, err := updateStmt.ExecContext(ctx, vectorBlob, id); err != nil {
+			return err
+		}
+
+		if len(vector) > 0 {
+			if err := s.upsertVecTable(ctx, tx, id, vector); err != nil {
+				return fmt.Errorf("reindex vector entry: %w", err)
+			}
+		} else {
+			if err := s.deleteVecEntry(ctx, tx, id); err != nil {
+				return fmt.Errorf("clear vector entry: %w", err)
+			}
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func extractTextFromJSON(jsonText string) string {
+	if jsonText == "" {
+		return ""
+	}
+
+	var data map[string]interface{}
+	if err := json.Unmarshal([]byte(jsonText), &data); err != nil {
+		return ""
+	}
+
+	var parts []string
+	var extractStrings func(interface{})
+	extractStrings = func(v interface{}) {
+		switch val := v.(type) {
+		case string:
+			if val != "" {
+				parts = append(parts, val)
+			}
+		case map[string]interface{}:
+			for _, item := range val {
+				extractStrings(item)
+			}
+		case []interface{}:
+			for _, item := range val {
+				extractStrings(item)
+			}
+		}
+	}
+
+	extractStrings(data)
+	return strings.Join(parts, " ")
 }

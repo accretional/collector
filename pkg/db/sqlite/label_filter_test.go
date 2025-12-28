@@ -20,7 +20,7 @@ func TestSearch_LabelFilters(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	dbPath := filepath.Join(tmpDir, "test.db")
-	store, err := NewSqliteStore(dbPath, collection.Options{EnableJSON: true})
+	store, err := NewStore(dbPath, collection.Options{EnableJSON: true})
 	if err != nil {
 		t.Fatal(err)
 	}

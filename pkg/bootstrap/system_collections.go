@@ -105,7 +105,7 @@ func (sc *SystemCollections) bootstrapCollectionRegistry(ctx context.Context) er
 		EnableFTS:  true,
 		EnableJSON: true,
 	}
-	store, err := sqlite.NewSqliteStore(dbPath, storeOpts)
+	store, err := sqlite.NewStore(dbPath, storeOpts)
 	if err != nil {
 		return fmt.Errorf("init sqlite: %w", err)
 	}
@@ -200,7 +200,7 @@ func (sc *SystemCollections) bootstrapTypeRegistry(ctx context.Context) error {
 		EnableFTS:  true,
 		EnableJSON: true,
 	}
-	store, err := sqlite.NewSqliteStore(dbPath, storeOpts)
+	store, err := sqlite.NewStore(dbPath, storeOpts)
 	if err != nil {
 		return fmt.Errorf("init sqlite: %w", err)
 	}
@@ -278,7 +278,7 @@ func (sc *SystemCollections) bootstrapConnections(ctx context.Context) error {
 		EnableFTS:  true,
 		EnableJSON: true,
 	}
-	store, err := sqlite.NewSqliteStore(dbPath, storeOpts)
+	store, err := sqlite.NewStore(dbPath, storeOpts)
 	if err != nil {
 		return fmt.Errorf("init sqlite: %w", err)
 	}
@@ -349,7 +349,7 @@ func (sc *SystemCollections) bootstrapAudit(ctx context.Context) error {
 		EnableFTS:  true,
 		EnableJSON: true,
 	}
-	store, err := sqlite.NewSqliteStore(dbPath, storeOpts)
+	store, err := sqlite.NewStore(dbPath, storeOpts)
 	if err != nil {
 		return fmt.Errorf("init sqlite: %w", err)
 	}
@@ -421,7 +421,7 @@ func (sc *SystemCollections) bootstrapLogs(ctx context.Context) error {
 		EnableFTS:  true,
 		EnableJSON: true,
 	}
-	store, err := sqlite.NewSqliteStore(dbPath, storeOpts)
+	store, err := sqlite.NewStore(dbPath, storeOpts)
 	if err != nil {
 		return fmt.Errorf("init sqlite: %w", err)
 	}

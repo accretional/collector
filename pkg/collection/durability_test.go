@@ -14,7 +14,7 @@ import (
 
 	pb "github.com/accretional/collector/gen/collector"
 	"github.com/accretional/collector/pkg/collection"
-	"github.com/accretional/collector/pkg/db/sqlite"
+	"github.com/accretional/collector/pkg/db"
 )
 
 func TestWAL_Checkpoint(t *testing.T) {
@@ -356,7 +356,11 @@ func TestRecovery_AfterAbnormalClose(t *testing.T) {
 
 	// 2. Initialize manually so we can simulate abnormal close
 	dbPath := filepath.Join(tempDir, "recovery.db")
-	store, err := sqlite.NewSqliteStore(dbPath, collection.Options{EnableJSON: true})
+	store, err := db.NewStore(context.Background(), db.Config{
+		Type:       db.DBTypeSQLite,
+		SQLitePath: dbPath,
+		Options:    collection.Options{EnableJSON: true},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -390,7 +394,11 @@ func TestRecovery_AfterAbnormalClose(t *testing.T) {
 	coll.Close()
 
 	// 5. Reopen (Recovery)
-	newStore, err := sqlite.NewSqliteStore(dbPath, collection.Options{EnableJSON: true})
+	newStore, err := db.NewStore(context.Background(), db.Config{
+		Type:       db.DBTypeSQLite,
+		SQLitePath: dbPath,
+		Options:    collection.Options{EnableJSON: true},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -437,7 +445,11 @@ func TestRecovery_FTSIndexConsistency(t *testing.T) {
 	dbPath := filepath.Join(tempDir, "fts.db")
 	opts := collection.Options{EnableFTS: true, EnableJSON: true}
 
-	store, _ := sqlite.NewSqliteStore(dbPath, opts)
+	store, _ := db.NewStore(context.Background(), db.Config{
+		Type:       db.DBTypeSQLite,
+		SQLitePath: dbPath,
+		Options:    opts,
+	})
 	fs, _ := collection.NewLocalFileSystem(filepath.Join(tempDir, "files"))
 	proto := &pb.Collection{Namespace: "fts", Name: "test"}
 
@@ -461,7 +473,11 @@ func TestRecovery_FTSIndexConsistency(t *testing.T) {
 	coll.Close()
 
 	// Reopen
-	newStore, _ := sqlite.NewSqliteStore(dbPath, opts)
+	newStore, _ := db.NewStore(context.Background(), db.Config{
+		Type:       db.DBTypeSQLite,
+		SQLitePath: dbPath,
+		Options:    opts,
+	})
 	reopened, err := collection.NewCollection(proto, newStore, fs)
 	if err != nil {
 		t.Fatalf("failed to reopen collection: %v", err)
@@ -757,7 +773,11 @@ func TestMetadataConsistency(t *testing.T) {
 	ctx := context.Background()
 
 	dbPath := filepath.Join(tempDir, "meta.db")
-	store, _ := sqlite.NewSqliteStore(dbPath, collection.Options{EnableJSON: true})
+	store, _ := db.NewStore(context.Background(), db.Config{
+		Type:       db.DBTypeSQLite,
+		SQLitePath: dbPath,
+		Options:    collection.Options{EnableJSON: true},
+	})
 	fs, _ := collection.NewLocalFileSystem(filepath.Join(tempDir, "files"))
 
 	proto := &pb.Collection{
@@ -785,7 +805,11 @@ func TestMetadataConsistency(t *testing.T) {
 	coll.Close()
 
 	// Reopen
-	newStore, _ := sqlite.NewSqliteStore(dbPath, collection.Options{EnableJSON: true})
+	newStore, _ := db.NewStore(context.Background(), db.Config{
+		Type:       db.DBTypeSQLite,
+		SQLitePath: dbPath,
+		Options:    collection.Options{EnableJSON: true},
+	})
 	reopened, err := collection.NewCollection(proto, newStore, fs)
 	if err != nil {
 		t.Fatalf("failed to reopen: %v", err)

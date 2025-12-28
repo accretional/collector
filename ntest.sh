@@ -37,17 +37,17 @@ go run cmd/main.go
 
 # 6. Run Tests
 echo "🧪 Running tests..."
-go test -v ./pkg/collection/ -run Durability
-go test -v ./pkg/collection/ -run Recovery
-go test -v ./pkg/collection/ -run Concurrent
-go test -v ./pkg/collection/ -run Stress
+go test -tags sqlite_fts5 -v ./pkg/collection/ -run Durability
+go test -tags sqlite_fts5 -v ./pkg/collection/ -run Recovery
+go test -tags sqlite_fts5 -v ./pkg/collection/ -run Concurrent
+go test -tags sqlite_fts5 -v ./pkg/collection/ -run Stress
 
 # Run with race detector
-go test -race -v ./pkg/collection/ -run Concurrent
+go test -tags sqlite_fts5 -race -v ./pkg/collection/ -run Concurrent
 
 # Run benchmarks
-go test -bench=. ./pkg/collection/ -benchtime=5s
+go test -tags sqlite_fts5 -bench=. ./pkg/collection/ -benchtime=5s
 
 # Run all tests with coverage
-go test -v -race -coverprofile=coverage.out ./pkg/collection/...
+go test -tags sqlite_fts5 -v -race -coverprofile=coverage.out ./pkg/collection/...
 go tool cover -func=coverage.out

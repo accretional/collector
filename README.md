@@ -2,13 +2,8 @@
 
 A gRPC + Protocol Buffers framework for building distributed, dynamic RPC systems with built-in service discovery, type safety, and a powerful ORM for protobuf messages.
 
-### NOTE
-
-If you're visiting here from HN or just checking out Accretional's repos, hit me up at fred@accretional.com or https://www.linkedin.com/in/fred-weitendorf-40b505b6/ if you're interested in using this! Or smash that star button to get updates on the project as we take it toward general availability late December 2025/early January 2026. Didn't expect my HN comment to get such a lift this early in the project!
-
-We're going to pair this with our container-based IDE Brilliant (~working, dev env at https://brilliant.mplode.dev), container-based LLM coding agent Clown (in progress), Static site generator Statue (working, see https://statue.dev or https://github.com/accretional/statue), and our nascent cloud platform Splendor (~working and currently hosts Brilliant, DM for access/info) to let you launch entire AI products and agent platforms in one shot, and then register them on our cloud platform for other people to use them (and get you paid).
-
-TL;DR: Collector is essentially a generalized control plane for Splendor's (a cloud platform we're building) upcoming multi-tenant, agent-friendly service mesh. But it's also a library or service you can use yourself to implement a generic CRUD server for protobufs and grpc with powerful, dynamic distributed programming/reflection.
+### HUMAN NOTE
+Contact [fred](https://www.linkedin.com/in/fred-weitendorf-40b505b6/) if you want to try using this! Smash that star button to get updates as we try to get it production ready, ~January 2026.
 
 ## What is Collector?
 
@@ -19,6 +14,34 @@ Collector is a distributed programming platform that combines:
 - **Reflection & Discovery**: Runtime service introspection and dynamic invocation
 
 It enables you to register and update protobuf messages and gRPC services at runtime, create "Collections" (tables + API servers) of any proto type, and dynamically dispatch RPC calls across a distributed system—all with strong typing and validation.
+
+<details><summary>Tell me more!</summary>
+
+Collections are generic protobuf container for structured data, backed by sqlite. A collection is an ordered list of records of a single proto message type, filterable labels, and create/update metadata.
+
+Namespaces are the core of collector's multitenancy model. A collection belongs to a single namespace, but the services respect a hierarchical namespacing model that keeps data/types/services/everything else separate across namespaces.
+
+CollectionService is implements generic CRUD and Search APIs for Collections, plus the ability to invoke custom rpcs on the Collections. These are all provided automatically.
+
+CollectionRepo is a Collection of Collections, "controller" of collection service and other internal/registered grpc servers and collections for this "collector". Also handles backups, clones/fetches, etc.
+
+CollectiveDispatcher implements Connect, Dispatch, and Serve rpcs across Collectors. This is what turns Collector into a node in a mesh. It also allows execution to move to data or find available compute dynamically.
+
+CollectorRegistry provides a registry of proto messages and grpcs with some reflection functionality. The rpc/message registry are what make this work as an "agent mesh" - it allows agents to interact with remote collectors, or remote collectors to interact with the local agent, in more compact/api-based interfaces than just text.Z
+
+</details>
+
+## Using it
+
+CollectionService alone is kind of like a protobuf ORM/CRUD server with search. CollectionRepo also gets you backups and db operations, including backups. 
+
+Paired with [statue](https://github.com/accretional/statue) these sqlite-based "collections" can be used as a portable/snapshotted generic container for structured data, that you can distribute and query on a static site!
+
+Enable CollectiveDispatcher and CollectorRegistry to get something with all the right characteristics of a node in an "agent mesh" - hierarchical multitenancy, data/service/type discovery, dynamic tool creation, interoperability with humans or traditional stateful instances/stateless services (which can also run collector!). Note: you should probably run this in a secure sandbox.
+
+**TL;DR: Collector is meant to serve as a node in an agent mesh, providing everything a tool-calling LLM needs to discovery/share/find/manage data and tools for itself and in conjunction with other agents. But it's also a library or service you can use yourself to implement a generic CRUD server for protobufs and grpc with powerful, dynamic distributed programming/reflection.**
+
+Most of the rest of the docs were written by robots, but reviewed by humans with love in San Francisco.
 
 ## Architecture
 
@@ -666,14 +689,26 @@ See: [Backup Availability Test Results](docs/testing/backup-availability.md)
 
 ```bash
 # Build the server
-go build ./cmd/server
+go build -tags sqlite_fts5 ./cmd/server
 
 # Build and run
-go run ./cmd/server/main.go
+go run -tags sqlite_fts5 ./cmd/server/main.go
+
+# Run tests
+go test -tags sqlite_fts5 ./...
 
 # Generate protobuf code (if proto files change)
 ./scripts/gen-proto.sh
 ```
+
+### Dependencies
+
+- **[mattn/go-sqlite3](https://github.com/mattn/go-sqlite3)**: CGO-based SQLite driver. Requires a C compiler (gcc/clang) for building.
+- **[asg017/sqlite-vec](https://github.com/asg017/sqlite-vec)**: Vector search extension for SQLite (optional, for semantic search).
+
+### Build Tags
+
+- **`sqlite_fts5`**: Enables FTS5 (Full-Text Search) support in SQLite. This is **required** for full-text search functionality and must be included in all build and test commands.
 
 ## Project Structure
 
@@ -707,10 +742,13 @@ collector/
 │   │   ├── connection.go
 │   │   └── README.md
 │   │
-│   ├── db/
+│   ├── db/              # Database factory
+│   │   ├── store.go     # Factory for creating stores
+│   │   ├── README.md    # How to add new backends
 │   │   └── sqlite/      # SQLite backend
 │   │       ├── store.go
-│   │       └── backup_test.go   # 🆕 Availability tests (7 tests)
+│   │       ├── store_test.go
+│   │       └── backup_test.go   # Availability tests
 │   │
 │   ├── fs/              # 🆕 Filesystem abstraction
 │   │   └── local/       # 🆕 Local filesystem implementation

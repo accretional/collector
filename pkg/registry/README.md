@@ -180,9 +180,16 @@ dispatcher := dispatch.NewDispatcherWithRegistry(collectorID, addr, namespaces, 
 import (
     "github.com/accretional/collector/pkg/registry"
     "github.com/accretional/collector/pkg/collection"
+    "github.com/accretional/collector/pkg/db"
 )
 
 // Create collections to store registered protos and services
+protosStore, _ := db.NewStore(ctx, db.Config{
+    Type:       db.DBTypeSQLite,
+    SQLitePath: "./data/protos.db",
+    Options:    collection.Options{EnableJSON: true},
+})
+
 registeredProtos, _ := collection.NewCollection(
     &pb.Collection{
         Namespace: "system",
@@ -195,6 +202,12 @@ registeredProtos, _ := collection.NewCollection(
     protosStore,
     &collection.LocalFileSystem{},
 )
+
+servicesStore, _ := db.NewStore(ctx, db.Config{
+    Type:       db.DBTypeSQLite,
+    SQLitePath: "./data/services.db",
+    Options:    collection.Options{EnableJSON: true},
+})
 
 registeredServices, _ := collection.NewCollection(
     &pb.Collection{
@@ -388,8 +401,10 @@ package main
 import (
     "context"
     "net"
+    "time"
 
     "github.com/accretional/collector/pkg/collection"
+    "github.com/accretional/collector/pkg/db"
     "github.com/accretional/collector/pkg/dispatch"
     "github.com/accretional/collector/pkg/registry"
     pb "github.com/accretional/collector/gen/collector"
@@ -405,11 +420,16 @@ func main() {
     // 1. Setup Registry Collections
     // ================================================================
 
-    protosStore, _ := sqlite.NewSqliteStore("./data/protos.db", collection.Options{EnableJSON: true})
-    protosStore.SetJSONConverter(collection.GetSystemTypeConverter("RegisteredProto"))
-
-    servicesStore, _ := sqlite.NewSqliteStore("./data/services.db", collection.Options{EnableJSON: true})
-    servicesStore.SetJSONConverter(collection.GetSystemTypeConverter("RegisteredService"))
+    protosStore, _ := db.NewStore(ctx, db.Config{
+        Type:       db.DBTypeSQLite,
+        SQLitePath: "./data/protos.db",
+        Options:    collection.Options{EnableJSON: true},
+    })
+    servicesStore, _ := db.NewStore(ctx, db.Config{
+        Type:       db.DBTypeSQLite,
+        SQLitePath: "./data/services.db",
+        Options:    collection.Options{EnableJSON: true},
+    })
 
     registeredProtos, _ := collection.NewCollection(
         &pb.Collection{

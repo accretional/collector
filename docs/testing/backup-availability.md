@@ -72,7 +72,7 @@ All tests passing ✅ (110 seconds total runtime)
 ### How WAL Mode Enables Concurrent Access
 
 ```go
-// In NewSqliteStore:
+// In NewStore:
 dsn := fmt.Sprintf("file:%s?_journal_mode=WAL&_busy_timeout=10000", path)
 
 // In Backup method:

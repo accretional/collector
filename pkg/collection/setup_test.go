@@ -5,8 +5,12 @@ import (
 	"path/filepath"
 	"testing"
 
+	"context"
+
 	pb "github.com/accretional/collector/gen/collector"
 	"github.com/accretional/collector/pkg/collection"
+
+	"github.com/accretional/collector/pkg/db"
 	"github.com/accretional/collector/pkg/db/sqlite"
 )
 
@@ -35,9 +39,13 @@ func setupTestCollection(t *testing.T) (*collection.Collection, func()) {
 		t.Fatalf("failed to create db dir: %v", err)
 	}
 
-	store, err := sqlite.NewSqliteStore(dbPath, collection.Options{
-		EnableFTS:  true, // Test FTS tables
-		EnableJSON: true, // Test JSON columns
+	store, err := db.NewStore(context.Background(), db.Config{
+		Type:       db.DBTypeSQLite,
+		SQLitePath: dbPath,
+		Options: collection.Options{
+			EnableFTS:  true, // Test FTS tables
+			EnableJSON: true, // Test JSON columns
+		},
 	})
 	if err != nil {
 		os.RemoveAll(tempDir)
@@ -99,7 +107,7 @@ func setupTestRepo(t *testing.T) (collection.CollectionRepo, func()) {
 		t.Fatalf("failed to create registry dir: %v", err)
 	}
 
-	registryDBStore, err := sqlite.NewSqliteStore(registryDBPath, collection.Options{EnableJSON: true})
+	registryDBStore, err := sqlite.NewStore(registryDBPath, collection.Options{EnableJSON: true})
 	if err != nil {
 		os.RemoveAll(tempDir)
 		t.Fatalf("failed to create registry db store: %v", err)
@@ -113,7 +121,7 @@ func setupTestRepo(t *testing.T) (collection.CollectionRepo, func()) {
 	}
 
 	// 4. Create dummy store (not used for metadata anymore)
-	dummyStore, err := sqlite.NewSqliteStore(":memory:", collection.Options{})
+	dummyStore, err := sqlite.NewStore(":memory:", collection.Options{})
 	if err != nil {
 		os.RemoveAll(tempDir)
 		t.Fatalf("failed to create dummy store: %v", err)
@@ -121,7 +129,7 @@ func setupTestRepo(t *testing.T) (collection.CollectionRepo, func()) {
 
 	// 5. Create the DefaultCollectionRepo with StoreFactory
 	storeFactory := func(path string, opts collection.Options) (collection.Store, error) {
-		return sqlite.NewSqliteStore(path, opts)
+		return sqlite.NewStore(path, opts)
 	}
 	repo := collection.NewCollectionRepo(dummyStore, pathConfig, registryStore, storeFactory)
 

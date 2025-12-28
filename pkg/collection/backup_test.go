@@ -11,14 +11,14 @@ import (
 	"time"
 
 	pb "github.com/accretional/collector/gen/collector"
+	_ "github.com/mattn/go-sqlite3"
 	"google.golang.org/protobuf/types/known/timestamppb"
-	_ "modernc.org/sqlite"
 )
 
 // createTestStore creates a simple SQLite store for testing
 func createTestStore(path string) (Store, error) {
 	dsn := fmt.Sprintf("file:%s?_journal_mode=WAL&_busy_timeout=10000", path)
-	db, err := sql.Open("sqlite", dsn)
+	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return nil, err
 	}

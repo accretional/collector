@@ -10,6 +10,7 @@ import (
 
 	pb "github.com/accretional/collector/gen/collector"
 	"github.com/accretional/collector/pkg/collection"
+	"github.com/accretional/collector/pkg/db"
 	"github.com/accretional/collector/pkg/db/sqlite"
 	"github.com/accretional/collector/pkg/dispatch"
 	"github.com/accretional/collector/pkg/registry"
@@ -32,10 +33,11 @@ func TestEndToEndIntegration(t *testing.T) {
 	tempDir := t.TempDir()
 
 	// Create registry collections
-	protosStore, err := sqlite.NewSqliteStore(
-		filepath.Join(tempDir, "protos.db"),
-		collection.Options{EnableJSON: true},
-	)
+	protosStore, err := db.NewStore(ctx, db.Config{
+		Type:       db.DBTypeSQLite,
+		SQLitePath: filepath.Join(tempDir, "protos.db"),
+		Options:    collection.Options{EnableJSON: true},
+	})
 	if err != nil {
 		t.Fatalf("failed to create protos store: %v", err)
 	}
@@ -57,10 +59,11 @@ func TestEndToEndIntegration(t *testing.T) {
 		t.Fatalf("failed to create protos collection: %v", err)
 	}
 
-	servicesStore, err := sqlite.NewSqliteStore(
-		filepath.Join(tempDir, "services.db"),
-		collection.Options{EnableJSON: true},
-	)
+	servicesStore, err := db.NewStore(ctx, db.Config{
+		Type:       db.DBTypeSQLite,
+		SQLitePath: filepath.Join(tempDir, "services.db"),
+		Options:    collection.Options{EnableJSON: true},
+	})
 	if err != nil {
 		t.Fatalf("failed to create services store: %v", err)
 	}
@@ -99,7 +102,7 @@ func TestEndToEndIntegration(t *testing.T) {
 		t.Fatalf("failed to create registry dir: %v", err)
 	}
 
-	registryDBStore, err := sqlite.NewSqliteStore(registryPath, collection.Options{EnableJSON: true})
+	registryDBStore, err := sqlite.NewStore(registryPath, collection.Options{EnableJSON: true})
 	if err != nil {
 		t.Fatalf("failed to create registry db store: %v", err)
 	}
@@ -112,7 +115,7 @@ func TestEndToEndIntegration(t *testing.T) {
 	defer registryStore.Close()
 
 	// Create dummy store (not used for metadata)
-	repoStore, err := sqlite.NewSqliteStore(":memory:", collection.Options{})
+	repoStore, err := sqlite.NewStore(":memory:", collection.Options{})
 	if err != nil {
 		t.Fatalf("failed to create repo store: %v", err)
 	}
@@ -120,7 +123,7 @@ func TestEndToEndIntegration(t *testing.T) {
 
 	// Create store factory
 	storeFactory := func(path string, opts collection.Options) (collection.Store, error) {
-		return sqlite.NewSqliteStore(path, opts)
+		return sqlite.NewStore(path, opts)
 	}
 	collectionRepo := collection.NewCollectionRepo(repoStore, pathConfig, registryStore, storeFactory)
 

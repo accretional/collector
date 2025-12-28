@@ -9,7 +9,7 @@ import (
 	"os"
 	"time"
 
-	_ "modernc.org/sqlite"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 // Fetcher handles retrieving Collections from remote sources.
@@ -161,7 +161,7 @@ func (f *Fetcher) ValidateRemoteDB(ctx context.Context, dbPath string) error {
 
 	// Open database and run integrity check
 	dsn := fmt.Sprintf("file:%s?mode=ro", dbPath)
-	db, err := sql.Open("sqlite", dsn)
+	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}

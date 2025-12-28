@@ -96,7 +96,7 @@ service CollectionService {
   rpc Update(UpdateRequest) returns (UpdateResponse);
   rpc Delete(DeleteRequest) returns (DeleteResponse);
   rpc List(ListRequest) returns (ListResponse);
-  rpc Search(SearchRequest) returns (SearchResponse);
+  rpc Search(SearchResponse) returns (SearchResponse);
   rpc Batch(BatchRequest) returns (BatchResponse);
   rpc Describe(DescribeRequest) returns (DescribeResponse);
   rpc Modify(ModifyRequest) returns (ModifyResponse);
@@ -112,14 +112,18 @@ service CollectionService {
 ```go
 import (
     "github.com/accretional/collector/pkg/collection"
-    "github.com/accretional/collector/pkg/db/sqlite"
+    "github.com/accretional/collector/pkg/db"
     pb "github.com/accretional/collector/gen/collector"
 )
 
 // Create SQLite store
-store, err := sqlite.NewSqliteStore("./data/users.db", collection.Options{
-    EnableJSON: true,  // Enable JSONB indexing
-    EnableFTS:  true,  // Enable full-text search
+store, err := db.NewStore(ctx, db.Config{
+	Type:       db.DBTypeSQLite,
+    SQLitePath: "./data/users.db",
+    Options: collection.Options{
+        EnableJSON: true,  // Enable JSONB indexing
+        EnableFTS:  true,  // Enable full-text search
+    },
 })
 
 // Create collection
@@ -566,7 +570,11 @@ options := collection.Options{
     EnableFTS:  true,   // Enable full-text search
 }
 
-store, err := sqlite.NewSqliteStore(dbPath, options)
+store, err := db.NewStore(ctx, db.Config{
+    Type: db.DBTypeSQLite,
+    SQLitePath: dbPath,
+    Options:    options,
+})
 
 // For JSON search to work properly, set a converter for the collection's type:
 // System types have built-in converters
