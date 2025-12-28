@@ -239,7 +239,7 @@ func New(config Config) (*Server, error) {
 	}
 
 	// Create repo with PathConfig and registry store
-	dummyStore, err := sqlite.NewSqliteStore(":memory:", collection.Options{})
+	dummyStore, err := sqlite.NewSqliteStore(":memory:", collection.Options{EnableJSON: true})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create dummy store: %w", err)
 	}

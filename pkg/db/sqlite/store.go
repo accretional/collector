@@ -367,10 +367,10 @@ func (s *SqliteStore) Search(ctx context.Context, q *collection.SearchQuery) ([]
 	// Label filters (from CollectionRecord.Metadata.Labels)
 	for key, value := range q.LabelFilters {
 		// Labels are stored as JSON in labels column: {"key":"value"}
-		// Use json_extract to filter by label key-value pairs
-		labelPath := `$.` + key
-		whereClauses = append(whereClauses, `json_extract(r.labels, ?) = ?`)
-		args = append(args, labelPath, value)
+		// Use json_each() to filter by label key-value pairs
+		// This handles all key types including those with special characters (dots, quotes, brackets)
+		whereClauses = append(whereClauses, `EXISTS (SELECT 1 FROM json_each(r.labels) WHERE key = ? AND value = ?)`)
+		args = append(args, key, value)
 	}
 
 	// Append WHERE clauses

@@ -442,3 +442,144 @@ func TestIssue3_InvalidJSONHandling(t *testing.T) {
 		}
 	})
 }
+
+// TestIssue6_LabelKeyEscaping tests that label keys with special characters are properly escaped.
+// Issue: Label keys containing dots or special JSON path characters were not properly escaped,
+// causing searches to fail or return wrong results.
+func TestIssue6_LabelKeyEscaping(t *testing.T) {
+	// Test: Label keys with dots should be searchable
+	t.Run("LabelKeyWithDots", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		dbPath := filepath.Join(tmpDir, "test.db")
+
+		store, err := NewSqliteStore(dbPath, collection.Options{EnableJSON: true})
+		if err != nil {
+			t.Fatalf("Store creation failed: %v", err)
+		}
+		defer store.Close()
+
+		ctx := context.Background()
+
+		// Create record with label key containing dots
+		record := &collector.CollectionRecord{
+			Id:        "dotted-label",
+			ProtoData: []byte(`{}`),
+			Metadata: &collector.Metadata{
+				CreatedAt: timestamppb.Now(),
+				UpdatedAt: timestamppb.Now(),
+				Labels: map[string]string{
+					"app.kubernetes.io/name": "myapp",
+					"simple":                 "value",
+				},
+			},
+		}
+
+		err = store.CreateRecord(ctx, record)
+		if err != nil {
+			t.Fatalf("CreateRecord failed: %v", err)
+		}
+
+		// Search by dotted label key
+		results, err := store.Search(ctx, &collection.SearchQuery{
+			LabelFilters: map[string]string{
+				"app.kubernetes.io/name": "myapp",
+			},
+		})
+		if err != nil {
+			t.Fatalf("Search failed: %v", err)
+		}
+		if len(results) != 1 {
+			t.Errorf("Expected 1 result for dotted label key, got %d", len(results))
+		}
+	})
+
+	// Test: Label keys with quotes should be searchable
+	t.Run("LabelKeyWithQuotes", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		dbPath := filepath.Join(tmpDir, "test.db")
+
+		store, err := NewSqliteStore(dbPath, collection.Options{EnableJSON: true})
+		if err != nil {
+			t.Fatalf("Store creation failed: %v", err)
+		}
+		defer store.Close()
+
+		ctx := context.Background()
+
+		// Create record with label key containing quotes
+		record := &collector.CollectionRecord{
+			Id:        "quoted-label",
+			ProtoData: []byte(`{}`),
+			Metadata: &collector.Metadata{
+				CreatedAt: timestamppb.Now(),
+				UpdatedAt: timestamppb.Now(),
+				Labels: map[string]string{
+					`key"with"quotes`: "value",
+				},
+			},
+		}
+
+		err = store.CreateRecord(ctx, record)
+		if err != nil {
+			t.Fatalf("CreateRecord failed: %v", err)
+		}
+
+		// Search by key with quotes
+		results, err := store.Search(ctx, &collection.SearchQuery{
+			LabelFilters: map[string]string{
+				`key"with"quotes`: "value",
+			},
+		})
+		if err != nil {
+			t.Fatalf("Search failed: %v", err)
+		}
+		if len(results) != 1 {
+			t.Errorf("Expected 1 result for quoted label key, got %d", len(results))
+		}
+	})
+
+	// Test: Label keys with brackets should be searchable
+	t.Run("LabelKeyWithBrackets", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		dbPath := filepath.Join(tmpDir, "test.db")
+
+		store, err := NewSqliteStore(dbPath, collection.Options{EnableJSON: true})
+		if err != nil {
+			t.Fatalf("Store creation failed: %v", err)
+		}
+		defer store.Close()
+
+		ctx := context.Background()
+
+		// Create record with label key containing brackets
+		record := &collector.CollectionRecord{
+			Id:        "bracket-label",
+			ProtoData: []byte(`{}`),
+			Metadata: &collector.Metadata{
+				CreatedAt: timestamppb.Now(),
+				UpdatedAt: timestamppb.Now(),
+				Labels: map[string]string{
+					"key[0]": "first",
+				},
+			},
+		}
+
+		err = store.CreateRecord(ctx, record)
+		if err != nil {
+			t.Fatalf("CreateRecord failed: %v", err)
+		}
+
+		// Search by key with brackets
+		results, err := store.Search(ctx, &collection.SearchQuery{
+			LabelFilters: map[string]string{
+				"key[0]": "first",
+			},
+		})
+		if err != nil {
+			t.Fatalf("Search failed: %v", err)
+		}
+		if len(results) != 1 {
+			t.Errorf("Expected 1 result for bracket label key, got %d", len(results))
+		}
+	})
+}

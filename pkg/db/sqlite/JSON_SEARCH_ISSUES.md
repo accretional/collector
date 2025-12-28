@@ -136,8 +136,8 @@ The JSON conversion pipeline works as follows:
 ---
 
 ### Issue 4: No JSON Indexing Strategy
-**Status**: Open
-**Severity**: Medium
+**Status**: Deferred (Future Enhancement)
+**Severity**: Low
 **Location**: `store.go` (Search method)
 
 **Problem**:
@@ -148,19 +148,35 @@ No JSON indexes are created for frequently-searched fields. All `json_extract()`
 SELECT ... WHERE json_extract(r.jsontext, '$.field') = ?
 ```
 
-**Impact**:
-- O(n) complexity for all JSON searches
-- Poor performance on large datasets
-- Registry namespace filtering scans all collections
+**Analysis**:
+1. **Label Filters**: Now use `json_each()` which iterates through the JSON object. For small label sets (typical case), this is efficient. Expression indexes wouldn't help `json_each()`.
 
-**Fix**: Create indexes on frequently-searched JSON paths, especially `$.namespace` for labels.
+2. **Field Filters**: Search paths depend on the collection's schema, which varies. We can't create static indexes for unknown paths.
+
+3. **Options considered**:
+   - Expression indexes on common paths (e.g., `$.namespace`) - requires knowing schema
+   - Caller-specified index creation - adds API complexity
+   - Full-text search on JSON - different approach entirely
+
+**Impact Assessment**:
+- For typical workloads with small-to-medium datasets, current performance is acceptable
+- Large datasets with frequent JSON searches would benefit from custom indexes
+- Users can create expression indexes manually for their specific schemas
+
+**Recommendation**: Defer as future enhancement. Current behavior is documented:
+- Label filters use `json_each()` - efficient for typical label counts
+- Field filters use `json_extract()` - table scan, acceptable for moderate datasets
+- Power users can create custom expression indexes:
+  ```sql
+  CREATE INDEX idx_namespace ON records(json_extract(jsontext, '$.namespace'));
+  ```
 
 ---
 
 ### Issue 5: Inconsistent Metadata Handling Between Retrieval Methods
-**Status**: Open
-**Severity**: Medium
-**Location**: `store.go:145-165` (GetRecord), `store.go:221-251` (ListRecords)
+**Status**: RESOLVED (By Design)
+**Severity**: Low
+**Location**: `store.go:172-200` (GetRecord), `store.go:221-260` (ListRecords)
 
 **Problem**:
 `GetRecord()` and `ListRecords()` do NOT select or populate the `jsontext` column:
@@ -170,20 +186,29 @@ SELECT ... WHERE json_extract(r.jsontext, '$.field') = ?
 SELECT proto_data, data_uri, created_at, updated_at, labels FROM records WHERE id = ?
 ```
 
-Only `Search()` populates records with JSON-derived data.
+Only `Search()` uses the `jsontext` column for filtering.
 
-**Impact**:
-- Confusion about when JSON data is available
-- Inconsistent record contents depending on retrieval method
+**Analysis**:
+This is actually correct behavior by design:
+- `proto_data` is the source of truth (binary protobuf)
+- `jsontext` is a derived column for search indexing only
+- The `CollectionRecord` proto message has no `jsontext` field
+- When retrieving records, you get `proto_data` which contains all the data
+- The `jsontext` column is purely for `json_extract()` queries in Search
 
-**Fix**: Either include `jsontext` in all retrieval methods, or document the behavior clearly.
+**Resolution**: Documented as by design. The architecture is:
+1. **Storage**: `proto_data` (binary) + `jsontext` (derived JSON for indexing)
+2. **Retrieval**: Returns `proto_data` - callers unmarshal to get the data
+3. **Search**: Filters on `jsontext` via `json_extract()`, returns `proto_data`
+
+This separation keeps `proto_data` as the single source of truth while enabling efficient JSON-based searching.
 
 ---
 
 ### Issue 6: Label Keys with Special Characters Not Escaped
-**Status**: Open
+**Status**: RESOLVED
 **Severity**: Low
-**Location**: `store.go:303-309`
+**Location**: `store.go:376-383`
 
 **Problem**:
 ```go
@@ -193,35 +218,37 @@ for key, value := range q.LabelFilters {
 }
 ```
 
-Label keys containing dots or special JSON path characters are not properly escaped:
+Label keys containing dots or special JSON path characters were not properly escaped:
 - Key `"a.b.c"` becomes path `$.a.b.c` instead of `$."a.b.c"`
-- This silently returns wrong results
+- Keys with quotes couldn't be queried via json_extract at all
 
-**Impact**:
-- Label searches fail for keys with special characters
-- Silent incorrect results
+**Resolution**: Changed from `json_extract()` with path syntax to `json_each()` which handles all key types:
+```go
+for key, value := range q.LabelFilters {
+    // Use json_each() to filter by label key-value pairs
+    // This handles all key types including those with special characters
+    whereClauses = append(whereClauses, `EXISTS (SELECT 1 FROM json_each(r.labels) WHERE key = ? AND value = ?)`)
+    args = append(args, key, value)
+}
+```
 
-**Fix**: Properly escape label keys for JSON path syntax.
+**Tests**: `json_issues_test.go:TestIssue6_LabelKeyEscaping`
 
 ---
 
 ### Issue 7: dummyStore Created Without EnableJSON
-**Status**: Open
+**Status**: RESOLVED
 **Severity**: Low
-**Location**: `pkg/server/server.go:240`
+**Location**: `pkg/server/server.go:242`
 
 **Problem**:
 ```go
 dummyStore, err := sqlite.NewSqliteStore(":memory:", collection.Options{})
 ```
 
-The dummyStore is created with empty Options (no EnableJSON). While currently not used for searches, this is inconsistent and could cause issues if the implementation changes.
+The dummyStore was created with empty Options (no EnableJSON). While not used for searches, this was inconsistent.
 
-**Impact**:
-- Low immediate risk (not used for searches)
-- Maintenance/refactoring risk
-
-**Fix**: Create with `collection.Options{EnableJSON: true}` for consistency.
+**Resolution**: Changed to `collection.Options{EnableJSON: true}` for consistency.
 
 ---
 
@@ -237,7 +264,7 @@ The dummyStore is created with empty Options (no EnableJSON). While currently no
 | 1. Silent schema error | RESOLVED | - | TestIssue1_JSONSchemaErrorHandling |
 | 2. No EnableJSON validation | RESOLVED | - | TestIssue2_EnableJSONValidationBeforeSearch |
 | 3. Binary proto not converted | RESOLVED | - | TestIssue3_InvalidJSONHandling |
-| 4. No JSON indexing | Open | - | - |
-| 5. Inconsistent metadata | Open | - | - |
-| 6. Label key escaping | Open | - | - |
-| 7. dummyStore options | Open | - | - |
+| 4. No JSON indexing | Deferred | - | - |
+| 5. Inconsistent metadata | RESOLVED (By Design) | - | - |
+| 6. Label key escaping | RESOLVED | - | TestIssue6_LabelKeyEscaping |
+| 7. dummyStore options | RESOLVED | - | - |
