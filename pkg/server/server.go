@@ -34,7 +34,7 @@ import (
 //   - system/types - Protobuf type registry
 //   - system/connections - Collector connections
 //   - system/audit - Audit log (future)
-//   - system/logs - System logs (future)
+//   - system/logs - System logs (structured logging to collection)
 //
 // Use your own namespace for application data.
 type Config struct {
@@ -135,7 +135,7 @@ func New(config Config) (*Server, error) {
 	s.logger.Printf("  - Type Registry: system/types")
 	s.logger.Printf("  - Connections: system/connections")
 	s.logger.Printf("  - Audit: system/audit")
-	s.logger.Printf("  - Logs: system/logs (stub)")
+	s.logger.Printf("  - Logs: system/logs")
 	s.logger.Println("========================================")
 
 	// ========================================================================

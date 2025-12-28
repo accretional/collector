@@ -257,7 +257,10 @@ func (s *SqliteStore) UpdateRecord(ctx context.Context, r *pb.CollectionRecord) 
 		return err
 	}
 
-	rows, _ := res.RowsAffected()
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("get rows affected: %w", err)
+	}
 	if rows == 0 {
 		return fmt.Errorf("record not found")
 	}
@@ -292,7 +295,9 @@ func (s *SqliteStore) ListRecords(ctx context.Context, offset, limit int) ([]*pb
 			lJSON            string
 		)
 
-		rows.Scan(&r.Id, &r.ProtoData, &dUri, &created, &updated, &lJSON)
+		if err := rows.Scan(&r.Id, &r.ProtoData, &dUri, &created, &updated, &lJSON); err != nil {
+			return nil, fmt.Errorf("scan record: %w", err)
+		}
 
 		r.Metadata = &pb.Metadata{
 			CreatedAt: &timestamppb.Timestamp{Seconds: created},
@@ -302,10 +307,17 @@ func (s *SqliteStore) ListRecords(ctx context.Context, offset, limit int) ([]*pb
 			r.DataUri = dUri.String
 		}
 		if lJSON != "" {
-			json.Unmarshal([]byte(lJSON), &r.Metadata.Labels)
+			if err := json.Unmarshal([]byte(lJSON), &r.Metadata.Labels); err != nil {
+				// Log but don't fail - labels are supplementary data
+				// Record ID helps debugging
+				r.Metadata.Labels = map[string]string{"_parse_error": err.Error()}
+			}
 		}
 
 		items = append(items, &r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate records: %w", err)
 	}
 	return items, nil
 }
@@ -426,6 +438,9 @@ func (s *SqliteStore) Search(ctx context.Context, q *collection.SearchQuery) ([]
 		}
 		results = append(results, searchResult)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate search results: %w", err)
+	}
 	return results, nil
 }
 
@@ -466,7 +481,9 @@ func (s *SqliteStore) Backup(ctx context.Context, destPath string) error {
 
 	// Use VACUUM INTO for the backup - this creates a consistent snapshot
 	// Even with WAL mode, VACUUM INTO creates a complete consistent copy
-	query := fmt.Sprintf("VACUUM INTO '%s'", destPath)
+	// Escape single quotes in path to prevent SQL injection
+	escapedPath := strings.ReplaceAll(destPath, "'", "''")
+	query := fmt.Sprintf("VACUUM INTO '%s'", escapedPath)
 	if err := s.ExecuteRaw(query); err != nil {
 		return fmt.Errorf("backup failed: %w", err)
 	}
@@ -494,7 +511,9 @@ func (s *SqliteStore) BackupOnline(ctx context.Context, destPath string, pagesBa
 	defer destDB.Close()
 
 	// Attach the destination database
-	attachQuery := fmt.Sprintf("ATTACH DATABASE '%s' AS backup", destPath)
+	// Escape single quotes in path to prevent SQL injection
+	escapedPath := strings.ReplaceAll(destPath, "'", "''")
+	attachQuery := fmt.Sprintf("ATTACH DATABASE '%s' AS backup", escapedPath)
 	if _, err := s.db.ExecContext(ctx, attachQuery); err != nil {
 		return fmt.Errorf("failed to attach backup db: %w", err)
 	}
@@ -514,9 +533,12 @@ func (s *SqliteStore) BackupOnline(ctx context.Context, destPath string, pagesBa
 	for rows.Next() {
 		var name string
 		if err := rows.Scan(&name); err != nil {
-			return err
+			return fmt.Errorf("scan table name: %w", err)
 		}
 		tables = append(tables, name)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate tables: %w", err)
 	}
 
 	// Copy each table
@@ -557,10 +579,11 @@ func (s *SqliteStore) BackupOnline(ctx context.Context, destPath string, pagesBa
 	for idxRows.Next() {
 		var sql string
 		if err := idxRows.Scan(&sql); err != nil {
-			continue
+			continue // Skip malformed index entries
 		}
 		destDB.ExecContext(ctx, sql) // Ignore errors, index might exist
 	}
+	// Note: Not checking idxRows.Err() as index copying is best-effort
 
 	return nil
 }

@@ -38,7 +38,8 @@ type Dispatcher struct {
 	servicesMutex sync.RWMutex
 
 	// Optional registry validator for checking if services are registered
-	registryValidator RegistryValidator
+	registryValidator      RegistryValidator
+	registryValidatorMutex sync.RWMutex
 }
 
 // NewDispatcher creates a new dispatcher instance
@@ -62,6 +63,8 @@ func NewDispatcherWithRegistry(collectorID, address string, namespaces []string,
 
 // SetRegistryValidator sets the registry validator for this dispatcher
 func (d *Dispatcher) SetRegistryValidator(validator RegistryValidator) {
+	d.registryValidatorMutex.Lock()
+	defer d.registryValidatorMutex.Unlock()
 	d.registryValidator = validator
 }
 
@@ -92,8 +95,11 @@ func (d *Dispatcher) Serve(ctx context.Context, req *pb.ServeRequest) (*pb.Serve
 	}
 
 	// Validate against registry if validator is configured
-	if d.registryValidator != nil {
-		if err := d.registryValidator.ValidateServiceMethod(ctx, req.Namespace, req.Service.ServiceName, req.MethodName); err != nil {
+	d.registryValidatorMutex.RLock()
+	validator := d.registryValidator
+	d.registryValidatorMutex.RUnlock()
+	if validator != nil {
+		if err := validator.ValidateServiceMethod(ctx, req.Namespace, req.Service.ServiceName, req.MethodName); err != nil {
 			return &pb.ServeResponse{
 				Status: &pb.Status{
 					Code:    404,

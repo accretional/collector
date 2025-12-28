@@ -14,7 +14,7 @@ All system tracking (collections, types, connections, audit, logs) should be col
    ↓ all requests validated against type registry
 4. Connection Collection (system/connections)
 5. Audit Collection (system/audit)
-6. Logs Collection (system/logs) [STUB]
+6. Logs Collection (system/logs) ✓
 ```
 
 ---
@@ -446,85 +446,49 @@ events := auditor.collection.Search(ctx, &SearchQuery{
 
 ---
 
-## 5. Logs Collection (STUB)
+## 5. Logs Collection ✅ **IMPLEMENTED**
 
 ### Design
 
 **Purpose:** Structured logging stored as collection for querying.
 
-**Collection:**
-```proto
-// system/logs stores LogEntry messages
-message LogEntry {
-    string id = 1;
-    google.protobuf.Timestamp timestamp = 2;
-    LogLevel level = 3;              // DEBUG, INFO, WARN, ERROR, FATAL
-    string message = 4;
-    string logger = 5;               // Component that logged
+**Current State:** ✅ **FULLY IMPLEMENTED**
+- `SystemLogger` in `pkg/collection/system_logger.go`
+- Implements `logging.Logger` interface (Debug, Info, Warn, Error, With)
+- Buffered async writes via worker goroutine (1000 entry buffer)
+- Used by server.go for all structured logging
+- Stores `SystemLog` proto messages in `system/logs` collection
 
-    // Structured context
-    map<string, string> fields = 6;
-    string stack_trace = 7;
-    string error = 8;
-
-    // Source
-    string collector_id = 9;
-    string file = 10;
-    int32 line = 11;
-    string function = 12;
-}
-
-enum LogLevel {
-    DEBUG = 0;
-    INFO = 1;
-    WARN = 2;
-    ERROR = 3;
-    FATAL = 4;
-}
-```
-
-**Implementation (STUB):**
+**Implementation Details:**
 ```go
-// TODO: Implement structured logging using collection
-//
-// Goals:
-// - Replace log.Printf() with structured logger
-// - Store all logs in system/logs collection
-// - Enable queries: "show ERROR logs from last hour"
-// - Support full-text search on log messages
-// - Aggregate logs across all collectors
-//
-// Design considerations:
-// - Performance: Buffer logs, batch insert
-// - Retention: Auto-cleanup old logs (use backup policy)
-// - Sampling: Maybe sample DEBUG logs in production
-// - Integration: Hook into existing log.Logger interface
-//
-// Example usage:
-//   logger := NewCollectionLogger(logsCollection)
-//   logger.Info("server started", "port", 50051)
-//   logger.Error("failed to connect", "error", err, "collector", id)
-//
-// Query examples:
-//   - Find errors: level=ERROR
-//   - From component: logger="dispatcher"
-//   - Full-text: message contains "connection refused"
-//   - Time range: timestamp > yesterday
-//
-type CollectionLogger struct {
-    collection *Collection  // system/logs
-    buffer     []*pb.LogEntry
-    // TODO: Implement
-}
+// Create logger from system logs collection
+sysLogger := collection.NewSystemLogger(systemCollections.Logs)
+s.log = sysLogger.With("collector_id", config.CollectorID)
 
-func (l *CollectionLogger) Info(msg string, fields ...interface{}) {
-    // TODO: Buffer and batch insert to collection
-}
-
-func (l *CollectionLogger) Error(msg string, fields ...interface{}) {
-    // TODO: Buffer and batch insert to collection
-}
+// Usage throughout server
+s.log.Info("Server started", "address", addr)
+s.log.Warn("Operation failed", "error", err)
 ```
+
+**Proto (SystemLog):**
+- `id`: UUID
+- `timestamp`: When logged
+- `level`: DEBUG, INFO, WARNING, ERROR
+- `message`: Log message
+- `component`: Source component
+- `fields`: Structured key-value pairs
+
+**Query Examples:**
+```go
+// Find errors from last hour
+logs := collection.Search(ctx, &SearchQuery{
+    LabelFilters: map[string]string{"level": "ERROR"},
+})
+
+// Full-text search on messages
+logs := collection.Search(ctx, &SearchQuery{
+    TextQuery: "connection refused",
+})
 
 ---
 
@@ -560,12 +524,12 @@ func (l *CollectionLogger) Error(msg string, fields ...interface{}) {
 3. ⬜ Buffered audit logger for batch inserts
 4. ⬜ Test audit queries
 
-### Phase 5: Logs Collection (Future - Stub)
-1. ⬜ Design structured logging interface
-2. ⬜ Create `system/logs` collection
-3. ⬜ Implement buffered logger
-4. ⬜ Replace existing log statements
-5. ⬜ Add retention/cleanup
+### Phase 5: Logs Collection ✅ **COMPLETE**
+1. ✅ `SystemLogger` implements `logging.Logger` interface
+2. ✅ `system/logs` collection created with `SystemLog` proto
+3. ✅ Buffered async worker with 1000 entry channel
+4. ✅ Used throughout server.go for structured logging
+5. ⬜ Add retention/cleanup (future enhancement)
 
 ---
 

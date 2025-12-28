@@ -404,7 +404,7 @@ func (sc *SystemCollections) bootstrapAudit(ctx context.Context) error {
 	return nil
 }
 
-// bootstrapLogs creates the system logs collection (stub)
+// bootstrapLogs creates the system logs collection for structured logging
 func (sc *SystemCollections) bootstrapLogs(ctx context.Context) error {
 	namespace := "system"
 	name := "logs"
@@ -452,7 +452,6 @@ func (sc *SystemCollections) bootstrapLogs(ctx context.Context) error {
 			Labels: map[string]string{
 				"system":    "true",
 				"bootstrap": "true",
-				"stub":      "true", // Mark as stub
 			},
 		},
 	}
@@ -469,18 +468,11 @@ func (sc *SystemCollections) bootstrapLogs(ctx context.Context) error {
 		return fmt.Errorf("register logs collection: %w", err)
 	}
 
-	// TODO: Implement log ingestion from standard Go log package
-	// TODO: Add structured logging with levels (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-	// TODO: Add log rotation policy (time-based and size-based)
-	// TODO: Add log forwarding to external systems (e.g., Loki, Elasticsearch)
-	// TODO: Add log query API with filtering by level, component, time range
-	// TODO: Consider using buffered writer for high-volume logging
-	// TODO: Add sampling for high-frequency log entries
-	// TODO: Add log aggregation and metrics extraction
-	// TODO: Add alerting based on log patterns (e.g., error rate threshold)
-
-	log.Println("NOTE: System logs collection is currently a stub")
-	log.Println("      Full logging implementation pending - see TODOs in system_collections.go")
+	// Future enhancements:
+	// - Add log rotation policy (time-based and size-based)
+	// - Add log forwarding to external systems (e.g., Loki, Elasticsearch)
+	// - Add sampling for high-frequency log entries
+	// - Add alerting based on log patterns (e.g., error rate threshold)
 
 	return nil
 }

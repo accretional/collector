@@ -1,16 +1,17 @@
-# CollectorRegistry Comprehensive Analysis (Updated 2025-12-20)
+# CollectorRegistry Comprehensive Analysis (Updated 2025-12-28)
 
 ## Executive Summary
 
-CollectorRegistry is **production-ready for basic schema registration** with strong security validation, but **critically incomplete** for real-world schema evolution, operational needs, and debugging scenarios.
+CollectorRegistry is **production-ready for basic schema registration** with strong security validation. Schema evolution (update/delete) is not yet implemented - schemas are currently immutable after registration.
 
-**Recent Improvements** (2025-12-20):
-- ✅ Added comprehensive namespace/name validation (TDD-based)
-- ✅ Implemented configurable size limits (DoS protection)
+**Recent Improvements** (2025-12-28):
+- ✅ Comprehensive namespace/name validation (TDD-based)
+- ✅ Configurable size limits (DoS protection)
 - ✅ Global MaxProtoSize enforcement at collection level
-- ✅ Expanded test coverage (+12 tests)
+- ✅ LookupProtoByMessageName for JSON conversion support
+- ✅ JSON search integration via dynamic proto conversion
 
-**Grade**: B+ (85%) - Strong security foundation, missing lifecycle management
+**Grade**: B+ (85%) - Strong security foundation, immutable schemas (update/delete not implemented)
 
 ---
 
