@@ -87,29 +87,51 @@ func (s *SqliteStore) Search(ctx context.Context, q *collection.SearchQuery) ([]
 
 ---
 
-### Issue 3: Invalid JSON Silently Defaults to Empty Object
-**Status**: Open
+### Issue 3: Binary Protobuf Not Converted to JSON
+**Status**: RESOLVED
 **Severity**: Medium
-**Location**: `store.go:113-119`
+**Location**: `store.go:123-142`
 
 **Problem**:
+The store assumed `proto_data` was already JSON, but the codebase stores binary protobuf.
+When `proto_data` was not valid JSON, it silently stored `"{}"` making records unsearchable.
+
+**Resolution**:
+Added `ProtoToJSONConverter` callback to SqliteStore. The store now:
+1. Uses the converter to transform binary protobuf → JSON (if converter is set)
+2. Falls back to using proto_data directly if it's already valid JSON
+3. Falls back to `"{}"` if no converter and proto_data is not JSON (graceful degradation)
+
 ```go
-var jsonText string
-if json.Valid(r.ProtoData) {
-    jsonText = string(r.ProtoData)
-} else {
-    jsonText = "{}"  // Silent default!
-}
+// Set converter on store
+store.SetJSONConverter(collection.NewStaticJSONConverter(&pb.Collection{}))
+
+// Or use system type converters
+store.SetJSONConverter(collection.GetSystemTypeConverter("Collection"))
 ```
 
-When `proto_data` is not valid JSON, it silently stores `"{}"` instead. This hides data corruption and makes affected records unsearchable.
+**Key files**:
+- `pkg/collection/options.go`: `ProtoToJSONConverter` type, `JSONConverterType` enum, `JSONConverterFactory` type
+- `pkg/collection/json_converter.go`: Converter implementations including:
+  - `NewStaticJSONConverter`: For compile-time known types
+  - `NewDynamicJSONConverter`: For registry-based types using dynamic protobuf
+  - `SystemTypeConverters`: Map of converters for system types
+  - `NewRegistryConverterFactory`: Creates a factory that looks up types from the registry
+- `pkg/collection/repo.go`: `JSONConverterSetter` interface, factory wiring in `GetCollection`
+- `pkg/db/sqlite/store.go`: `SetJSONConverter()` and updated CreateRecord/UpdateRecord
+- `pkg/registry/registry.go`: `LookupProtoByMessageName` for type lookup
 
-**Impact**:
-- Data quality issues are hidden
-- Records with invalid JSON return no search results
-- No way to know if data failed JSON validation
+**Architecture**:
+The JSON conversion pipeline works as follows:
+1. **Store creation**: Stores are created with `EnableJSON: true`
+2. **Converter setup**: A `ProtoToJSONConverter` is set via `SetJSONConverter()`
+3. **Factory pattern**: The `DefaultCollectionRepo` uses a `JSONConverterFactory` to create converters based on collection type
+4. **Registry lookup**: `NewRegistryConverterFactory` creates converters by looking up FileDescriptors from the registry
+5. **Fallback behavior**: If no converter is set, the store:
+   - Uses proto_data directly if it's valid JSON
+   - Falls back to `"{}"` otherwise (record stored but not searchable by JSON fields)
 
-**Fix**: Log warning when proto_data is not valid JSON, or return error.
+**Tests**: `json_issues_test.go:TestIssue3_InvalidJSONHandling`
 
 ---
 
@@ -205,8 +227,6 @@ The dummyStore is created with empty Options (no EnableJSON). While currently no
 
 ## Test Coverage Gaps
 
-- No tests for stores created with `EnableJSON: false` attempting filtered search
-- No tests for invalid JSON proto_data handling
 - No tests for label keys with special characters (dots, brackets)
 - No performance tests verifying index usage
 
@@ -216,7 +236,7 @@ The dummyStore is created with empty Options (no EnableJSON). While currently no
 |-------|--------|-----------|-------------|
 | 1. Silent schema error | RESOLVED | - | TestIssue1_JSONSchemaErrorHandling |
 | 2. No EnableJSON validation | RESOLVED | - | TestIssue2_EnableJSONValidationBeforeSearch |
-| 3. Silent JSON default | Open | - | - |
+| 3. Binary proto not converted | RESOLVED | - | TestIssue3_InvalidJSONHandling |
 | 4. No JSON indexing | Open | - | - |
 | 5. Inconsistent metadata | Open | - | - |
 | 6. Label key escaping | Open | - | - |

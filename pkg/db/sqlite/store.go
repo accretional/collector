@@ -16,10 +16,11 @@ import (
 )
 
 type SqliteStore struct {
-	db      *sql.DB
-	path    string
-	options collection.Options
-	mu      sync.RWMutex
+	db            *sql.DB
+	path          string
+	options       collection.Options
+	mu            sync.RWMutex
+	jsonConverter collection.ProtoToJSONConverter // Converts binary proto to JSON for jsontext column
 }
 
 // NewSqliteStore initializes the database and applies schemas.
@@ -107,23 +108,56 @@ func NewSqliteStore(path string, opts collection.Options) (*SqliteStore, error) 
 func (s *SqliteStore) Close() error { return s.db.Close() }
 func (s *SqliteStore) Path() string { return s.path }
 
+// SetJSONConverter sets the function used to convert binary proto_data to JSON for the jsontext column.
+// This must be called before CreateRecord/UpdateRecord if EnableJSON is true and proto_data contains binary protobuf.
+func (s *SqliteStore) SetJSONConverter(conv collection.ProtoToJSONConverter) {
+	s.jsonConverter = conv
+}
+
 func (s *SqliteStore) CreateRecord(ctx context.Context, r *pb.CollectionRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	query := `INSERT INTO records (id, proto_data, data_uri, created_at, updated_at, labels, jsontext) 
-              VALUES (?, ?, ?, ?, ?, ?, ?)`
-
 	labelsJSON, _ := json.Marshal(r.Metadata.Labels)
 
-	// If proto_data is valid JSON, use it for jsontext. Otherwise, use a default.
-	var jsonText string
-	if json.Valid(r.ProtoData) {
-		jsonText = string(r.ProtoData)
-	} else {
-		jsonText = "{}"
+	// If EnableJSON, include jsontext column; otherwise use simpler query
+	if s.options.EnableJSON {
+		// Determine JSON representation for the jsontext column.
+		// Priority:
+		//   1. Use jsonConverter if set (converts binary protobuf to JSON)
+		//   2. Use proto_data directly if it's already valid JSON
+		//   3. Fallback to "{}" - record is stored but JSON field searches won't find it
+		//      (label searches still work since labels column is separate)
+		var jsonText string
+		if s.jsonConverter != nil {
+			converted, err := s.jsonConverter(r.ProtoData)
+			if err != nil {
+				return fmt.Errorf("convert proto to JSON: %w", err)
+			}
+			jsonText = converted
+		} else if json.Valid(r.ProtoData) {
+			jsonText = string(r.ProtoData)
+		} else {
+			jsonText = "{}"
+		}
+
+		query := `INSERT INTO records (id, proto_data, data_uri, created_at, updated_at, labels, jsontext)
+                  VALUES (?, ?, ?, ?, ?, ?, ?)`
+		_, err := s.db.ExecContext(ctx, query,
+			r.Id,
+			r.ProtoData,
+			r.DataUri,
+			r.Metadata.CreatedAt.Seconds,
+			r.Metadata.UpdatedAt.Seconds,
+			string(labelsJSON),
+			jsonText,
+		)
+		return err
 	}
 
+	// Without EnableJSON, don't use jsontext column
+	query := `INSERT INTO records (id, proto_data, data_uri, created_at, updated_at, labels)
+              VALUES (?, ?, ?, ?, ?, ?)`
 	_, err := s.db.ExecContext(ctx, query,
 		r.Id,
 		r.ProtoData,
@@ -131,7 +165,6 @@ func (s *SqliteStore) CreateRecord(ctx context.Context, r *pb.CollectionRecord) 
 		r.Metadata.CreatedAt.Seconds,
 		r.Metadata.UpdatedAt.Seconds,
 		string(labelsJSON),
-		jsonText,
 	)
 	return err
 }
@@ -183,23 +216,43 @@ func (s *SqliteStore) UpdateRecord(ctx context.Context, r *pb.CollectionRecord) 
 	}
 	defer tx.Rollback()
 
-	query := `UPDATE records SET proto_data=?, updated_at=?, labels=?, jsontext=? WHERE id=?`
 	labelsJSON, _ := json.Marshal(r.Metadata.Labels)
 
-	var jsonText string
-	if json.Valid(r.ProtoData) {
-		jsonText = string(r.ProtoData)
+	var res sql.Result
+	if s.options.EnableJSON {
+		// Determine JSON representation for the jsontext column (same logic as CreateRecord)
+		var jsonText string
+		if s.jsonConverter != nil {
+			converted, err := s.jsonConverter(r.ProtoData)
+			if err != nil {
+				return fmt.Errorf("convert proto to JSON: %w", err)
+			}
+			jsonText = converted
+		} else if json.Valid(r.ProtoData) {
+			jsonText = string(r.ProtoData)
+		} else {
+			jsonText = "{}"
+		}
+
+		query := `UPDATE records SET proto_data=?, updated_at=?, labels=?, jsontext=? WHERE id=?`
+		res, err = tx.ExecContext(ctx, query,
+			r.ProtoData,
+			r.Metadata.UpdatedAt.Seconds,
+			string(labelsJSON),
+			jsonText,
+			r.Id,
+		)
 	} else {
-		jsonText = "{}"
+		// Without EnableJSON, don't update jsontext column
+		query := `UPDATE records SET proto_data=?, updated_at=?, labels=? WHERE id=?`
+		res, err = tx.ExecContext(ctx, query,
+			r.ProtoData,
+			r.Metadata.UpdatedAt.Seconds,
+			string(labelsJSON),
+			r.Id,
+		)
 	}
 
-	res, err := tx.ExecContext(ctx, query,
-		r.ProtoData,
-		r.Metadata.UpdatedAt.Seconds,
-		string(labelsJSON),
-		jsonText,
-		r.Id,
-	)
 	if err != nil {
 		return err
 	}

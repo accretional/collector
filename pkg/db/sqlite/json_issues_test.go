@@ -10,6 +10,7 @@ import (
 
 	"github.com/accretional/collector/gen/collector"
 	"github.com/accretional/collector/pkg/collection"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -263,6 +264,181 @@ func TestIssue2_EnableJSONValidationBeforeSearch(t *testing.T) {
 		// Should return empty results (no records created)
 		if len(results) != 0 {
 			t.Errorf("Expected 0 results, got %d", len(results))
+		}
+	})
+}
+
+// TestIssue3_InvalidJSONHandling tests that invalid JSON proto_data is handled properly.
+// Issue: Invalid JSON silently defaults to empty object (store.go:119-125)
+func TestIssue3_InvalidJSONHandling(t *testing.T) {
+	// Test 1: Valid JSON proto_data should work fine
+	t.Run("ValidJSONProtoData", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		dbPath := filepath.Join(tmpDir, "test.db")
+
+		store, err := NewSqliteStore(dbPath, collection.Options{EnableJSON: true})
+		if err != nil {
+			t.Fatalf("Store creation failed: %v", err)
+		}
+		defer store.Close()
+
+		ctx := context.Background()
+
+		// Create record with valid JSON proto_data
+		record := &collector.CollectionRecord{
+			Id:        "valid-json",
+			ProtoData: []byte(`{"name": "test", "status": "active"}`),
+			Metadata: &collector.Metadata{
+				CreatedAt: timestamppb.Now(),
+				UpdatedAt: timestamppb.Now(),
+				Labels:    map[string]string{"type": "test"},
+			},
+		}
+
+		err = store.CreateRecord(ctx, record)
+		if err != nil {
+			t.Fatalf("CreateRecord with valid JSON should succeed: %v", err)
+		}
+
+		// Should be searchable by JSON field
+		results, err := store.Search(ctx, &collection.SearchQuery{
+			Filters: map[string]collection.Filter{
+				"status": {Operator: collection.OpEquals, Value: "active"},
+			},
+		})
+		if err != nil {
+			t.Fatalf("Search failed: %v", err)
+		}
+		if len(results) != 1 {
+			t.Errorf("Expected 1 result, got %d", len(results))
+		}
+	})
+
+	// Test 2: Binary proto_data with EnableJSON but no converter falls back gracefully
+	t.Run("BinaryProtoWithoutConverter", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		dbPath := filepath.Join(tmpDir, "test.db")
+
+		store, err := NewSqliteStore(dbPath, collection.Options{EnableJSON: true})
+		if err != nil {
+			t.Fatalf("Store creation failed: %v", err)
+		}
+		defer store.Close()
+
+		ctx := context.Background()
+
+		// Create record with binary protobuf (not JSON)
+		// Without a converter set, this should fall back to "{}" for jsontext
+		record := &collector.CollectionRecord{
+			Id:        "binary-proto",
+			ProtoData: []byte{0x0a, 0x04, 0x74, 0x65, 0x73, 0x74}, // binary protobuf, not JSON
+			Metadata: &collector.Metadata{
+				CreatedAt: timestamppb.Now(),
+				UpdatedAt: timestamppb.Now(),
+				Labels:    map[string]string{"type": "test"},
+			},
+		}
+
+		// Should succeed - falls back to "{}" for jsontext (graceful degradation)
+		err = store.CreateRecord(ctx, record)
+		if err != nil {
+			t.Errorf("CreateRecord should succeed with fallback, got error: %v", err)
+		}
+
+		// Verify the record was stored
+		retrieved, err := store.GetRecord(ctx, "binary-proto")
+		if err != nil {
+			t.Fatalf("GetRecord failed: %v", err)
+		}
+		if string(retrieved.ProtoData) != string(record.ProtoData) {
+			t.Errorf("ProtoData mismatch: got %v, want %v", retrieved.ProtoData, record.ProtoData)
+		}
+	})
+
+	// Test 3: Binary proto_data with converter should convert properly
+	t.Run("BinaryProtoWithConverter", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		dbPath := filepath.Join(tmpDir, "test.db")
+
+		store, err := NewSqliteStore(dbPath, collection.Options{EnableJSON: true})
+		if err != nil {
+			t.Fatalf("Store creation failed: %v", err)
+		}
+		defer store.Close()
+
+		// Use real converter for Collection type
+		store.SetJSONConverter(collection.NewStaticJSONConverter(&collector.Collection{}))
+
+		ctx := context.Background()
+
+		// Create a real Collection proto and marshal it
+		testCollection := &collector.Collection{
+			Namespace: "test",
+			Name:      "mytest",
+		}
+		protoBytes, err := proto.Marshal(testCollection)
+		if err != nil {
+			t.Fatalf("Failed to marshal test proto: %v", err)
+		}
+
+		record := &collector.CollectionRecord{
+			Id:        "converted-proto",
+			ProtoData: protoBytes,
+			Metadata: &collector.Metadata{
+				CreatedAt: timestamppb.Now(),
+				UpdatedAt: timestamppb.Now(),
+				Labels:    map[string]string{"type": "test"},
+			},
+		}
+
+		err = store.CreateRecord(ctx, record)
+		if err != nil {
+			t.Fatalf("CreateRecord with converter should succeed: %v", err)
+		}
+
+		// Search should find the record using converted JSON
+		results, err := store.Search(ctx, &collection.SearchQuery{
+			Filters: map[string]collection.Filter{
+				"namespace": {Operator: collection.OpEquals, Value: "test"},
+			},
+		})
+		if err != nil {
+			t.Fatalf("Search failed: %v", err)
+		}
+		if len(results) != 1 {
+			t.Errorf("Expected 1 result, got %d", len(results))
+		}
+	})
+
+	// Test 4: Invalid JSON proto_data WITHOUT EnableJSON should work (no JSON features used)
+	t.Run("InvalidJSONWithoutEnableJSON", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		dbPath := filepath.Join(tmpDir, "test.db")
+
+		// Create store WITHOUT EnableJSON - binary protobuf should be fine
+		store, err := NewSqliteStore(dbPath, collection.Options{EnableJSON: false})
+		if err != nil {
+			t.Fatalf("Store creation failed: %v", err)
+		}
+		defer store.Close()
+
+		ctx := context.Background()
+
+		// Create record with binary protobuf (not JSON)
+		record := &collector.CollectionRecord{
+			Id:        "binary-proto",
+			ProtoData: []byte{0x0a, 0x04, 0x74, 0x65, 0x73, 0x74}, // binary protobuf
+			Metadata: &collector.Metadata{
+				CreatedAt: timestamppb.Now(),
+				UpdatedAt: timestamppb.Now(),
+				Labels:    map[string]string{},
+			},
+		}
+
+		// Without EnableJSON, binary proto_data should be fine
+		err = store.CreateRecord(ctx, record)
+		if err != nil {
+			t.Errorf("CreateRecord without EnableJSON should accept binary proto_data: %v", err)
 		}
 	})
 }

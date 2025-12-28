@@ -28,11 +28,12 @@ message CollectionDir {
 }
 
 // A record in the Collection table (the "inode")
-// Only serialized proto bytes here, derive JSON as needed.
-// Note that table records do have a json_data field
+// proto_data contains binary serialized protobuf. When stored with EnableJSON,
+// the Store derives a JSON representation and stores it in the jsontext column
+// for efficient searching via json_extract().
 message CollectionRecord {
   string id = 1;  // Primary key
-  bytes proto_data = 2;  // Serialized protobuf
+  bytes proto_data = 2;  // Serialized protobuf (binary)
   string data_uri = 3;  // Optional reference to CollectionData/Dir
   Metadata metadata = 4;
 }

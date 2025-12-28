@@ -42,17 +42,24 @@ type Store interface {
 	ExecuteRaw(query string, args ...interface{}) error
 }
 
+// JSONConverterSetter is an optional interface that stores can implement
+// to support setting a JSON converter for proto→JSON conversion.
+type JSONConverterSetter interface {
+	SetJSONConverter(conv ProtoToJSONConverter)
+}
+
 // StoreFactory is a function that creates a new Store instance at the given path with the given options.
 type StoreFactory func(path string, opts Options) (Store, error)
 
 // DefaultCollectionRepo is a facade that provides a simple interface for managing collections.
 // It uses a CollectionRepoService and a Store to do the heavy lifting.
 type DefaultCollectionRepo struct {
-	service       *CollectionRepoService
-	store         Store
-	pathConfig    *PathConfig
-	storeFactory  StoreFactory
-	typeValidator MessageTypeValidator // Optional: validates message types if set
+	service          *CollectionRepoService
+	store            Store
+	pathConfig       *PathConfig
+	storeFactory     StoreFactory
+	typeValidator    MessageTypeValidator   // Optional: validates message types if set
+	converterFactory JSONConverterFactory   // Optional: creates JSON converters for stores
 }
 
 // NewCollectionRepo creates a new DefaultCollectionRepo with the given Store, PathConfig, RegistryStore, and StoreFactory.
@@ -71,6 +78,12 @@ func NewCollectionRepo(store Store, pathConfig *PathConfig, registryStore Regist
 // This is optional - if not set, type validation is skipped.
 func (r *DefaultCollectionRepo) SetTypeValidator(validator MessageTypeValidator) {
 	r.typeValidator = validator
+}
+
+// SetJSONConverterFactory sets the factory used to create JSON converters for stores.
+// If not set, stores will use fallback behavior (proto_data if valid JSON, else "{}").
+func (r *DefaultCollectionRepo) SetJSONConverterFactory(factory JSONConverterFactory) {
+	r.converterFactory = factory
 }
 
 // CreateCollection creates a new collection.
@@ -255,6 +268,17 @@ func (r *DefaultCollectionRepo) GetCollection(ctx context.Context, namespace, na
 	store, err := r.storeFactory(dbPath, Options{EnableJSON: true, EnableFTS: true})
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database at %s: %w", dbPath, err)
+	}
+
+	// Set up JSON converter if factory is available and store supports it
+	if r.converterFactory != nil {
+		if setter, ok := store.(JSONConverterSetter); ok {
+			if mt := metadata.Collection.GetMessageType(); mt != nil {
+				if conv := r.converterFactory(mt.GetNamespace(), mt.GetMessageName()); conv != nil {
+					setter.SetJSONConverter(conv)
+				}
+			}
+		}
 	}
 
 	// Create filesystem

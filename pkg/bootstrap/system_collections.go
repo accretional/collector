@@ -110,6 +110,9 @@ func (sc *SystemCollections) bootstrapCollectionRegistry(ctx context.Context) er
 		return fmt.Errorf("init sqlite: %w", err)
 	}
 
+	// Set JSON converter for Collection type (system type known at compile time)
+	store.SetJSONConverter(collection.GetSystemTypeConverter("Collection"))
+
 	// Create filesystem
 	filesPath, err := sc.pathConfig.CollectionFilesPath(namespace, name)
 	if err != nil {
@@ -202,6 +205,9 @@ func (sc *SystemCollections) bootstrapTypeRegistry(ctx context.Context) error {
 		return fmt.Errorf("init sqlite: %w", err)
 	}
 
+	// Set JSON converter for ValidationRule type
+	store.SetJSONConverter(collection.GetSystemTypeConverter("ValidationRule"))
+
 	filesPath, err := sc.pathConfig.CollectionFilesPath(namespace, name)
 	if err != nil {
 		return fmt.Errorf("invalid files path: %w", err)
@@ -277,6 +283,9 @@ func (sc *SystemCollections) bootstrapConnections(ctx context.Context) error {
 		return fmt.Errorf("init sqlite: %w", err)
 	}
 
+	// Set JSON converter for Connection type
+	store.SetJSONConverter(collection.GetSystemTypeConverter("Connection"))
+
 	filesPath, err := sc.pathConfig.CollectionFilesPath(namespace, name)
 	if err != nil {
 		return fmt.Errorf("invalid files path: %w", err)
@@ -344,6 +353,9 @@ func (sc *SystemCollections) bootstrapAudit(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("init sqlite: %w", err)
 	}
+
+	// Set JSON converter for AuditEvent type
+	store.SetJSONConverter(collection.GetSystemTypeConverter("AuditEvent"))
 
 	filesPath, err := sc.pathConfig.CollectionFilesPath(namespace, name)
 	if err != nil {
@@ -413,6 +425,9 @@ func (sc *SystemCollections) bootstrapLogs(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("init sqlite: %w", err)
 	}
+
+	// Set JSON converter for SystemLog type
+	store.SetJSONConverter(collection.GetSystemTypeConverter("SystemLog"))
 
 	filesPath, err := sc.pathConfig.CollectionFilesPath(namespace, name)
 	if err != nil {

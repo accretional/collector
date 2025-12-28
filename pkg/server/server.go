@@ -153,6 +153,7 @@ func New(config Config) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("init protos store: %w", err)
 	}
+	protosStore.SetJSONConverter(collection.GetSystemTypeConverter("RegisteredProto"))
 	s.stores = append(s.stores, protosStore)
 
 	registeredProtos, err := collection.NewCollection(
@@ -177,6 +178,7 @@ func New(config Config) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("init services store: %w", err)
 	}
+	servicesStore.SetJSONConverter(collection.GetSystemTypeConverter("RegisteredService"))
 	s.stores = append(s.stores, servicesStore)
 
 	registeredServices, err := collection.NewCollection(
@@ -252,7 +254,19 @@ func New(config Config) (*Server, error) {
 
 	// Wire type registry into collection repo for type validation
 	collectionRepo.SetTypeValidator(systemCollections.TypeRegistry)
-	s.log.Info("Collection repository created with type validation")
+
+	// Wire JSON converter factory for proto→JSON conversion in stores
+	// This allows searching collections by JSON fields
+	converterFactory := collection.NewRegistryConverterFactory(func(namespace, messageName string) (*descriptorpb.FileDescriptorProto, error) {
+		ctx := context.Background()
+		registeredProto, err := registryServer.LookupProtoByMessageName(ctx, namespace, messageName)
+		if err != nil {
+			return nil, err
+		}
+		return registeredProto.GetFileDescriptor(), nil
+	})
+	collectionRepo.SetJSONConverterFactory(converterFactory)
+	s.log.Info("Collection repository created with type validation and JSON conversion")
 
 	// ========================================================================
 	// 4. Create gRPC Server with ALL Services

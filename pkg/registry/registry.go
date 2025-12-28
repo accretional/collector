@@ -343,6 +343,34 @@ func (s *RegistryServer) LookupProto(ctx context.Context, namespace, fileName st
 	return registeredProto, nil
 }
 
+// LookupProtoByMessageName searches for a registered proto that contains the given message name.
+// It searches within the specified namespace and returns the first matching proto.
+func (s *RegistryServer) LookupProtoByMessageName(ctx context.Context, namespace, messageName string) (*collector.RegisteredProto, error) {
+	// Search for protos in this namespace that contain the message name
+	// The messageNames field is stored as a JSON array in the jsontext column
+	results, err := s.registeredProtos.Search(ctx, &collection.SearchQuery{
+		LabelFilters: map[string]string{"namespace": namespace},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("search protos: %w", err)
+	}
+
+	// Check each result for the message name
+	for _, result := range results {
+		registeredProto := &collector.RegisteredProto{}
+		if err := proto.Unmarshal(result.Record.ProtoData, registeredProto); err != nil {
+			continue // Skip invalid records
+		}
+		for _, name := range registeredProto.MessageNames {
+			if name == messageName {
+				return registeredProto, nil
+			}
+		}
+	}
+
+	return nil, status.Errorf(codes.NotFound, "proto with message %s not found in namespace %s", messageName, namespace)
+}
+
 // LookupService retrieves a registered service by namespace and service name
 func (s *RegistryServer) LookupService(ctx context.Context, req *collector.LookupServiceRequest) (*collector.LookupServiceResponse, error) {
 	serviceID := fmt.Sprintf("%s/%s", req.Namespace, req.ServiceName)
