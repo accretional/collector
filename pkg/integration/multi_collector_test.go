@@ -43,7 +43,14 @@ func setupCollector(t *testing.T, collectorID, namespace string, port int) (
 	t.Cleanup(func() { protosStore.Close() })
 
 	registeredProtos, err := collection.NewCollection(
-		&pb.Collection{Namespace: "system", Name: "registered_protos"},
+		&pb.Collection{
+			Namespace: "system",
+			Name:      "registered_protos",
+			MessageType: &pb.MessageTypeRef{
+				Namespace:   "collector",
+				MessageName: "RegisteredProto",
+			},
+		},
 		protosStore,
 		&collection.LocalFileSystem{},
 	)
@@ -61,7 +68,14 @@ func setupCollector(t *testing.T, collectorID, namespace string, port int) (
 	t.Cleanup(func() { servicesStore.Close() })
 
 	registeredServices, err := collection.NewCollection(
-		&pb.Collection{Namespace: "system", Name: "registered_services"},
+		&pb.Collection{
+			Namespace: "system",
+			Name:      "registered_services",
+			MessageType: &pb.MessageTypeRef{
+				Namespace:   "collector",
+				MessageName: "RegisteredService",
+			},
+		},
 		servicesStore,
 		&collection.LocalFileSystem{},
 	)

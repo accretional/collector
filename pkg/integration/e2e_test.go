@@ -42,7 +42,14 @@ func TestEndToEndIntegration(t *testing.T) {
 	defer protosStore.Close()
 
 	registeredProtos, err := collection.NewCollection(
-		&pb.Collection{Namespace: "system", Name: "registered_protos"},
+		&pb.Collection{
+			Namespace: "system",
+			Name:      "registered_protos",
+			MessageType: &pb.MessageTypeRef{
+				Namespace:   "collector",
+				MessageName: "RegisteredProto",
+			},
+		},
 		protosStore,
 		&collection.LocalFileSystem{},
 	)
@@ -60,7 +67,14 @@ func TestEndToEndIntegration(t *testing.T) {
 	defer servicesStore.Close()
 
 	registeredServices, err := collection.NewCollection(
-		&pb.Collection{Namespace: "system", Name: "registered_services"},
+		&pb.Collection{
+			Namespace: "system",
+			Name:      "registered_services",
+			MessageType: &pb.MessageTypeRef{
+				Namespace:   "collector",
+				MessageName: "RegisteredService",
+			},
+		},
 		servicesStore,
 		&collection.LocalFileSystem{},
 	)

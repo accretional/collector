@@ -15,12 +15,34 @@ import (
 )
 
 func setupTestServer(t *testing.T) (*RegistryServer, *collection.Collection, *collection.Collection) {
-	registeredProtos, err := collection.NewCollection(&collector.Collection{Namespace: "system", Name: "registered_protos"}, newTempStore(t), &collection.LocalFileSystem{})
+	registeredProtos, err := collection.NewCollection(
+		&collector.Collection{
+			Namespace: "system",
+			Name:      "registered_protos",
+			MessageType: &collector.MessageTypeRef{
+				Namespace:   "collector",
+				MessageName: "RegisteredProto",
+			},
+		},
+		newTempStore(t),
+		&collection.LocalFileSystem{},
+	)
 	if err != nil {
 		t.Fatalf("failed to create registered protos collection: %v", err)
 	}
 
-	registeredServices, err := collection.NewCollection(&collector.Collection{Namespace: "system", Name: "registered_services"}, newTempStore(t), &collection.LocalFileSystem{})
+	registeredServices, err := collection.NewCollection(
+		&collector.Collection{
+			Namespace: "system",
+			Name:      "registered_services",
+			MessageType: &collector.MessageTypeRef{
+				Namespace:   "collector",
+				MessageName: "RegisteredService",
+			},
+		},
+		newTempStore(t),
+		&collection.LocalFileSystem{},
+	)
 	if err != nil {
 		t.Fatalf("failed to create registered services collection: %v", err)
 	}

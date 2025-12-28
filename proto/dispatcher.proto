@@ -24,6 +24,7 @@ message DispatchServer {
 }
 
 // Stored in Connections Collection
+// Tracks both current state and history of collector-to-collector connections
 message Connection {
   string id = 1;
   string source_collector_id = 2;
@@ -31,7 +32,35 @@ message Connection {
   string address = 4;
   repeated string shared_namespaces = 5;
   Metadata metadata = 6;
-  google.protobuf.Timestamp last_activity = 7;
+
+  // Lifecycle timestamps
+  google.protobuf.Timestamp connected_at = 7;
+  google.protobuf.Timestamp disconnected_at = 8;  // Set when connection ends
+  google.protobuf.Timestamp last_activity = 9;
+  google.protobuf.Timestamp last_heartbeat = 10;
+
+  // Session tracking for crash recovery
+  // Each collector restart generates a new session_id
+  // On startup, connections from previous sessions are marked STALE
+  string session_id = 11;
+
+  // Usage statistics
+  int64 request_count = 12;
+  int64 bytes_sent = 13;
+  int64 bytes_received = 14;
+  int32 reconnect_count = 15;  // Times this source->target pair has reconnected
+
+  // Connection status
+  ConnectionStatus status = 16;
+  string status_message = 17;  // Human-readable status details (e.g., error message)
+
+  enum ConnectionStatus {
+    UNKNOWN = 0;
+    ACTIVE = 1;
+    DISCONNECTED = 2;  // Clean disconnect
+    FAILED = 3;        // Error-induced disconnect
+    STALE = 4;         // From previous session, status unknown
+  }
 }
 
 // Stored in Dispatches Collection (tracks dispatch history)

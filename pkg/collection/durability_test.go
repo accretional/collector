@@ -105,24 +105,36 @@ func TestUpdateRecord_RollbackOnFailure(t *testing.T) {
 		t.Error("original data not correct")
 	}
 
-	// Try to update with invalid data
+	// Try to update with data that exceeds the size limit
+	// This should fail and preserve the original data
+	oversizedData := make([]byte, collection.MaxProtoSize+1)
+	for i := range oversizedData {
+		oversizedData[i] = 'x'
+	}
 	invalid := &pb.CollectionRecord{
 		Id:        "rollback-test",
-		ProtoData: []byte{0xFF, 0xFE}, // Invalid UTF-8
+		ProtoData: oversizedData,
 	}
 
-	_ = coll.UpdateRecord(ctx, invalid)
+	err := coll.UpdateRecord(ctx, invalid)
+	if err == nil {
+		t.Fatal("expected update to fail due to size limit")
+	}
 
-	// Original data should still be retrievable
-	retrieved, err := coll.GetRecord(ctx, "rollback-test")
+	// Original data should still be retrievable and unchanged
+	retrieved, err = coll.GetRecord(ctx, "rollback-test")
 	if err != nil {
 		t.Fatalf("failed to get record after failed update: %v", err)
 	}
 
-	// If the update failed, original should be preserved
+	// Original should be preserved since the update failed
 	var data map[string]interface{}
 	if err := json.Unmarshal(retrieved.ProtoData, &data); err != nil {
 		t.Error("data should still be valid JSON")
+	}
+
+	if data["version"] != float64(1) {
+		t.Errorf("expected version 1, got %v", data["version"])
 	}
 }
 

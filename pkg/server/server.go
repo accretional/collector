@@ -18,6 +18,7 @@ import (
 	"github.com/accretional/collector/pkg/db/sqlite"
 	"github.com/accretional/collector/pkg/dispatch"
 	"github.com/accretional/collector/pkg/registry"
+	"github.com/accretional/collector/pkg/security"
 	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -53,6 +54,9 @@ type Config struct {
 
 	// Logger is the logger to use (default: log.Default())
 	Logger *log.Logger
+
+	// AuthInterceptor is an optional security interceptor (default: allow all)
+	AuthInterceptor grpc.UnaryServerInterceptor
 }
 
 // Server represents a fully configured Collector server with all services.
@@ -146,7 +150,14 @@ func New(config Config) (*Server, error) {
 	s.stores = append(s.stores, protosStore)
 
 	registeredProtos, err := collection.NewCollection(
-		&pb.Collection{Namespace: "system", Name: "registered_protos"},
+		&pb.Collection{
+			Namespace: "system",
+			Name:      "registered_protos",
+			MessageType: &pb.MessageTypeRef{
+				Namespace:   "collector",
+				MessageName: "RegisteredProto",
+			},
+		},
 		protosStore,
 		&collection.LocalFileSystem{},
 	)
@@ -163,7 +174,14 @@ func New(config Config) (*Server, error) {
 	s.stores = append(s.stores, servicesStore)
 
 	registeredServices, err := collection.NewCollection(
-		&pb.Collection{Namespace: "system", Name: "registered_services"},
+		&pb.Collection{
+			Namespace: "system",
+			Name:      "registered_services",
+			MessageType: &pb.MessageTypeRef{
+				Namespace:   "collector",
+				MessageName: "RegisteredService",
+			},
+		},
 		servicesStore,
 		&collection.LocalFileSystem{},
 	)
@@ -238,10 +256,16 @@ func New(config Config) (*Server, error) {
 	auditLogger := collection.NewAuditLogger(s.systemCollections.Audit)
 	s.logger.Println("✓ Audit logger initialized")
 
+	// Setup Auth Interceptor (default to no-op if nil)
+	authInterceptor := config.AuthInterceptor
+	if authInterceptor == nil {
+		authInterceptor = security.DefaultAuthInterceptor
+	}
+
 	grpcServer := registry.NewServerWithValidation(
 		registryServer,
 		config.Namespace,
-		grpc.ChainUnaryInterceptor(auditLogger.UnaryServerInterceptor()),
+		grpc.ChainUnaryInterceptor(authInterceptor, auditLogger.UnaryServerInterceptor()),
 	)
 	s.grpcServer = grpcServer
 
@@ -310,6 +334,11 @@ func New(config Config) (*Server, error) {
 	// Register Dispatcher service
 	pb.RegisterCollectiveDispatcherServer(grpcServer, dispatcher)
 	s.logger.Println("✓ Registered CollectiveDispatcher service")
+
+	// Recover connections from previous session
+	if err := dispatcher.GetConnectionManager().RecoverFromRestart(ctx); err != nil {
+		s.logger.Printf("Warning: failed to recover connections: %v", err)
+	}
 
 	s.logger.Println("\n========================================")
 	s.logger.Printf("Collector %s running on 0.0.0.0:%d", config.CollectorID, config.Port)

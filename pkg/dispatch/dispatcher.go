@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	pb "github.com/accretional/collector/gen/collector"
 	"github.com/accretional/collector/pkg/collection"
@@ -11,6 +12,12 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/anypb"
 )
+
+// generateSessionID creates a unique session ID for this dispatcher instance.
+// Format: {collectorID}_{timestamp_nano}
+func generateSessionID(collectorID string) string {
+	return fmt.Sprintf("%s_%d", collectorID, time.Now().UnixNano())
+}
 
 // ServiceHandler is a function that handles a service method invocation
 type ServiceHandler func(ctx context.Context, input interface{}) (interface{}, error)
@@ -36,16 +43,18 @@ type Dispatcher struct {
 
 // NewDispatcher creates a new dispatcher instance
 func NewDispatcher(collectorID, address string, namespaces []string) *Dispatcher {
+	sessionID := generateSessionID(collectorID)
 	return &Dispatcher{
-		connManager: NewConnectionManager(collectorID, address, namespaces, nil),
+		connManager: NewConnectionManager(collectorID, address, namespaces, sessionID, nil),
 		services:    make(map[string]map[string]ServiceHandler),
 	}
 }
 
 // NewDispatcherWithRegistry creates a new dispatcher instance with registry validation
 func NewDispatcherWithRegistry(collectorID, address string, namespaces []string, validator RegistryValidator, coll *collection.Collection) *Dispatcher {
+	sessionID := generateSessionID(collectorID)
 	return &Dispatcher{
-		connManager:       NewConnectionManager(collectorID, address, namespaces, coll),
+		connManager:       NewConnectionManager(collectorID, address, namespaces, sessionID, coll),
 		services:          make(map[string]map[string]ServiceHandler),
 		registryValidator: validator,
 	}
