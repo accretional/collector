@@ -54,7 +54,13 @@ func NewSqliteStore(path string, opts collection.Options) (*SqliteStore, error) 
 
 	if opts.EnableJSON {
 		if _, err := db.Exec(collection.JSONSchema); err != nil {
-			// Ignore error if column already exists, or handle strictly
+			// Only ignore "duplicate column" errors (idempotent schema application)
+			// Any other error indicates a real problem that should be surfaced
+			if !strings.Contains(err.Error(), "duplicate column") {
+				db.Close()
+				return nil, fmt.Errorf("json schema failed: %w", err)
+			}
+			// Column already exists - this is fine (idempotent)
 		}
 	}
 
@@ -258,6 +264,12 @@ func (s *SqliteStore) CountRecords(ctx context.Context) (int64, error) {
 }
 
 func (s *SqliteStore) Search(ctx context.Context, q *collection.SearchQuery) ([]*collection.SearchResult, error) {
+	// Validate that EnableJSON was set if JSON features are being used
+	requiresJSON := len(q.Filters) > 0 || len(q.LabelFilters) > 0 || q.OrderBy != ""
+	if requiresJSON && !s.options.EnableJSON {
+		return nil, fmt.Errorf("search with filters, label filters, or ordering requires EnableJSON option; store was created without EnableJSON")
+	}
+
 	var query strings.Builder
 	var args []interface{}
 	var whereClauses []string

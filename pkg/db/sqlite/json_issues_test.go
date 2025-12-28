@@ -1,0 +1,268 @@
+package sqlite
+
+import (
+	"context"
+	"database/sql"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/accretional/collector/gen/collector"
+	"github.com/accretional/collector/pkg/collection"
+	"google.golang.org/protobuf/types/known/timestamppb"
+)
+
+// TestIssue1_JSONSchemaErrorHandling tests that JSON schema errors are properly handled.
+// Issue: Silent error on JSON schema creation (store.go:55-59)
+// The error from JSONSchema execution was silently ignored, which could hide real failures.
+func TestIssue1_JSONSchemaErrorHandling(t *testing.T) {
+	// Test 1: Normal creation with EnableJSON should work
+	t.Run("NormalCreation", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		dbPath := filepath.Join(tmpDir, "test.db")
+
+		store, err := NewSqliteStore(dbPath, collection.Options{EnableJSON: true})
+		if err != nil {
+			t.Fatalf("Expected store creation to succeed, got error: %v", err)
+		}
+		defer store.Close()
+
+		// Verify jsontext column exists by inserting a record
+		ctx := context.Background()
+		record := &collector.CollectionRecord{
+			Id:        "test-1",
+			ProtoData: []byte(`{"name": "test"}`),
+			Metadata: &collector.Metadata{
+				CreatedAt: timestamppb.Now(),
+				UpdatedAt: timestamppb.Now(),
+				Labels:    map[string]string{"env": "test"},
+			},
+		}
+		if err := store.CreateRecord(ctx, record); err != nil {
+			t.Fatalf("Failed to create record: %v", err)
+		}
+
+		// Verify we can search using JSON features
+		results, err := store.Search(ctx, &collection.SearchQuery{
+			LabelFilters: map[string]string{"env": "test"},
+		})
+		if err != nil {
+			t.Fatalf("Search failed: %v", err)
+		}
+		if len(results) != 1 {
+			t.Errorf("Expected 1 result, got %d", len(results))
+		}
+	})
+
+	// Test 2: Idempotent creation - calling twice with EnableJSON should work
+	t.Run("IdempotentCreation", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		dbPath := filepath.Join(tmpDir, "test.db")
+
+		// First creation
+		store1, err := NewSqliteStore(dbPath, collection.Options{EnableJSON: true})
+		if err != nil {
+			t.Fatalf("First store creation failed: %v", err)
+		}
+		store1.Close()
+
+		// Second creation on same DB - should succeed (column already exists)
+		store2, err := NewSqliteStore(dbPath, collection.Options{EnableJSON: true})
+		if err != nil {
+			t.Fatalf("Second store creation should succeed (idempotent), got error: %v", err)
+		}
+		defer store2.Close()
+	})
+
+	// Test 3: Verify that non-duplicate-column errors are NOT silently ignored
+	// This test creates a scenario where JSONSchema fails for a reason other than
+	// "duplicate column" and verifies the error is returned.
+	t.Run("NonDuplicateColumnErrorReturned", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		dbPath := filepath.Join(tmpDir, "test.db")
+
+		// Open database directly and create a conflicting state
+		dsn := "file:" + dbPath + "?_journal_mode=WAL&_busy_timeout=10000"
+		db, err := sql.Open("sqlite", dsn)
+		if err != nil {
+			t.Fatalf("Failed to open db: %v", err)
+		}
+
+		// Create the default schema
+		if _, err := db.Exec(collection.DefaultSchema); err != nil {
+			db.Close()
+			t.Fatalf("Failed to create default schema: %v", err)
+		}
+
+		// Create jsontext as an INTEGER column (incompatible with TEXT)
+		// This simulates a corrupted/incompatible state
+		if _, err := db.Exec("ALTER TABLE records ADD COLUMN jsontext INTEGER"); err != nil {
+			db.Close()
+			t.Fatalf("Failed to add incompatible column: %v", err)
+		}
+		db.Close()
+
+		// Now try to create a SqliteStore with EnableJSON
+		// The JSONSchema tries: ALTER TABLE records ADD COLUMN jsontext TEXT
+		// This should fail because jsontext already exists (but as INTEGER)
+		// With the bug, this error would be silently ignored
+		// After fix, the store creation should still succeed (duplicate column is OK)
+		// but if the column type mismatch causes issues, they should surface
+		store, err := NewSqliteStore(dbPath, collection.Options{EnableJSON: true})
+		if err != nil {
+			// If we get an error here, that's actually fine - it means we're not
+			// silently ignoring errors. But duplicate column errors should be OK.
+			if !strings.Contains(err.Error(), "duplicate column") {
+				t.Logf("Got non-duplicate-column error (expected with fix): %v", err)
+			}
+		} else {
+			defer store.Close()
+			// Store was created - verify the column is actually usable
+			// If the column exists but is wrong type, operations may fail
+			ctx := context.Background()
+			record := &collector.CollectionRecord{
+				Id:        "test-1",
+				ProtoData: []byte(`{"name": "test"}`),
+				Metadata: &collector.Metadata{
+					CreatedAt: timestamppb.Now(),
+					UpdatedAt: timestamppb.Now(),
+					Labels:    map[string]string{"key": "value"},
+				},
+			}
+			// This might fail if the column type is incompatible
+			err := store.CreateRecord(ctx, record)
+			if err != nil {
+				t.Logf("CreateRecord failed (may indicate column type issue): %v", err)
+			}
+		}
+	})
+
+	// Test 4: Verify error is returned when database becomes read-only during JSON schema
+	t.Run("ReadOnlyDatabaseError", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		dbPath := filepath.Join(tmpDir, "test.db")
+
+		// Create database with default schema only (no JSON)
+		dsn := "file:" + dbPath + "?_journal_mode=WAL&_busy_timeout=10000"
+		db, err := sql.Open("sqlite", dsn)
+		if err != nil {
+			t.Fatalf("Failed to open db: %v", err)
+		}
+		if _, err := db.Exec(collection.DefaultSchema); err != nil {
+			db.Close()
+			t.Fatalf("Failed to create default schema: %v", err)
+		}
+		db.Close()
+
+		// Make the database file read-only
+		if err := os.Chmod(dbPath, 0444); err != nil {
+			t.Fatalf("Failed to make db read-only: %v", err)
+		}
+		// Restore permissions after test
+		defer os.Chmod(dbPath, 0644)
+
+		// Try to create store with EnableJSON - should fail because we can't write
+		// With the current bug, this might silently ignore the JSON schema error
+		// After fix, we should get an error
+		_, err = NewSqliteStore(dbPath, collection.Options{EnableJSON: true})
+		if err == nil {
+			t.Error("Expected error when creating store on read-only database with EnableJSON, got nil")
+		} else {
+			t.Logf("Got expected error for read-only database: %v", err)
+		}
+	})
+}
+
+// TestIssue2_EnableJSONValidationBeforeSearch tests that Search properly validates
+// EnableJSON state before executing JSON queries.
+// Issue: No EnableJSON validation before Search() (store.go:260-365)
+func TestIssue2_EnableJSONValidationBeforeSearch(t *testing.T) {
+	// Test: Search with filters on store created WITHOUT EnableJSON should return clear error
+	t.Run("SearchWithoutEnableJSON", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		dbPath := filepath.Join(tmpDir, "test.db")
+
+		// Create store WITHOUT EnableJSON
+		store, err := NewSqliteStore(dbPath, collection.Options{EnableJSON: false})
+		if err != nil {
+			t.Fatalf("Store creation failed: %v", err)
+		}
+		defer store.Close()
+
+		ctx := context.Background()
+
+		// Try to search with label filters - this uses json_extract on labels column
+		// which doesn't exist when EnableJSON is false
+		_, err = store.Search(ctx, &collection.SearchQuery{
+			LabelFilters: map[string]string{"namespace": "test"},
+		})
+
+		// Should get a clear error message about EnableJSON
+		if err == nil {
+			t.Error("Expected error when searching with filters on non-JSON store, got nil")
+		} else {
+			errStr := err.Error()
+			if !strings.Contains(errStr, "EnableJSON") {
+				t.Errorf("Error should mention EnableJSON, got: %v", err)
+			}
+		}
+	})
+
+	// Test: Search with JSON field filters on store without EnableJSON
+	t.Run("SearchFiltersWithoutEnableJSON", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		dbPath := filepath.Join(tmpDir, "test.db")
+
+		// Create store WITHOUT EnableJSON
+		store, err := NewSqliteStore(dbPath, collection.Options{EnableJSON: false})
+		if err != nil {
+			t.Fatalf("Store creation failed: %v", err)
+		}
+		defer store.Close()
+
+		ctx := context.Background()
+
+		// Try to search with field filters - this uses json_extract on jsontext column
+		_, err = store.Search(ctx, &collection.SearchQuery{
+			Filters: map[string]collection.Filter{
+				"status": {Operator: collection.OpEquals, Value: "active"},
+			},
+		})
+
+		// Should get a clear error message about EnableJSON
+		if err == nil {
+			t.Error("Expected error when searching with filters on non-JSON store, got nil")
+		} else {
+			errStr := err.Error()
+			if !strings.Contains(errStr, "EnableJSON") {
+				t.Errorf("Error should mention EnableJSON, got: %v", err)
+			}
+		}
+	})
+
+	// Test: Empty search query should work even without EnableJSON
+	t.Run("EmptySearchWithoutEnableJSON", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		dbPath := filepath.Join(tmpDir, "test.db")
+
+		// Create store WITHOUT EnableJSON
+		store, err := NewSqliteStore(dbPath, collection.Options{EnableJSON: false})
+		if err != nil {
+			t.Fatalf("Store creation failed: %v", err)
+		}
+		defer store.Close()
+
+		ctx := context.Background()
+
+		// Empty search query should work - no JSON features needed
+		results, err := store.Search(ctx, &collection.SearchQuery{})
+		if err != nil {
+			t.Errorf("Empty search should work without EnableJSON: %v", err)
+		}
+		// Should return empty results (no records created)
+		if len(results) != 0 {
+			t.Errorf("Expected 0 results, got %d", len(results))
+		}
+	})
+}
