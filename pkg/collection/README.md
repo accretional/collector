@@ -608,4 +608,27 @@ pb.RegisterCollectionServiceServer(grpcServer, collectionServer)
 - Computed/virtual fields
 - Triggers and hooks on CRUD operations
 - Time-series optimizations
-- GraphQL interface
+
+## Logging & Observability
+
+The system uses a structured logging system backed by a dedicated collection (`system/logs`).
+
+### System Logger
+
+`SystemLogger` provides structured logging that writes to both stdout (for immediate operator visibility) and persists to the `system/logs` collection (for queryability and retention).
+
+```go
+// Usage
+log := collection.NewSystemLogger(logsCollection)
+log.Info("Backup started", "collection", "users", "size_bytes", 1024)
+log.Error("Failed to connect", "error", err)
+```
+
+**Features:**
+- **Buffered writes**: Writes to SQLite are buffered to prevent blocking critical paths.
+- **Persistence**: Logs are stored as protobuf records in `system/logs`.
+- **Searchable**: Search logs by component and level via `Metadata.Labels` (e.g., `labels.level = "ERROR"`).
+- **Standard levels**: DEBUG, INFO, WARN, ERROR.
+
+**Note**: Full-text search on log messages is not currently supported because log payloads are stored as binary protobufs to maximize performance. Use `component` and `level` labels for filtering.
+

@@ -61,19 +61,19 @@ registryCollection.Create(ctx, &pb.CollectionRecord{
 // 3. Now it's bootstrapped and can track other collections normally
 ```
 
-**Current State:** ✅ **IMPLEMENTED**
+**Current State:** ✅ **FULLY IMPLEMENTED**
 - `SystemCollections.CollectionRegistry` in `pkg/bootstrap/system_collections.go`
 - Self-referential bootstrap in `bootstrapCollectionRegistry()`
 - Stores `pb.Collection` protos in `system/collections` collection
 - Tests in `pkg/bootstrap/system_collections_test.go`
 
-**Legacy (still in use by CollectionRepo):**
-- `SqliteRegistryStore` in `pkg/collection/registry_store.go`
-- Direct SQL table: `collections(id, namespace, name, db_path, ...)`
+**Production Usage (server.go:227):**
+- `CollectionRegistryStore` wraps `system/collections` Collection
+- Implements `RegistryStore` interface
+- `CollectionRepo` uses this in production
 
-**Remaining Migration:**
-- Update `CollectionRepo` to use `SystemCollections.CollectionRegistry` instead of `SqliteRegistryStore`
-- This would unify the two implementations
+**Test-only (not used in production):**
+- `SqliteRegistryStore` in `pkg/collection/registry_store.go` - direct SQL for test simplicity
 
 **Benefits (already available):**
 - ✅ Search collections: `"indexed_fields contains email"`
@@ -532,13 +532,14 @@ func (l *CollectionLogger) Error(msg string, fields ...interface{}) {
 
 ## Implementation Order
 
-### Phase 1: Collection Registry ✅ **IMPLEMENTED**
+### Phase 1: Collection Registry ✅ **COMPLETE**
 1. ✅ `system/collections` collection exists (`pkg/bootstrap/system_collections.go`)
 2. ✅ Self-referential bootstrap implemented in `bootstrapCollectionRegistry()`
-3. ⬜ Migrate `SqliteRegistryStore` to use collection (still uses direct SQL)
-4. ✅ Search via Collection API available
-5. ✅ Bootstrap sequence tested in `system_collections_test.go`
-6. ⬜ Update CollectionRepo to use bootstrapped registry instead of SqliteRegistryStore
+3. ✅ `CollectionRegistryStore` wraps collection, implements `RegistryStore` interface
+4. ✅ Server uses `CollectionRegistryStore` in production (server.go:227)
+5. ✅ Search via Collection API available
+6. ✅ Bootstrap sequence tested in `system_collections_test.go`
+7. ℹ️ `SqliteRegistryStore` kept for test convenience only
 
 ### Phase 2: Type Registry (Partial - registry collections exist)
 1. ✅ `system/registered_protos` and `system/registered_services` collections exist
@@ -638,17 +639,16 @@ func (l *CollectionLogger) Error(msg string, fields ...interface{}) {
 1. **Self-Reference**: Collection registry references itself - must handle bootstrap carefully
 2. **Performance**: Connection/audit need buffering - can't write on every operation
 3. **Type Safety**: Type registry enables runtime validation - consider performance impact
-4. **Backward Compat**: Existing code uses SqliteRegistryStore - need migration path
+4. **Backward Compat**: Tests still use SqliteRegistryStore for simplicity; production uses CollectionRegistryStore
 5. **Logs Volume**: Logs collection could be huge - need retention policy from day 1
 
 **Success Criteria:**
 
 - [x] System boots with all system collections (bootstrap package)
-- [x] Can query collection registry (system/collections)
+- [x] Can query collection registry (system/collections via CollectionRegistryStore)
 - [ ] Type validation works on all requests
 - [x] Connection history is queryable (implemented with persistence)
 - [x] Connection crash recovery works (RecoverFromRestart)
 - [x] Audit trail captures operations (basic interceptor exists)
 - [x] All tests pass
 - [ ] Performance is acceptable (<10ms overhead)
-- [ ] Migrate SqliteRegistryStore to use collection-based registry
