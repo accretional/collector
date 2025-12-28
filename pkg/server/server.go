@@ -17,6 +17,7 @@ import (
 	"github.com/accretional/collector/pkg/collection"
 	"github.com/accretional/collector/pkg/db/sqlite"
 	"github.com/accretional/collector/pkg/dispatch"
+	"github.com/accretional/collector/pkg/logging"
 	"github.com/accretional/collector/pkg/registry"
 	"github.com/accretional/collector/pkg/security"
 	"github.com/google/uuid"
@@ -63,6 +64,7 @@ type Config struct {
 type Server struct {
 	config     Config
 	logger     *log.Logger
+	log        logging.Logger // Structured logger
 	grpcServer *grpc.Server
 	listener   net.Listener
 	dispatcher *dispatch.Dispatcher
@@ -123,6 +125,10 @@ func New(config Config) (*Server, error) {
 		return nil, fmt.Errorf("bootstrap system collections: %w", err)
 	}
 	s.systemCollections = systemCollections
+
+	// Initialize structured logger
+	sysLogger := collection.NewSystemLogger(systemCollections.Logs)
+	s.log = sysLogger.With("collector_id", config.CollectorID, "namespace", config.Namespace)
 
 	s.logger.Println("✓ System collections ready:")
 	s.logger.Printf("  - Collection Registry: system/collections")
@@ -194,23 +200,23 @@ func New(config Config) (*Server, error) {
 
 	// Wire type registry into registry server for automatic type registration
 	registryServer.SetTypeRegistrar(systemCollections.TypeRegistry)
-	s.logger.Println("✓ Registry server created with type registration")
+	s.log.Info("Registry server created with type registration")
 
 	// Register all services in the registry
 	if err := registry.RegisterCollectionService(ctx, registryServer, config.Namespace); err != nil {
 		return nil, fmt.Errorf("register CollectionService: %w", err)
 	}
-	s.logger.Printf("✓ Registered CollectionService in namespace '%s'", config.Namespace)
+	s.log.Info("Registered CollectionService", "namespace", config.Namespace)
 
 	if err := registry.RegisterDispatcherService(ctx, registryServer, config.Namespace); err != nil {
 		return nil, fmt.Errorf("register Dispatcher: %w", err)
 	}
-	s.logger.Printf("✓ Registered CollectiveDispatcher in namespace '%s'", config.Namespace)
+	s.log.Info("Registered CollectiveDispatcher", "namespace", config.Namespace)
 
 	if err := registry.RegisterCollectionRepoService(ctx, registryServer, config.Namespace); err != nil {
 		return nil, fmt.Errorf("register CollectionRepo: %w", err)
 	}
-	s.logger.Printf("✓ Registered CollectionRepo in namespace '%s'", config.Namespace)
+	s.log.Info("Registered CollectionRepo", "namespace", config.Namespace)
 
 	// ========================================================================
 	// 3. Setup Collection Repository
@@ -220,14 +226,14 @@ func New(config Config) (*Server, error) {
 	// This enables "dogfooding" - the registry is just another collection
 	registryStore := collection.NewCollectionRegistryStore(s.systemCollections.CollectionRegistry)
 	s.registryStore = registryStore
-	s.logger.Println("✓ Registry store initialized using system/collections")
+	s.log.Info("Registry store initialized using system/collections")
 
 	// Clean up any timed-out operations from previous crashes
-	s.logger.Println("Checking for timed-out operations...")
+	s.log.Info("Checking for timed-out operations...")
 	if cleaned, err := collection.CleanupTimedOutOperations(ctx, registryStore); err != nil {
-		s.logger.Printf("Warning: failed to cleanup timed-out operations: %v", err)
+		s.log.Warn("Failed to cleanup timed-out operations", "error", err)
 	} else if cleaned > 0 {
-		s.logger.Printf("✓ Cleaned up %d timed-out operation(s)", cleaned)
+		s.log.Info("Cleaned up timed-out operations", "count", cleaned)
 	}
 
 	// Create repo with PathConfig and registry store
@@ -246,7 +252,7 @@ func New(config Config) (*Server, error) {
 
 	// Wire type registry into collection repo for type validation
 	collectionRepo.SetTypeValidator(systemCollections.TypeRegistry)
-	s.logger.Println("✓ Collection repository created with type validation")
+	s.log.Info("Collection repository created with type validation")
 
 	// ========================================================================
 	// 4. Create gRPC Server with ALL Services
@@ -254,7 +260,7 @@ func New(config Config) (*Server, error) {
 
 	// Audit Logger
 	auditLogger := collection.NewAuditLogger(s.systemCollections.Audit)
-	s.logger.Println("✓ Audit logger initialized")
+	s.log.Info("Audit logger initialized")
 
 	// Setup Auth Interceptor (default to no-op if nil)
 	authInterceptor := config.AuthInterceptor
@@ -273,17 +279,17 @@ func New(config Config) (*Server, error) {
 
 	// 1. Registry Service
 	pb.RegisterCollectorRegistryServer(grpcServer, registryServer)
-	s.logger.Println("✓ Registered CollectorRegistry service")
+	s.log.Info("Registered CollectorRegistry service")
 
 	// 2. Collection Service
 	collectionServer := collection.NewCollectionServer(collectionRepo)
 	pb.RegisterCollectionServiceServer(grpcServer, collectionServer)
-	s.logger.Println("✓ Registered CollectionService")
+	s.log.Info("Registered CollectionService")
 
 	// 3. CollectionRepo Service
 	repoGrpcServer := collection.NewGrpcServer(collectionRepo, pathConfig)
 	pb.RegisterCollectionRepoServer(grpcServer, repoGrpcServer)
-	s.logger.Println("✓ Registered CollectionRepo")
+	s.log.Info("Registered CollectionRepo")
 
 	// ========================================================================
 	// 5. Setup Listener (but don't start serving yet)
@@ -300,7 +306,7 @@ func New(config Config) (*Server, error) {
 	time.Sleep(100 * time.Millisecond) // Let server start
 
 	actualAddr := lis.Addr().String()
-	s.logger.Printf("✓ Server started on %s", actualAddr)
+	s.log.Info("Server started", "address", actualAddr)
 
 	// ========================================================================
 	// 6. Setup Dispatcher with gRPC-based Registry Validation
@@ -329,27 +335,24 @@ func New(config Config) (*Server, error) {
 		s.systemCollections.Connections,
 	)
 	s.dispatcher = dispatcher
-	s.logger.Println("✓ Dispatcher created with gRPC-based registry validation")
+	s.log.Info("Dispatcher created with gRPC-based registry validation")
 
 	// Register Dispatcher service
 	pb.RegisterCollectiveDispatcherServer(grpcServer, dispatcher)
-	s.logger.Println("✓ Registered CollectiveDispatcher service")
+	s.log.Info("Registered CollectiveDispatcher service")
 
 	// Recover connections from previous session
 	if err := dispatcher.GetConnectionManager().RecoverFromRestart(ctx); err != nil {
-		s.logger.Printf("Warning: failed to recover connections: %v", err)
+		s.log.Warn("Failed to recover connections", "error", err)
 	}
 
-	s.logger.Println("\n========================================")
-	s.logger.Printf("Collector %s running on 0.0.0.0:%d", config.CollectorID, config.Port)
-	s.logger.Println("All services available:")
-	s.logger.Println("  - CollectorRegistry")
-	s.logger.Println("  - CollectionService")
-	s.logger.Println("  - CollectiveDispatcher")
-	s.logger.Println("  - CollectionRepo")
-	s.logger.Printf("Namespace: %s", config.Namespace)
-	s.logger.Println("Registry validation: ENABLED")
-	s.logger.Println("========================================")
+	s.log.Info("Collector started successfully",
+		"id", config.CollectorID,
+		"port", config.Port,
+		"namespace", config.Namespace,
+		"validation", "ENABLED",
+		"services", "CollectorRegistry, CollectionService, CollectiveDispatcher, CollectionRepo",
+	)
 
 	return s, nil
 }

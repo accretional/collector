@@ -184,13 +184,27 @@ import (
 
 // Create collections to store registered protos and services
 registeredProtos, _ := collection.NewCollection(
-    &pb.Collection{Namespace: "system", Name: "registered_protos"},
+    &pb.Collection{
+        Namespace: "system",
+        Name:      "registered_protos",
+        MessageType: &pb.MessageTypeRef{
+            Namespace:   "collector",
+            MessageName: "RegisteredProto",
+        },
+    },
     protosStore,
     &collection.LocalFileSystem{},
 )
 
 registeredServices, _ := collection.NewCollection(
-    &pb.Collection{Namespace: "system", Name: "registered_services"},
+    &pb.Collection{
+        Namespace: "system",
+        Name:      "registered_services",
+        MessageType: &pb.MessageTypeRef{
+            Namespace:   "collector",
+            MessageName: "RegisteredService",
+        },
+    },
     servicesStore,
     &collection.LocalFileSystem{},
 )
@@ -395,13 +409,27 @@ func main() {
     servicesStore, _ := sqlite.NewSqliteStore("./data/services.db", collection.Options{EnableJSON: true})
 
     registeredProtos, _ := collection.NewCollection(
-        &pb.Collection{Namespace: "system", Name: "registered_protos"},
+        &pb.Collection{
+            Namespace: "system",
+            Name:      "registered_protos",
+            MessageType: &pb.MessageTypeRef{
+                Namespace:   "collector",
+                MessageName: "RegisteredProto",
+            },
+        },
         protosStore,
         &collection.LocalFileSystem{},
     )
 
     registeredServices, _ := collection.NewCollection(
-        &pb.Collection{Namespace: "system", Name: "registered_services"},
+        &pb.Collection{
+            Namespace: "system",
+            Name:      "registered_services",
+            MessageType: &pb.MessageTypeRef{
+                Namespace:   "collector",
+                MessageName: "RegisteredService",
+            },
+        },
         servicesStore,
         &collection.LocalFileSystem{},
     )

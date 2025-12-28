@@ -20,7 +20,7 @@ CollectorRegistry is **production-ready for basic schema registration** with str
 - ✅ **Input Validation**: Namespace, proto name, service name validation blocking path traversal, reserved names, invalid characters
 - ✅ **Size Limits**: Configurable limits on message count (100k), nesting depth (100), proto size (10MB)
 - ✅ **Global Protection**: MaxProtoSize enforced at collection level (defense-in-depth)
-- ✅ **Reserved Namespaces**: Blocks `repo`, `backups`, `files`, `system`, `internal`, `admin`, `metadata`
+- ✅ **Reserved Namespaces**: Blocks `repo`, `backups`, `files` (filesystem conflicts only; `system`, `internal`, `admin`, `metadata` are allowed for internal use)
 - ✅ **Hierarchical Validation**: ValidateServiceName rejects slashes; ValidateProtoFileName allows dots for extensions
 
 ### Core Functionality

@@ -52,9 +52,9 @@ func TestTypeRegistry_CacheInvalidation(t *testing.T) {
 
 	// 3. Verify Cache Hit (Read)
 	// We can't access tr.cache directly (private), but we can verify behavior
-	// or use reflection/export for whitebox testing. 
+	// or use reflection/export for whitebox testing.
 	// Since we are in the same package (bootstrap), we CAN access private fields if we use package bootstrap.
-	
+
 	typeID := namespace + "/" + msgName
 	tr.mu.RLock()
 	cachedRule, inCache := tr.cache[typeID]

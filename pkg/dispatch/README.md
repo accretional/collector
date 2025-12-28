@@ -48,9 +48,9 @@ Creates a bidirectional connection between two collectors.
 **Request:**
 ```protobuf
 message ConnectRequest {
-  string collector_id = 1;        // ID of collector initiating connection
-  string address = 2;             // gRPC address of initiating collector
-  repeated string namespaces = 3; // Namespaces supported by initiator
+  string address = 1;                    // gRPC address of initiating collector
+  repeated string namespaces = 2;        // Namespaces supported by initiator
+  map<string, string> metadata = 3;      // Optional metadata (e.g., "collector_id")
 }
 ```
 
@@ -375,7 +375,7 @@ func main() {
     // Client Makes Request
     // ============================================================
 
-    conn, _ := grpc.Dial("localhost:50051", grpc.WithInsecure())
+    conn, _ := grpc.NewClient("localhost:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
     client := pb.NewCollectiveDispatcherClient(conn)
 
     // Request to "users" namespace - executes on Collector 1 (local)

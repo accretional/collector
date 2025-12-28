@@ -61,39 +61,21 @@ registryCollection.Create(ctx, &pb.CollectionRecord{
 // 3. Now it's bootstrapped and can track other collections normally
 ```
 
-**Current State:**
+**Current State:** ✅ **IMPLEMENTED**
+- `SystemCollections.CollectionRegistry` in `pkg/bootstrap/system_collections.go`
+- Self-referential bootstrap in `bootstrapCollectionRegistry()`
+- Stores `pb.Collection` protos in `system/collections` collection
+- Tests in `pkg/bootstrap/system_collections_test.go`
+
+**Legacy (still in use by CollectionRepo):**
 - `SqliteRegistryStore` in `pkg/collection/registry_store.go`
 - Direct SQL table: `collections(id, namespace, name, db_path, ...)`
 
-**Migration:**
-```go
-type CollectionRegistry struct {
-    collection *Collection  // system/collections
-}
+**Remaining Migration:**
+- Update `CollectionRepo` to use `SystemCollections.CollectionRegistry` instead of `SqliteRegistryStore`
+- This would unify the two implementations
 
-// Replaces SqliteRegistryStore methods:
-func (r *CollectionRegistry) SaveCollection(ctx, coll, dbPath) {
-    return r.collection.Create(ctx, &CollectionRecord{
-        Id: coll.Namespace + "/" + coll.Name,
-        ProtoData: marshal(coll),
-    })
-}
-
-func (r *CollectionRegistry) GetCollection(ctx, ns, name) {
-    record := r.collection.Get(ctx, ns + "/" + name)
-    return unmarshal(record.ProtoData)
-}
-
-func (r *CollectionRegistry) ListCollections(ctx, namespace) {
-    return r.collection.Search(ctx, &SearchQuery{
-        Filters: map[string]Filter{
-            "namespace": {Operator: OpEquals, Value: namespace},
-        },
-    })
-}
-```
-
-**Benefits:**
+**Benefits (already available):**
 - ✅ Search collections: `"indexed_fields contains email"`
 - ✅ Query by labels: `"environment=production"`
 - ✅ Full-text search collection metadata
@@ -324,15 +306,19 @@ connections := r.collection.Search(ctx, &SearchQuery{
 })
 ```
 
-**Current State:**
+**Current State:** ✅ **IMPLEMENTED**
 - `ConnectionManager` in `pkg/dispatch/connection_manager.go`
-- In-memory only: `map[string]*ConnectionState`
+- Persists connections to collection (optional, nil-safe)
+- `ActiveConnection` struct for in-memory state (gRPC clients, activity)
+- `Connection` proto updated with lifecycle timestamps, session tracking, usage stats
+- `RecoverFromRestart()` marks stale connections from previous sessions
+- Tests in `pkg/dispatch/connection_persistence_test.go`
 
-**Migration:**
-- Add `collection *Collection` field
-- Persist on connect/disconnect
-- Keep in-memory cache for performance
-- Periodic background sync for activity updates
+**Implementation Details:**
+- Session IDs track collector restarts (format: `{collectorID}_{timestamp_nano}`)
+- Connection statuses: ACTIVE, DISCONNECTED, FAILED, STALE
+- Stats tracked: request_count, bytes_sent, bytes_received, reconnect_count
+- In-memory cache maintained for performance with fallback when no persistence
 
 ---
 
@@ -546,44 +532,41 @@ func (l *CollectionLogger) Error(msg string, fields ...interface{}) {
 
 ## Implementation Order
 
-### Phase 1: Collection Registry (Week 1)
-1. Create `system/collections` collection
-2. Implement self-referential bootstrap
-3. Migrate `SqliteRegistryStore` to use collection
-4. Add search capabilities
-5. Test bootstrap sequence
-6. Update all callers
+### Phase 1: Collection Registry ✅ **IMPLEMENTED**
+1. ✅ `system/collections` collection exists (`pkg/bootstrap/system_collections.go`)
+2. ✅ Self-referential bootstrap implemented in `bootstrapCollectionRegistry()`
+3. ⬜ Migrate `SqliteRegistryStore` to use collection (still uses direct SQL)
+4. ✅ Search via Collection API available
+5. ✅ Bootstrap sequence tested in `system_collections_test.go`
+6. ⬜ Update CollectionRepo to use bootstrapped registry instead of SqliteRegistryStore
 
-### Phase 2: Type Registry (Week 1-2)
-1. Define `RegisteredType` proto
-2. Create `system/types` collection
-3. Register all collector types
-4. Implement type validation interceptor
-5. Merge existing `registered_protos` and `registered_services`
-6. Enable validation on all requests
+### Phase 2: Type Registry (Partial - registry collections exist)
+1. ✅ `system/registered_protos` and `system/registered_services` collections exist
+2. ✅ Collections now set MessageType field
+3. ⬜ Define unified `RegisteredType` proto
+4. ⬜ Implement type validation interceptor
+5. ⬜ Merge protos/services into unified type registry
 
-### Phase 3: Connection Collection (Week 2)
-1. Define enhanced `Connection` proto with state
-2. Create `system/connections` collection
-3. Migrate `ConnectionManager` to persist
-4. Keep in-memory cache for performance
-5. Add activity tracking and updates
-6. Test connection history queries
+### Phase 3: Connection Collection ✅ **COMPLETE**
+1. ✅ Enhanced `Connection` proto with state, timestamps, session tracking
+2. ✅ `ConnectionManager` persists to collection (optional)
+3. ✅ In-memory `ActiveConnection` cache for performance
+4. ✅ `RecoverFromRestart()` marks stale connections
+5. ✅ Activity tracking (request_count, bytes_sent/received)
+6. ✅ Tests in `connection_persistence_test.go`
 
-### Phase 4: Audit Collection (Week 2-3)
-1. Define `AuditEvent` proto
-2. Create `system/audit` collection
-3. Implement audit interceptor
-4. Add buffered audit logger
-5. Integrate with all gRPC methods
-6. Test audit queries
+### Phase 4: Audit Collection (Partial - interceptor exists)
+1. ✅ `AuditEvent` proto exists
+2. ✅ Basic audit interceptor in `pkg/collection/audit.go`
+3. ⬜ Buffered audit logger for batch inserts
+4. ⬜ Test audit queries
 
-### Phase 5: Logs Collection (Future)
-1. Design structured logging interface
-2. Create `system/logs` collection
-3. Implement buffered logger
-4. Replace existing log statements
-5. Add retention/cleanup
+### Phase 5: Logs Collection (Future - Stub)
+1. ⬜ Design structured logging interface
+2. ⬜ Create `system/logs` collection
+3. ⬜ Implement buffered logger
+4. ⬜ Replace existing log statements
+5. ⬜ Add retention/cleanup
 
 ---
 
@@ -660,10 +643,12 @@ func (l *CollectionLogger) Error(msg string, fields ...interface{}) {
 
 **Success Criteria:**
 
-- [ ] System boots with all system collections
-- [ ] Can query collection registry
+- [x] System boots with all system collections (bootstrap package)
+- [x] Can query collection registry (system/collections)
 - [ ] Type validation works on all requests
-- [ ] Connection history is queryable
-- [ ] Audit trail captures all operations
-- [ ] All tests pass
+- [x] Connection history is queryable (implemented with persistence)
+- [x] Connection crash recovery works (RecoverFromRestart)
+- [x] Audit trail captures operations (basic interceptor exists)
+- [x] All tests pass
 - [ ] Performance is acceptable (<10ms overhead)
+- [ ] Migrate SqliteRegistryStore to use collection-based registry

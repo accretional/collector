@@ -17,14 +17,14 @@ import (
 // ActiveConnection represents the runtime state of an active connection.
 // This is kept in memory and contains resources that cannot be persisted (gRPC clients).
 type ActiveConnection struct {
-	ConnectionID string                         // Links to persisted Connection record
-	Client       pb.CollectiveDispatcherClient  // gRPC client for making calls
-	GrpcConn     *grpc.ClientConn               // Underlying gRPC connection
-	LastActivity time.Time                      // For timeout/health checks
-	IsInitiator  bool                           // True if we initiated this connection
+	ConnectionID string                        // Links to persisted Connection record
+	Client       pb.CollectiveDispatcherClient // gRPC client for making calls
+	GrpcConn     *grpc.ClientConn              // Underlying gRPC connection
+	LastActivity time.Time                     // For timeout/health checks
+	IsInitiator  bool                          // True if we initiated this connection
 
 	// Cached connection info for when persistence is unavailable
-	Connection   *pb.Connection
+	Connection *pb.Connection
 }
 
 // ConnectionManager manages connections between collectors.

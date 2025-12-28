@@ -6,17 +6,20 @@ This document provides critical guidelines for AI agents (like Claude, GPT, etc.
 
 ### Go Installation
 
-This project requires **Go 1.25.5** (or the version specified in `go.mod`).
+This project requires the Go version specified in `go.mod` (currently **Go 1.25**).
 
 **Installing/Upgrading Go:**
 
 ```bash
-# Download and install Go from official source
+# Check required version in go.mod
+head -3 go.mod
+
+# Download and install Go from official source (example for 1.25)
 cd /tmp
-wget https://go.dev/dl/go1.25.5.linux-amd64.tar.gz
+wget https://go.dev/dl/go1.25.linux-amd64.tar.gz
 sudo rm -rf /usr/local/go
-sudo tar -C /usr/local -xzf go1.25.5.linux-amd64.tar.gz
-rm go1.25.5.linux-amd64.tar.gz
+sudo tar -C /usr/local -xzf go1.25.linux-amd64.tar.gz
+rm go1.25.linux-amd64.tar.gz
 
 # Verify installation
 /usr/local/go/bin/go version
@@ -24,7 +27,7 @@ rm go1.25.5.linux-amd64.tar.gz
 
 **Note:** Go versions are available at `https://go.dev/dl/go{VERSION}.linux-amd64.tar.gz`
 
-Replace `{VERSION}` with the desired version (e.g., `1.25.5`, `1.24.11`, etc.)
+Replace `{VERSION}` with the version from go.mod (e.g., `1.25`, `1.24.11`, etc.)
 
 **Update PATH:**
 ```bash

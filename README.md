@@ -231,7 +231,8 @@ func main() {
 - `Logger` - Custom logger (default: `log.Default()`)
 
 **Reserved Namespaces:**
-- `system` - Reserved for internal collections (types, collections, connections, audit, logs)
+- `repo`, `backups`, `files` - Reserved (conflict with filesystem paths)
+- `system` - Used for internal collections (types, collections, connections, audit, logs) but not blocked
 - Use your own namespace for application data (e.g., `"my-app"`, `"shared"`, `"production"`)
 
 **See also:** [examples/embedded/main.go](examples/embedded/main.go) for a complete example.
@@ -282,7 +283,7 @@ import (
 
 func main() {
     // Connect to collector
-    conn, _ := grpc.Dial("localhost:50051", grpc.WithInsecure())
+    conn, _ := grpc.NewClient("localhost:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
     defer conn.Close()
 
     ctx := context.Background()
@@ -291,9 +292,12 @@ func main() {
     repoClient := pb.NewCollectionRepoClient(conn)
     createResp, _ := repoClient.CreateCollection(ctx, &pb.CreateCollectionRequest{
         Collection: &pb.Collection{
-            Namespace:   "production",
-            Name:        "users",
-            MessageType: "collector.User",
+            Namespace: "production",
+            Name:      "users",
+            MessageType: &pb.MessageTypeRef{
+                Namespace:   "myapp",
+                MessageName: "User",
+            },
         },
     })
 
@@ -315,9 +319,11 @@ func main() {
     // 4. Connect to another collector
     dispatcherClient := pb.NewCollectiveDispatcherClient(conn)
     connectResp, _ := dispatcherClient.Connect(ctx, &pb.ConnectRequest{
-        CollectorId: "collector-001",
-        Address:     "localhost:50051",
-        Namespaces:  []string{"production"},
+        Address:    "localhost:50052",
+        Namespaces: []string{"production"},
+        Metadata: map[string]string{
+            "collector_id": "collector-001",
+        },
     })
 
     // 5. Dispatch a request (routes automatically)

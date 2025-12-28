@@ -63,7 +63,7 @@ type Collection struct {
 **Key Fields:**
 - `Namespace`: Logical isolation (e.g., "production", "staging", "tenant-123")
 - `Name`: Collection identifier (e.g., "users", "orders")
-- `MessageType`: Fully qualified proto message type (e.g., "collector.User")
+- `MessageType`: Reference to proto message type (`&pb.MessageTypeRef{Namespace: "myapp", MessageName: "User"}`)
 - `IndexedFields`: Fields to index for fast queries
 - `ServerEndpoint`: Optional gRPC endpoint for remote access
 
@@ -125,9 +125,12 @@ store, err := sqlite.NewSqliteStore("./data/users.db", collection.Options{
 // Create collection
 coll, err := collection.NewCollection(
     &pb.Collection{
-        Namespace:   "production",
-        Name:        "users",
-        MessageType: "collector.User",
+        Namespace: "production",
+        Name:      "users",
+        MessageType: &pb.MessageTypeRef{
+            Namespace:   "myapp",
+            MessageName: "User",
+        },
         IndexedFields: []string{"email", "username"},
     },
     store,
@@ -138,26 +141,37 @@ coll, err := collection.NewCollection(
 ### CRUD Operations
 
 ```go
-// CREATE
-record := &pb.User{
-    Id:       "user-123",
-    Name:     "Alice",
-    Email:    "alice@example.com",
-    Metadata: map[string]string{"role": "admin"},
+// CREATE - wrap your proto in a CollectionRecord
+user := &pb.User{
+    Id:    "user-123",
+    Name:  "Alice",
+    Email: "alice@example.com",
 }
+protoData, _ := proto.Marshal(user)
 
-err := coll.CreateRecord(ctx, "user-123", record)
+err := coll.CreateRecord(ctx, &pb.CollectionRecord{
+    Id:        "user-123",
+    ProtoData: protoData,
+    Metadata: &pb.Metadata{
+        Labels: map[string]string{"role": "admin"},
+    },
+})
 
-// GET
+// GET - returns CollectionRecord, unmarshal ProtoData
+record, err := coll.GetRecord(ctx, "user-123")
 user := &pb.User{}
-err := coll.GetRecord(ctx, "user-123", user)
+proto.Unmarshal(record.ProtoData, user)
 
-// UPDATE
+// UPDATE - pass full CollectionRecord
 user.Name = "Alice Smith"
-err := coll.UpdateRecord(ctx, "user-123", user)
+protoData, _ = proto.Marshal(user)
+err = coll.UpdateRecord(ctx, &pb.CollectionRecord{
+    Id:        "user-123",
+    ProtoData: protoData,
+})
 
 // DELETE
-err := coll.DeleteRecord(ctx, "user-123")
+err = coll.DeleteRecord(ctx, "user-123")
 
 // LIST
 records, err := coll.ListRecords(ctx, 10, 0)  // limit=10, offset=0
@@ -309,7 +323,7 @@ grpcServer.Serve(lis)
 
 ```go
 // Connect to CollectionService
-conn, _ := grpc.Dial("localhost:50051", grpc.WithInsecure())
+conn, _ := grpc.NewClient("localhost:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
 client := pb.NewCollectionServiceClient(conn)
 
 // Create record

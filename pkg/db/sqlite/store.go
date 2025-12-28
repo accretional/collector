@@ -35,6 +35,9 @@ func NewSqliteStore(path string, opts collection.Options) (*SqliteStore, error) 
 	pragmas := []string{
 		"PRAGMA synchronous = NORMAL",
 		"PRAGMA foreign_keys = ON",
+		// TODO: Consider enabling auto_vacuum = INCREMENTAL for production.
+		// A background maintenance task should monitor PRAGMA freelist_count
+		// and run PRAGMA incremental_vacuum or VACUUM when bloat > 20%.
 	}
 	for _, p := range pragmas {
 		if _, err := db.Exec(p); err != nil {

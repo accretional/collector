@@ -590,6 +590,41 @@ func TestVeryLargeRecord(t *testing.T) {
 	}
 }
 
+func TestUpdateRecord_BinaryData(t *testing.T) {
+	coll, cleanup := setupTestCollection(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// 1. Create binary record
+	binaryV1 := []byte{0x01, 0x02, 0x03}
+	record := &pb.CollectionRecord{
+		Id:        "binary-update",
+		ProtoData: binaryV1,
+	}
+	if err := coll.CreateRecord(ctx, record); err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+
+	// 2. Update with new binary data
+	binaryV2 := []byte{0x04, 0x05, 0x06, 0x07}
+	update := &pb.CollectionRecord{
+		Id:        "binary-update",
+		ProtoData: binaryV2,
+	}
+	if err := coll.UpdateRecord(ctx, update); err != nil {
+		t.Fatalf("update failed: %v", err)
+	}
+
+	// 3. Verify
+	retrieved, err := coll.GetRecord(ctx, "binary-update")
+	if err != nil {
+		t.Fatalf("get failed: %v", err)
+	}
+	if !bytes.Equal(retrieved.ProtoData, binaryV2) {
+		t.Errorf("expected %v, got %v", binaryV2, retrieved.ProtoData)
+	}
+}
+
 // Path Safety Tests
 
 func TestInvalidRecordIDs(t *testing.T) {
