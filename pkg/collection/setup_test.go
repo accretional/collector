@@ -92,14 +92,22 @@ func setupTestRepo(t *testing.T) (collection.CollectionRepo, func()) {
 	// 2. Create PathConfig
 	pathConfig := collection.NewPathConfig(tempDir)
 
-	// 3. Create registry store
-	registryPath := pathConfig.RegistryDBPath()
-	if err := os.MkdirAll(filepath.Dir(registryPath), 0755); err != nil {
+	// 3. Create registry store using CollectionRegistryStore (same as production)
+	registryDBPath := filepath.Join(tempDir, "system", "collections.db")
+	if err := os.MkdirAll(filepath.Dir(registryDBPath), 0755); err != nil {
+		os.RemoveAll(tempDir)
 		t.Fatalf("failed to create registry dir: %v", err)
 	}
 
-	registryStore, err := collection.NewSqliteRegistryStore(registryPath)
+	registryDBStore, err := sqlite.NewSqliteStore(registryDBPath, collection.Options{EnableJSON: true})
 	if err != nil {
+		os.RemoveAll(tempDir)
+		t.Fatalf("failed to create registry db store: %v", err)
+	}
+
+	registryStore, err := collection.NewCollectionRegistryStoreFromStore(registryDBStore, &collection.LocalFileSystem{})
+	if err != nil {
+		registryDBStore.Close()
 		os.RemoveAll(tempDir)
 		t.Fatalf("failed to create registry store: %v", err)
 	}
@@ -120,6 +128,7 @@ func setupTestRepo(t *testing.T) (collection.CollectionRepo, func()) {
 	// Cleanup function
 	cleanup := func() {
 		registryStore.Close()
+		registryDBStore.Close()
 		dummyStore.Close()
 		os.RemoveAll(tempDir)
 	}

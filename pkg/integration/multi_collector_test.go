@@ -99,13 +99,19 @@ func setupCollector(t *testing.T, collectorID, namespace string, port int) (
 	// Setup CollectionRepo with PathConfig and RegistryStore
 	pathConfig := collection.NewPathConfig(tempDir)
 
-	// Create registry store
-	registryPath := pathConfig.RegistryDBPath()
+	// Create registry store using CollectionRegistryStore (same as production)
+	registryPath := filepath.Join(tempDir, "system", "collections.db")
 	if err := os.MkdirAll(filepath.Dir(registryPath), 0755); err != nil {
 		t.Fatalf("failed to create registry dir: %v", err)
 	}
 
-	registryStore, err := collection.NewSqliteRegistryStore(registryPath)
+	registryDBStore, err := sqlite.NewSqliteStore(registryPath, collection.Options{EnableJSON: true})
+	if err != nil {
+		t.Fatalf("failed to create registry db store: %v", err)
+	}
+	t.Cleanup(func() { registryDBStore.Close() })
+
+	registryStore, err := collection.NewCollectionRegistryStoreFromStore(registryDBStore, &collection.LocalFileSystem{})
 	if err != nil {
 		t.Fatalf("failed to create registry store: %v", err)
 	}

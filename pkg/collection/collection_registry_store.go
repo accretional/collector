@@ -22,6 +22,28 @@ func NewCollectionRegistryStore(collection *Collection) *CollectionRegistryStore
 	}
 }
 
+// NewCollectionRegistryStoreFromStore creates a CollectionRegistryStore using the provided Store.
+// This is useful for testing where you want to use an in-memory store.
+// The store should have EnableJSON: true for search to work properly.
+func NewCollectionRegistryStoreFromStore(store Store, fs FileSystem) (*CollectionRegistryStore, error) {
+	coll, err := NewCollection(
+		&pb.Collection{
+			Namespace: "system",
+			Name:      "collections",
+			MessageType: &pb.MessageTypeRef{
+				Namespace:   "collector",
+				MessageName: "Collection",
+			},
+		},
+		store,
+		fs,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create system/collections: %w", err)
+	}
+	return NewCollectionRegistryStore(coll), nil
+}
+
 // SaveCollection persists a collection to the registry.
 func (s *CollectionRegistryStore) SaveCollection(ctx context.Context, collection *pb.Collection, dbPath string) error {
 	id := fmt.Sprintf("%s/%s", collection.Namespace, collection.Name)
@@ -91,30 +113,11 @@ func (s *CollectionRegistryStore) GetCollection(ctx context.Context, namespace, 
 		return nil, fmt.Errorf("unmarshal collection: %w", err)
 	}
 
-	// Reconstruct dbPath (it's not stored directly in the proto, but derived)
-	// In the SqliteRegistryStore it was stored, but here we might need to rely on PathConfig conventions
-	// or store it in the Metadata labels if strictly necessary.
-	// However, for now, let's assume standard paths or that the caller (Repo) handles paths.
-	// Wait, RegistryStore interface returns DBPath.
-	// The SqliteStore stored it explicitly.
-	// We should store it in the collection proto, maybe in Metadata?
-	// Or just return the standard path based on namespace/name?
-	// The interface signature requires returning it.
-
-	// Check if we stored it in labels?
-	// Let's modify SaveCollection to store dbPath in labels if needed,
-	// but standardizing on PathConfig is better.
-	// For backward compatibility with the interface, we'll try to look it up from labels
-	// or return a default if not found.
-
+	// dbPath is stored in the metadata labels by SaveCollection
 	dbPath := ""
 	if coll.Metadata != nil && coll.Metadata.Labels != nil {
 		dbPath = coll.Metadata.Labels["db_path"]
 	}
-
-	// If not in labels, the caller might reconstruct it using PathConfig.
-	// But let's verify what SqliteRegistryStore did.
-	// It stored 'db_path' column.
 
 	return &CollectionMetadata{
 		Collection: &coll,
@@ -165,7 +168,13 @@ func (s *CollectionRegistryStore) ListCollections(ctx context.Context, namespace
 }
 
 // DeleteCollection removes a collection from the registry.
+// System namespace collections cannot be deleted.
 func (s *CollectionRegistryStore) DeleteCollection(ctx context.Context, namespace, name string) error {
+	// Prevent deletion of system namespace collections
+	if namespace == "system" {
+		return fmt.Errorf("cannot delete system collection: %s/%s (system namespace is protected)", namespace, name)
+	}
+
 	id := fmt.Sprintf("%s/%s", namespace, name)
 	return s.collection.DeleteRecord(ctx, id)
 }

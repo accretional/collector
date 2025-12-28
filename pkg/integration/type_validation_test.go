@@ -32,12 +32,18 @@ func TestTypeValidationIntegration(t *testing.T) {
 	}
 	defer systemCollections.Close()
 
-	// Create registry store
-	registryStorePath := pathConfig.RegistryDBPath()
+	// Create registry store using CollectionRegistryStore (same as production)
+	registryStorePath := filepath.Join(tmpDir, "system", "collections.db")
 	if err := ensureDir(registryStorePath); err != nil {
 		t.Fatalf("Create registry dir failed: %v", err)
 	}
-	registryStore, err := collection.NewSqliteRegistryStore(registryStorePath)
+	registryDBStore, err := sqlite.NewSqliteStore(registryStorePath, collection.Options{EnableJSON: true})
+	if err != nil {
+		t.Fatalf("Create registry db store failed: %v", err)
+	}
+	defer registryDBStore.Close()
+
+	registryStore, err := collection.NewCollectionRegistryStoreFromStore(registryDBStore, &collection.LocalFileSystem{})
 	if err != nil {
 		t.Fatalf("Create registry store failed: %v", err)
 	}

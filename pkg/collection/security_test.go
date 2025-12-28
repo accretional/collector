@@ -1,12 +1,15 @@
-package collection
+package collection_test
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	pb "github.com/accretional/collector/gen/collector"
+	"github.com/accretional/collector/pkg/collection"
+	"github.com/accretional/collector/pkg/db/sqlite"
 )
 
 // TestValidateName tests the name validation function
@@ -43,7 +46,7 @@ func TestValidateName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateName(tt.input, tt.fieldName)
+			err := collection.ValidateName(tt.input, tt.fieldName)
 			if (err != nil) != tt.wantError {
 				t.Errorf("ValidateName(%q) error = %v, wantError %v", tt.input, err, tt.wantError)
 			}
@@ -81,7 +84,7 @@ func TestValidateNamespace(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateNamespace(tt.namespace)
+			err := collection.ValidateNamespace(tt.namespace)
 			if (err != nil) != tt.wantError {
 				t.Errorf("ValidateNamespace(%q) error = %v, wantError %v", tt.namespace, err, tt.wantError)
 			}
@@ -91,7 +94,7 @@ func TestValidateNamespace(t *testing.T) {
 
 // TestPathConfigValidation tests that PathConfig methods validate inputs
 func TestPathConfigValidation(t *testing.T) {
-	pathConfig := NewPathConfig(t.TempDir())
+	pathConfig := collection.NewPathConfig(t.TempDir())
 
 	tests := []struct {
 		name      string
@@ -138,7 +141,7 @@ func TestPathConfigValidation(t *testing.T) {
 // TestFileSystemPathTraversal tests that filesystem operations reject path traversal attempts
 func TestFileSystemPathTraversal(t *testing.T) {
 	root := t.TempDir()
-	fs, err := NewLocalFileSystem(root)
+	fs, err := collection.NewLocalFileSystem(root)
 	if err != nil {
 		t.Fatalf("failed to create filesystem: %v", err)
 	}
@@ -197,7 +200,7 @@ func TestFileSystemPathTraversal(t *testing.T) {
 // TestFileSystemSafePaths tests that safe paths work correctly
 func TestFileSystemSafePaths(t *testing.T) {
 	root := t.TempDir()
-	fs, err := NewLocalFileSystem(root)
+	fs, err := collection.NewLocalFileSystem(root)
 	if err != nil {
 		t.Fatalf("failed to create filesystem: %v", err)
 	}
@@ -251,23 +254,39 @@ func TestFileSystemSafePaths(t *testing.T) {
 // TestCreateCollectionValidation tests that CreateCollection validates namespace and name
 func TestCreateCollectionValidation(t *testing.T) {
 	tempDir := t.TempDir()
-	pathConfig := NewPathConfig(tempDir)
+	pathConfig := collection.NewPathConfig(tempDir)
 
-	// Create registry store
-	registryPath := filepath.Join(tempDir, "registry.db")
-	registryStore, err := NewSqliteRegistryStore(registryPath)
+	// Create registry store using CollectionRegistryStore (same as production)
+	registryPath := filepath.Join(tempDir, "system", "collections.db")
+	if err := os.MkdirAll(filepath.Dir(registryPath), 0755); err != nil {
+		t.Fatalf("failed to create registry dir: %v", err)
+	}
+
+	registryDBStore, err := sqlite.NewSqliteStore(registryPath, collection.Options{EnableJSON: true})
+	if err != nil {
+		t.Fatalf("failed to create registry db store: %v", err)
+	}
+	defer registryDBStore.Close()
+
+	registryStore, err := collection.NewCollectionRegistryStoreFromStore(registryDBStore, &collection.LocalFileSystem{})
 	if err != nil {
 		t.Fatalf("failed to create registry store: %v", err)
 	}
 	defer registryStore.Close()
 
-	// Create dummy store for repo
-	dummyStore := &mockStore{}
-	storeFactory := func(path string, opts Options) (Store, error) {
-		return &mockStore{}, nil
+	// Create dummy store for repo - use real sqlite store
+	dummyStore, err := sqlite.NewSqliteStore(":memory:", collection.Options{})
+	if err != nil {
+		t.Fatalf("failed to create dummy store: %v", err)
+	}
+	defer dummyStore.Close()
+
+	// Create store factory that returns real stores
+	storeFactory := func(path string, opts collection.Options) (collection.Store, error) {
+		return sqlite.NewSqliteStore(path, opts)
 	}
 
-	repo := NewCollectionRepo(dummyStore, pathConfig, registryStore, storeFactory)
+	repo := collection.NewCollectionRepo(dummyStore, pathConfig, registryStore, storeFactory)
 	ctx := context.Background()
 
 	tests := []struct {
@@ -291,12 +310,12 @@ func TestCreateCollectionValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			collection := &pb.Collection{
+			coll := &pb.Collection{
 				Namespace: tt.namespace,
 				Name:      tt.collName,
 			}
 
-			_, err := repo.CreateCollection(ctx, collection)
+			_, err := repo.CreateCollection(ctx, coll)
 			if (err != nil) != tt.wantError {
 				t.Errorf("CreateCollection() error = %v, wantError %v", err, tt.wantError)
 			}

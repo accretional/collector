@@ -71,9 +71,7 @@ registryCollection.Create(ctx, &pb.CollectionRecord{
 - `CollectionRegistryStore` wraps `system/collections` Collection
 - Implements `RegistryStore` interface
 - `CollectionRepo` uses this in production
-
-**Test-only (not used in production):**
-- `SqliteRegistryStore` in `pkg/collection/registry_store.go` - direct SQL for test simplicity
+- Tests also use `CollectionRegistryStore` via `NewCollectionRegistryStoreFromStore()` helper
 
 **Benefits (already available):**
 - ✅ Search collections: `"indexed_fields contains email"`
@@ -539,7 +537,7 @@ func (l *CollectionLogger) Error(msg string, fields ...interface{}) {
 4. ✅ Server uses `CollectionRegistryStore` in production (server.go:227)
 5. ✅ Search via Collection API available
 6. ✅ Bootstrap sequence tested in `system_collections_test.go`
-7. ℹ️ `SqliteRegistryStore` kept for test convenience only
+7. ✅ Tests use same `CollectionRegistryStore` as production (via `NewCollectionRegistryStoreFromStore()`)
 
 ### Phase 2: Type Registry (Partial - registry collections exist)
 1. ✅ `system/registered_protos` and `system/registered_services` collections exist
@@ -639,7 +637,7 @@ func (l *CollectionLogger) Error(msg string, fields ...interface{}) {
 1. **Self-Reference**: Collection registry references itself - must handle bootstrap carefully
 2. **Performance**: Connection/audit need buffering - can't write on every operation
 3. **Type Safety**: Type registry enables runtime validation - consider performance impact
-4. **Backward Compat**: Tests still use SqliteRegistryStore for simplicity; production uses CollectionRegistryStore
+4. **Unified Implementation**: Tests and production both use `CollectionRegistryStore` for consistency
 5. **Logs Volume**: Logs collection could be huge - need retention policy from day 1
 
 **Success Criteria:**

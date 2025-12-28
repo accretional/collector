@@ -23,9 +23,15 @@ func setupTestService(t *testing.T) (*collection.CollectionRepoService, func()) 
 		t.Fatalf("failed to create store: %v", err)
 	}
 
-	// Create in-memory registry store for testing
-	registryStore, err := collection.NewSqliteRegistryStore(":memory:")
+	// Create registry store using CollectionRegistryStore (same as production)
+	registryDBStore, err := sqlite.NewSqliteStore(":memory:", collection.Options{EnableJSON: true})
 	if err != nil {
+		t.Fatalf("failed to create registry db store: %v", err)
+	}
+
+	registryStore, err := collection.NewCollectionRegistryStoreFromStore(registryDBStore, &collection.LocalFileSystem{})
+	if err != nil {
+		registryDBStore.Close()
 		t.Fatalf("failed to create registry store: %v", err)
 	}
 
@@ -33,6 +39,7 @@ func setupTestService(t *testing.T) (*collection.CollectionRepoService, func()) 
 
 	cleanup := func() {
 		registryStore.Close()
+		registryDBStore.Close()
 		store.Close()
 	}
 
