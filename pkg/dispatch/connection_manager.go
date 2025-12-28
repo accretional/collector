@@ -7,8 +7,10 @@ import (
 	"time"
 
 	pb "github.com/accretional/collector/gen/collector"
+	"github.com/accretional/collector/pkg/collection"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -17,6 +19,7 @@ type ConnectionManager struct {
 	collectorID string
 	address     string
 	namespaces  []string
+	collection  *collection.Collection
 
 	// Track active connections
 	connections      map[string]*ConnectionState
@@ -36,11 +39,12 @@ type ConnectionState struct {
 }
 
 // NewConnectionManager creates a new connection manager
-func NewConnectionManager(collectorID, address string, namespaces []string) *ConnectionManager {
+func NewConnectionManager(collectorID, address string, namespaces []string, coll *collection.Collection) *ConnectionManager {
 	return &ConnectionManager{
 		collectorID: collectorID,
 		address:     address,
 		namespaces:  namespaces,
+		collection:  coll,
 		connections: make(map[string]*ConnectionState),
 		clients:     make(map[string]pb.CollectiveDispatcherClient),
 	}
@@ -89,6 +93,14 @@ func (cm *ConnectionManager) HandleConnect(ctx context.Context, req *pb.ConnectR
 	cm.connections[connectionID] = &ConnectionState{
 		Connection:   conn,
 		LastActivity: time.Now(),
+	}
+
+	// Persist to collection if available
+	if cm.collection != nil {
+		if err := cm.persistConnection(ctx, conn); err != nil {
+			// Log error but continue - persistence failure shouldn't kill the connection
+			fmt.Printf("Warning: failed to persist connection: %v\n", err)
+		}
 	}
 
 	return &pb.ConnectResponse{
@@ -162,7 +174,30 @@ func (cm *ConnectionManager) ConnectTo(ctx context.Context, address string, name
 	cm.connections[resp.ConnectionId] = connState
 	cm.connectionsMutex.Unlock()
 
+	// Persist to collection if available
+	if cm.collection != nil {
+		if err := cm.persistConnection(ctx, connState.Connection); err != nil {
+			fmt.Printf("Warning: failed to persist outbound connection: %v\n", err)
+		}
+	}
+
 	return resp, nil
+}
+
+// persistConnection saves the connection to the system/connections collection
+func (cm *ConnectionManager) persistConnection(ctx context.Context, conn *pb.Connection) error {
+	protoData, err := proto.Marshal(conn)
+	if err != nil {
+		return fmt.Errorf("marshal connection: %w", err)
+	}
+
+	record := &pb.CollectionRecord{
+		Id:        conn.Id,
+		ProtoData: protoData,
+		Metadata:  conn.Metadata,
+	}
+
+	return cm.collection.CreateRecord(ctx, record)
 }
 
 // GetClient returns a client for the given address

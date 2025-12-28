@@ -118,6 +118,7 @@ func setupCollector(t *testing.T, collectorID, namespace string, port int) (
 		addr,
 		[]string{namespace},
 		validator,
+		nil,
 	)
 
 	// Create single gRPC server with ALL services

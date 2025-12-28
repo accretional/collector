@@ -65,7 +65,7 @@ type Server struct {
 
 	// Components that need cleanup
 	systemCollections *bootstrap.SystemCollections
-	registryStore     *collection.SqliteRegistryStore
+	registryStore     collection.RegistryStore
 	loopbackConn      *grpc.ClientConn
 	stores            []collection.Store
 
@@ -198,17 +198,11 @@ func New(config Config) (*Server, error) {
 	// 3. Setup Collection Repository
 	// ========================================================================
 
-	registryStorePath := pathConfig.RegistryDBPath()
-	if err := os.MkdirAll(filepath.Dir(registryStorePath), 0755); err != nil {
-		return nil, fmt.Errorf("create registry dir: %w", err)
-	}
-	s.logger.Printf("Registry database: %s", registryStorePath)
-
-	registryStore, err := collection.NewSqliteRegistryStore(registryStorePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to init registry store: %w", err)
-	}
+	// Use the system/collections collection for the registry store
+	// This enables "dogfooding" - the registry is just another collection
+	registryStore := collection.NewCollectionRegistryStore(s.systemCollections.CollectionRegistry)
 	s.registryStore = registryStore
+	s.logger.Println("✓ Registry store initialized using system/collections")
 
 	// Clean up any timed-out operations from previous crashes
 	s.logger.Println("Checking for timed-out operations...")
@@ -240,7 +234,15 @@ func New(config Config) (*Server, error) {
 	// 4. Create gRPC Server with ALL Services
 	// ========================================================================
 
-	grpcServer := registry.NewServerWithValidation(registryServer, config.Namespace)
+	// Audit Logger
+	auditLogger := collection.NewAuditLogger(s.systemCollections.Audit)
+	s.logger.Println("✓ Audit logger initialized")
+
+	grpcServer := registry.NewServerWithValidation(
+		registryServer,
+		config.Namespace,
+		grpc.ChainUnaryInterceptor(auditLogger.UnaryServerInterceptor()),
+	)
 	s.grpcServer = grpcServer
 
 	// Register ALL services on the same server
@@ -300,6 +302,7 @@ func New(config Config) (*Server, error) {
 		actualAddr,
 		[]string{config.Namespace},
 		validator,
+		s.systemCollections.Connections,
 	)
 	s.dispatcher = dispatcher
 	s.logger.Println("✓ Dispatcher created with gRPC-based registry validation")

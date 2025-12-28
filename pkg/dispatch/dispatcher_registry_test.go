@@ -71,6 +71,7 @@ func TestDispatcherWithRegistryValidation(t *testing.T) {
 		"localhost:50052",
 		[]string{namespace},
 		validator,
+		nil, // No collection for testing
 	)
 
 	// Register handler locally

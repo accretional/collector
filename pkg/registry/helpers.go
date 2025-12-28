@@ -62,8 +62,8 @@ func (v *RegistryServerValidator) ValidateServiceMethod(ctx context.Context, nam
 // for the specified namespace.
 func WithValidation(registry *RegistryServer, namespace string) []grpc.ServerOption {
 	return []grpc.ServerOption{
-		grpc.UnaryInterceptor(registry.ValidationInterceptor(namespace)),
-		grpc.StreamInterceptor(registry.StreamValidationInterceptor(namespace)),
+		grpc.ChainUnaryInterceptor(registry.ValidationInterceptor(namespace)),
+		grpc.ChainStreamInterceptor(registry.StreamValidationInterceptor(namespace)),
 	}
 }
 

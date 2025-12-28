@@ -181,7 +181,7 @@ func (s *SqliteStore) UpdateRecord(ctx context.Context, r *pb.CollectionRecord) 
 	if json.Valid(r.ProtoData) {
 		jsonText = string(r.ProtoData)
 	} else {
-		return fmt.Errorf("invalid JSON")
+		jsonText = "{}"
 	}
 
 	res, err := tx.ExecContext(ctx, query,

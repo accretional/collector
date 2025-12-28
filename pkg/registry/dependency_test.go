@@ -149,7 +149,7 @@ func TestRegisterProto_CircularDependency(t *testing.T) {
 	reqB := &collector.RegisterProtoRequest{
 		Namespace: "test",
 		FileDescriptor: &descriptorpb.FileDescriptorProto{
-			Name: proto.String("b.proto"),
+			Name:       proto.String("b.proto"),
 			Dependency: []string{"a.proto"},
 			MessageType: []*descriptorpb.DescriptorProto{
 				{Name: proto.String("MessageB")},
@@ -166,7 +166,7 @@ func TestRegisterProto_CircularDependency(t *testing.T) {
 	reqC := &collector.RegisterProtoRequest{
 		Namespace: "test",
 		FileDescriptor: &descriptorpb.FileDescriptorProto{
-			Name: proto.String("c.proto"),
+			Name:       proto.String("c.proto"),
 			Dependency: []string{"b.proto"},
 			MessageType: []*descriptorpb.DescriptorProto{
 				{Name: proto.String("MessageC")},
@@ -183,7 +183,7 @@ func TestRegisterProto_CircularDependency(t *testing.T) {
 	reqSelf := &collector.RegisterProtoRequest{
 		Namespace: "test",
 		FileDescriptor: &descriptorpb.FileDescriptorProto{
-			Name: proto.String("self.proto"),
+			Name:       proto.String("self.proto"),
 			Dependency: []string{"self.proto"}, // Self-reference
 			MessageType: []*descriptorpb.DescriptorProto{
 				{Name: proto.String("SelfMessage")},
@@ -224,7 +224,7 @@ func TestRegisterProto_TransitiveDependencies(t *testing.T) {
 	reqB := &collector.RegisterProtoRequest{
 		Namespace: "test",
 		FileDescriptor: &descriptorpb.FileDescriptorProto{
-			Name: proto.String("b.proto"),
+			Name:       proto.String("b.proto"),
 			Dependency: []string{"a.proto"},
 			MessageType: []*descriptorpb.DescriptorProto{
 				{Name: proto.String("MessageB")},
@@ -243,8 +243,8 @@ func TestRegisterProto_TransitiveDependencies(t *testing.T) {
 		FileDescriptor: &descriptorpb.FileDescriptorProto{
 			Name: proto.String("c.proto"),
 			Dependency: []string{
-				"b.proto",         // Exists
-				"missing.proto",   // Doesn't exist
+				"b.proto",       // Exists
+				"missing.proto", // Doesn't exist
 			},
 			MessageType: []*descriptorpb.DescriptorProto{
 				{Name: proto.String("MessageC")},
@@ -329,7 +329,7 @@ func TestRegisterProto_WellKnownTypes(t *testing.T) {
 		req := &collector.RegisterProtoRequest{
 			Namespace: "test",
 			FileDescriptor: &descriptorpb.FileDescriptorProto{
-				Name: proto.String(fmt.Sprintf("myapp_%d.proto", i)), // Use unique names
+				Name:       proto.String(fmt.Sprintf("myapp_%d.proto", i)), // Use unique names
 				Dependency: []string{wkt},
 				MessageType: []*descriptorpb.DescriptorProto{
 					{Name: proto.String("MyMessage")},
@@ -351,7 +351,7 @@ func TestRegisterProto_EmptyDependencies(t *testing.T) {
 	req := &collector.RegisterProtoRequest{
 		Namespace: "test",
 		FileDescriptor: &descriptorpb.FileDescriptorProto{
-			Name: proto.String("standalone.proto"),
+			Name:       proto.String("standalone.proto"),
 			Dependency: []string{}, // Explicitly empty
 			MessageType: []*descriptorpb.DescriptorProto{
 				{Name: proto.String("StandaloneMessage")},
@@ -365,11 +365,11 @@ func TestRegisterProto_EmptyDependencies(t *testing.T) {
 	}
 }
 
-// TestRegisterProto_HierarchicalNamespaceResolution tests that child namespaces can access parent dependencies
-func TestRegisterProto_HierarchicalNamespaceResolution(t *testing.T) {
+// TestRegisterProto_HierarchicalNamespacesNotSupported tests that hierarchical namespaces (with slashes) are rejected
+func TestRegisterProto_HierarchicalNamespacesNotSupported(t *testing.T) {
 	server, _, _ := setupTestServer(t)
 
-	// Register a common proto in parent namespace "team"
+	// Register a common proto in a flat namespace first
 	parentReq := &collector.RegisterProtoRequest{
 		Namespace: "team",
 		FileDescriptor: &descriptorpb.FileDescriptorProto{
@@ -381,18 +381,14 @@ func TestRegisterProto_HierarchicalNamespaceResolution(t *testing.T) {
 	}
 	_, err := server.RegisterProto(context.Background(), parentReq)
 	if err != nil {
-		t.Fatalf("Failed to register in parent namespace: %v", err)
+		t.Fatalf("Failed to register in flat namespace: %v", err)
 	}
 
-	// Register a proto in child namespace "team/project" that depends on parent's proto
-	// This should SUCCEED because "team/project" can access "team" dependencies
+	// Hierarchical namespaces with "/" are NOT supported - they should be rejected
 	childReq := &collector.RegisterProtoRequest{
 		Namespace: "team/project",
 		FileDescriptor: &descriptorpb.FileDescriptorProto{
 			Name: proto.String("app.proto"),
-			Dependency: []string{
-				"common.proto", // Exists in parent namespace "team"
-			},
 			MessageType: []*descriptorpb.DescriptorProto{
 				{Name: proto.String("AppMessage")},
 			},
@@ -400,19 +396,15 @@ func TestRegisterProto_HierarchicalNamespaceResolution(t *testing.T) {
 	}
 
 	_, err = server.RegisterProto(context.Background(), childReq)
-	if err != nil {
-		t.Errorf("Expected success when child namespace accesses parent dependency, got: %v", err)
+	if err == nil {
+		t.Error("Expected error when using hierarchical namespace with slash, got nil")
 	}
 
-	// Register in deeper child namespace "team/project/service"
-	// This should also SUCCEED, accessing grandparent namespace
+	// Deeper hierarchical namespace should also be rejected
 	deepChildReq := &collector.RegisterProtoRequest{
 		Namespace: "team/project/service",
 		FileDescriptor: &descriptorpb.FileDescriptorProto{
 			Name: proto.String("service.proto"),
-			Dependency: []string{
-				"common.proto", // Exists in grandparent namespace "team"
-			},
 			MessageType: []*descriptorpb.DescriptorProto{
 				{Name: proto.String("ServiceMessage")},
 			},
@@ -420,7 +412,7 @@ func TestRegisterProto_HierarchicalNamespaceResolution(t *testing.T) {
 	}
 
 	_, err = server.RegisterProto(context.Background(), deepChildReq)
-	if err != nil {
-		t.Errorf("Expected success when deep child namespace accesses grandparent dependency, got: %v", err)
+	if err == nil {
+		t.Error("Expected error when using deep hierarchical namespace with slashes, got nil")
 	}
 }

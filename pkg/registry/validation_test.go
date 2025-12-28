@@ -16,14 +16,13 @@ import (
 func TestRegisterProto_ReservedNamespace(t *testing.T) {
 	server, _, _ := setupTestServer(t)
 
+	// Only filesystem-conflicting namespaces are reserved
+	// "system", "internal", "admin", "metadata" are intentionally NOT reserved
+	// as they are used for system collections
 	reservedNamespaces := []string{
 		"repo",
 		"backups",
 		"files",
-		"system",
-		"internal",
-		"admin",
-		"metadata",
 		// Note: .backup is excluded because it's already blocked by the "no leading dot" rule
 	}
 
@@ -106,20 +105,20 @@ func TestRegisterProto_InvalidProtoName(t *testing.T) {
 	server, _, _ := setupTestServer(t)
 
 	invalidNames := []string{
-		"../test.proto",        // Path traversal
-		"../../etc/passwd",     // Path traversal
-		"test/../bad.proto",    // Path traversal in middle
-		".hidden.proto",        // Starts with dot
-		"test..proto",          // Contains ..
-		"test\\bad.proto",      // Backslash
-		"test:bad.proto",       // Colon
-		"test*bad.proto",       // Asterisk
-		"test?bad.proto",       // Question mark
-		"test\"bad.proto",      // Quote
-		"test<bad.proto",       // Less than
-		"test>bad.proto",       // Greater than
-		"test|bad.proto",       // Pipe
-		"test/bad.proto",       // Slash (breaks ID format)
+		"../test.proto",     // Path traversal
+		"../../etc/passwd",  // Path traversal
+		"test/../bad.proto", // Path traversal in middle
+		".hidden.proto",     // Starts with dot
+		"test..proto",       // Contains ..
+		"test\\bad.proto",   // Backslash
+		"test:bad.proto",    // Colon
+		"test*bad.proto",    // Asterisk
+		"test?bad.proto",    // Question mark
+		"test\"bad.proto",   // Quote
+		"test<bad.proto",    // Less than
+		"test>bad.proto",    // Greater than
+		"test|bad.proto",    // Pipe
+		"test/bad.proto",    // Slash (breaks ID format)
 	}
 
 	for _, name := range invalidNames {
@@ -271,17 +270,18 @@ func TestRegisterService_InvalidServiceName(t *testing.T) {
 	}
 }
 
-// TestRegisterProto_ValidHierarchicalNamespace tests that hierarchical namespaces with "/" are allowed
-func TestRegisterProto_ValidHierarchicalNamespace(t *testing.T) {
+// TestRegisterProto_SlashInNamespaceRejected tests that forward slashes in namespaces are rejected
+// (hierarchical namespaces are not supported)
+func TestRegisterProto_SlashInNamespaceRejected(t *testing.T) {
 	server, _, _ := setupTestServer(t)
 
-	validNamespaces := []string{
+	invalidNamespaces := []string{
 		"team/project",
 		"team/project/service",
 		"org/dept/team/project",
 	}
 
-	for _, ns := range validNamespaces {
+	for _, ns := range invalidNamespaces {
 		req := &collector.RegisterProtoRequest{
 			Namespace: ns,
 			FileDescriptor: &descriptorpb.FileDescriptorProto{
@@ -293,8 +293,8 @@ func TestRegisterProto_ValidHierarchicalNamespace(t *testing.T) {
 		}
 
 		_, err := server.RegisterProto(context.Background(), req)
-		if err != nil {
-			t.Errorf("Expected success for hierarchical namespace %q, got error: %v", ns, err)
+		if err == nil {
+			t.Errorf("Expected error for namespace with slash %q, got nil", ns)
 		}
 	}
 }

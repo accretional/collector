@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	pb "github.com/accretional/collector/gen/collector"
+	"github.com/accretional/collector/pkg/collection"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -36,15 +37,15 @@ type Dispatcher struct {
 // NewDispatcher creates a new dispatcher instance
 func NewDispatcher(collectorID, address string, namespaces []string) *Dispatcher {
 	return &Dispatcher{
-		connManager: NewConnectionManager(collectorID, address, namespaces),
+		connManager: NewConnectionManager(collectorID, address, namespaces, nil),
 		services:    make(map[string]map[string]ServiceHandler),
 	}
 }
 
 // NewDispatcherWithRegistry creates a new dispatcher instance with registry validation
-func NewDispatcherWithRegistry(collectorID, address string, namespaces []string, validator RegistryValidator) *Dispatcher {
+func NewDispatcherWithRegistry(collectorID, address string, namespaces []string, validator RegistryValidator, coll *collection.Collection) *Dispatcher {
 	return &Dispatcher{
-		connManager:       NewConnectionManager(collectorID, address, namespaces),
+		connManager:       NewConnectionManager(collectorID, address, namespaces, coll),
 		services:          make(map[string]map[string]ServiceHandler),
 		registryValidator: validator,
 	}

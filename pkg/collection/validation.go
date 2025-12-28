@@ -8,13 +8,11 @@ import (
 // Reserved namespaces that cannot be used by users
 // These are reserved because they conflict with internal directory structure
 var reservedNamespaces = map[string]bool{
-	"repo":     true, // Used for ./data/repo/collections.db
-	"backups":  true, // Used for ./data/backups/metadata.db
-	"files":    true, // Used for ./data/files/{namespace}/{name}
-	"system":   true, // Reserved for system collections
-	"internal": true, // Reserved for internal use
-	"admin":    true, // Reserved for admin operations
-	"metadata": true, // Reserved for metadata storage
+	"repo":    true, // Used for ./data/repo/collections.db
+	"backups": true, // Used for ./data/backups/metadata.db
+	"files":   true, // Used for ./data/files/{namespace}/{name}
+	// Note: "system", "internal", "admin", "metadata" are intentionally NOT reserved
+	// They are valid namespaces used for system collections
 	// Note: .backup is blocked by the "no leading dot" rule in ValidateName
 }
 
@@ -25,8 +23,8 @@ const (
 )
 
 // Invalid characters in names (filesystem-unsafe characters)
-// Note: "/" is allowed in namespaces to support hierarchical namespaces (e.g., "team/project")
-const invalidChars = `.\:*?"<>|`
+// Note: "/" is NOT allowed - no hierarchical namespaces supported
+const invalidChars = `./\:*?"<>|`
 
 // ValidateName validates a namespace or collection name.
 // Returns an error if the name is invalid.
@@ -65,26 +63,14 @@ func ValidateName(name string, fieldName string) error {
 }
 
 // ValidateNamespace validates a namespace name and checks if it's reserved.
-// For hierarchical namespaces (e.g., "team/project"), this also checks that
-// the root namespace and all parent namespaces are not reserved.
 func ValidateNamespace(namespace string) error {
 	if err := ValidateName(namespace, "namespace"); err != nil {
 		return err
 	}
 
-	// Check if namespace or any parent namespace is reserved
-	// For "team/project/service", check: "team", "team/project", "team/project/service"
-	segments := strings.Split(namespace, "/")
-	current := ""
-	for i, segment := range segments {
-		if i > 0 {
-			current += "/"
-		}
-		current += segment
-
-		if reservedNamespaces[current] {
-			return fmt.Errorf("namespace '%s' is reserved and cannot be used (in path '%s')", current, namespace)
-		}
+	// Check if namespace is reserved
+	if reservedNamespaces[namespace] {
+		return fmt.Errorf("namespace '%s' is reserved and cannot be used", namespace)
 	}
 
 	return nil

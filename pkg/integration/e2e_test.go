@@ -114,6 +114,7 @@ func TestEndToEndIntegration(t *testing.T) {
 		"localhost:0",
 		[]string{namespace},
 		validator,
+		nil,
 	)
 
 	t.Log("✓ Dispatcher created with registry validation")

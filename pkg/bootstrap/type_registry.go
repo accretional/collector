@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sync"
 
 	pb "github.com/accretional/collector/gen/collector"
 	"github.com/accretional/collector/pkg/collection"
@@ -17,12 +18,15 @@ import (
 // reference valid types
 type TypeRegistry struct {
 	typesCollection *collection.Collection
+	cache           map[string]*pb.ValidationRule
+	mu              sync.RWMutex
 }
 
 // NewTypeRegistry creates a new TypeRegistry wrapping the system/types collection
 func NewTypeRegistry(typesCollection *collection.Collection) *TypeRegistry {
 	return &TypeRegistry{
 		typesCollection: typesCollection,
+		cache:           make(map[string]*pb.ValidationRule),
 	}
 }
 
@@ -96,6 +100,11 @@ func (tr *TypeRegistry) RegisterMessageType(ctx context.Context, namespace strin
 		return fmt.Errorf("create type record: %w", err)
 	}
 
+	// Update cache
+	tr.mu.Lock()
+	tr.cache[typeID] = validationRule
+	tr.mu.Unlock()
+
 	return nil
 }
 
@@ -143,6 +152,11 @@ func (tr *TypeRegistry) updateMessageType(ctx context.Context, typeID, namespace
 		return fmt.Errorf("update type record: %w", err)
 	}
 
+	// Update cache
+	tr.mu.Lock()
+	tr.cache[typeID] = validationRule
+	tr.mu.Unlock()
+
 	return nil
 }
 
@@ -166,21 +180,10 @@ func (tr *TypeRegistry) RegisterFileDescriptor(ctx context.Context, namespace st
 // ValidateMessageType checks if a message type is registered
 func (tr *TypeRegistry) ValidateMessageType(ctx context.Context, namespace, messageName string) error {
 	typeID := fmt.Sprintf("%s/%s", namespace, messageName)
-
-	record, err := tr.typesCollection.GetRecord(ctx, typeID)
-	if err == sql.ErrNoRows {
-		return fmt.Errorf("message type %s not registered", typeID)
-	}
+	_, err := tr.GetMessageType(ctx, namespace, messageName)
 	if err != nil {
-		return fmt.Errorf("lookup message type: %w", err)
+		return fmt.Errorf("message type %s not registered: %w", typeID, err)
 	}
-
-	// Verify it's a valid validation rule
-	var rule pb.ValidationRule
-	if err := proto.Unmarshal(record.ProtoData, &rule); err != nil {
-		return fmt.Errorf("unmarshal validation rule: %w", err)
-	}
-
 	return nil
 }
 
@@ -203,6 +206,15 @@ func (tr *TypeRegistry) ValidateCollectionMessageType(ctx context.Context, coll 
 func (tr *TypeRegistry) GetMessageType(ctx context.Context, namespace, messageName string) (*pb.ValidationRule, error) {
 	typeID := fmt.Sprintf("%s/%s", namespace, messageName)
 
+	// Check cache first
+	tr.mu.RLock()
+	if rule, ok := tr.cache[typeID]; ok {
+		tr.mu.RUnlock()
+		return rule, nil
+	}
+	tr.mu.RUnlock()
+
+	// Cache miss - look up in collection
 	record, err := tr.typesCollection.GetRecord(ctx, typeID)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("message type %s not found", typeID)
@@ -215,6 +227,11 @@ func (tr *TypeRegistry) GetMessageType(ctx context.Context, namespace, messageNa
 	if err := proto.Unmarshal(record.ProtoData, &rule); err != nil {
 		return nil, fmt.Errorf("unmarshal validation rule: %w", err)
 	}
+
+	// Update cache
+	tr.mu.Lock()
+	tr.cache[typeID] = &rule
+	tr.mu.Unlock()
 
 	return &rule, nil
 }

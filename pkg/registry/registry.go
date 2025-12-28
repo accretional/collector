@@ -24,8 +24,8 @@ type RegistryServer struct {
 	collector.UnimplementedCollectorRegistryServer
 	registeredProtos   *collection.Collection
 	registeredServices *collection.Collection
-	typeRegistrar      TypeRegistrar      // Optional: registers types when protos are registered
-	sizeLimits         *ProtoSizeLimits   // Configurable size limits for proto registration
+	typeRegistrar      TypeRegistrar    // Optional: registers types when protos are registered
+	sizeLimits         *ProtoSizeLimits // Configurable size limits for proto registration
 }
 
 func NewRegistryServer(registeredProtos, registeredServices *collection.Collection) *RegistryServer {
