@@ -85,7 +85,7 @@ func TestIssue1_JSONSchemaErrorHandling(t *testing.T) {
 
 		// Open database directly and create a conflicting state
 		dsn := "file:" + dbPath + "?_journal_mode=WAL&_busy_timeout=10000"
-		db, err := sql.Open("sqlite", dsn)
+		db, err := sql.Open("sqlite3", dsn)
 		if err != nil {
 			t.Fatalf("Failed to open db: %v", err)
 		}
@@ -146,7 +146,7 @@ func TestIssue1_JSONSchemaErrorHandling(t *testing.T) {
 
 		// Create database with default schema only (no JSON)
 		dsn := "file:" + dbPath + "?_journal_mode=WAL&_busy_timeout=10000"
-		db, err := sql.Open("sqlite", dsn)
+		db, err := sql.Open("sqlite3", dsn)
 		if err != nil {
 			t.Fatalf("Failed to open db: %v", err)
 		}
