@@ -51,6 +51,10 @@ func (s *CollectionRegistryStore) SaveCollection(ctx context.Context, collection
 		collCopy.Metadata.Labels["db_path"] = dbPath
 	}
 
+	// Index namespace and name in labels for efficient searching
+	collCopy.Metadata.Labels["namespace"] = collection.Namespace
+	collCopy.Metadata.Labels["name"] = collection.Name
+
 	// Marshal the collection proto
 	protoData, err := proto.Marshal(collCopy)
 	if err != nil {
@@ -124,8 +128,8 @@ func (s *CollectionRegistryStore) ListCollections(ctx context.Context, namespace
 
 	if namespace != "" {
 		query = &SearchQuery{
-			Filters: map[string]Filter{
-				"namespace": {Operator: OpEquals, Value: namespace},
+			LabelFilters: map[string]string{
+				"namespace": namespace,
 			},
 		}
 	} else {
