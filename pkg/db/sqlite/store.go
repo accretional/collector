@@ -556,7 +556,8 @@ func (s *Store) BackupOnline(ctx context.Context, destPath string, pagesBatchSiz
 
 func (s *Store) Search(ctx context.Context, q *collection.SearchQuery) ([]*collection.SearchResult, error) {
 	// Validate EnableJSON is set when using JSON features
-	if len(q.Filters) > 0 && !s.options.EnableJSON {
+	hasFilters := len(q.Filters) > 0 || len(q.PostFilters) > 0
+	if hasFilters && !s.options.EnableJSON {
 		return nil, fmt.Errorf("search with Filters requires EnableJSON to be true")
 	}
 
@@ -583,10 +584,12 @@ func (s *Store) Search(ctx context.Context, q *collection.SearchQuery) ([]*colle
 }
 
 type searchQueryBuilder struct {
-	store        *Store
-	query        *collection.SearchQuery
-	hasVector    bool
-	hasFTS       bool
+	store *Store
+	query *collection.SearchQuery
+
+	hasVector bool
+	hasFTS    bool
+
 	querySQL     strings.Builder
 	args         []interface{}
 	whereClauses []string
@@ -605,7 +608,7 @@ func (b *searchQueryBuilder) buildHybrid(ctx context.Context) ([]*collection.Sea
 
 	limit := b.getKNNLimit()
 
-	b.selectFields(`r.id, r.proto_data, r.data_uri, r.created_at, r.updated_at, r.labels,
+	b.selectFields(`r.id, r.proto_data, r.data_uri, r.created_at, r.updated_at, r.labels, r.jsontext,
                     v.distance, bm25(records_fts) as fts_score`)
 	b.fromClause(`records_vec v
                   JOIN records r ON r.rowid = v.rowid
@@ -619,10 +622,11 @@ func (b *searchQueryBuilder) buildHybrid(ctx context.Context) ([]*collection.Sea
 	b.args = append(b.args, queryVector, limit, b.query.FullText)
 
 	b.addSimilarityThreshold()
-	b.addFilters()
+	b.applyPreFilters()
 	b.buildWhere()
 	b.orderBy(`v.distance, fts_score`, `json_extract(r.jsontext, '$.%s') %s, v.distance, fts_score`)
-	b.addPagination(true)
+	b.applyPostFilters()
+	b.addPagination()
 
 	return b.store.executeSearchQuery(ctx, b.querySQL.String(), b.args, true, true)
 }
@@ -640,7 +644,7 @@ func (b *searchQueryBuilder) buildVector(ctx context.Context) ([]*collection.Sea
 
 	limit := b.getKNNLimit()
 
-	b.selectFields(`r.id, r.proto_data, r.data_uri, r.created_at, r.updated_at, r.labels, v.distance`)
+	b.selectFields(`r.id, r.proto_data, r.data_uri, r.created_at, r.updated_at, r.labels, r.jsontext, v.distance`)
 	b.fromClause(`records_vec v JOIN records r ON r.rowid = v.rowid`)
 
 	b.whereClauses = []string{
@@ -650,10 +654,11 @@ func (b *searchQueryBuilder) buildVector(ctx context.Context) ([]*collection.Sea
 	b.args = append(b.args, queryVector, limit)
 
 	b.addSimilarityThreshold()
-	b.addFilters()
+	b.applyPreFilters()
 	b.buildWhere()
 	b.orderBy(`v.distance`, `json_extract(r.jsontext, '$.%s') %s, v.distance`)
-	b.addPagination(true)
+	b.applyPostFilters()
+	b.addPagination()
 
 	return b.store.executeSearchQuery(ctx, b.querySQL.String(), b.args, true, false)
 }
@@ -663,30 +668,32 @@ func (b *searchQueryBuilder) buildFTS(ctx context.Context) ([]*collection.Search
 		return nil, fmt.Errorf("full-text search requested but FTS5 is not available. Build with -tags sqlite_fts5 to enable FTS5 support")
 	}
 
-	b.selectFields(`r.id, r.proto_data, r.data_uri, r.created_at, r.updated_at, r.labels,
+	b.selectFields(`r.id, r.proto_data, r.data_uri, r.created_at, r.updated_at, r.labels, r.jsontext,
                     bm25(records_fts) as score`)
 	b.fromClause(`records r JOIN records_fts ON r.rowid = records_fts.rowid`)
 
 	b.whereClauses = []string{`records_fts MATCH ?`}
 	b.args = append(b.args, b.query.FullText)
 
-	b.addFilters()
+	b.applyPreFilters()
 	b.buildWhere()
 	b.orderBy(`score`, `json_extract(r.jsontext, '$.%s') %s, score`)
-	b.addPagination(false)
+	b.applyPostFilters()
+	b.addPagination()
 
 	return b.store.executeSearchQuery(ctx, b.querySQL.String(), b.args, false, true)
 }
 
 func (b *searchQueryBuilder) buildScalar(ctx context.Context) ([]*collection.SearchResult, error) {
-	b.selectFields(`r.id, r.proto_data, r.data_uri, r.created_at, r.updated_at, r.labels`)
+	b.selectFields(`r.id, r.proto_data, r.data_uri, r.created_at, r.updated_at, r.labels, r.jsontext`)
 	b.fromClause(`records r`)
 
 	b.whereClauses = []string{}
-	b.addFilters()
+	b.applyPreFilters()
 	b.buildWhere()
 	b.orderBy(`r.created_at DESC`, `json_extract(r.jsontext, '$.%s') %s`)
-	b.addPagination(false)
+	b.applyPostFilters()
+	b.addPagination()
 
 	return b.store.executeSearchQuery(ctx, b.querySQL.String(), b.args, false, false)
 }
@@ -715,7 +722,7 @@ func (b *searchQueryBuilder) addSimilarityThreshold() {
 	}
 }
 
-func (b *searchQueryBuilder) addFilters() {
+func (b *searchQueryBuilder) applyPreFilters() {
 	clauses, args := b.store.buildFilters(b.query.Filters)
 	b.whereClauses = append(b.whereClauses, clauses...)
 	b.args = append(b.args, args...)
@@ -739,9 +746,9 @@ func (b *searchQueryBuilder) orderBy(defaultOrder, customOrderFmt string) {
 	}
 }
 
-func (b *searchQueryBuilder) addPagination(vectorSearch bool) {
-	if vectorSearch {
-		// Vector searches: OFFSET only (LIMIT is handled by KNN k parameter)
+func (b *searchQueryBuilder) addPagination() {
+	if b.hasVector && len(b.query.PostFilters) < 1 {
+		// Vector searches without post filters: OFFSET only (LIMIT is handled by KNN k parameter)
 		if b.query.Offset > 0 {
 			b.querySQL.WriteString("OFFSET ? ")
 			b.args = append(b.args, b.query.Offset)
@@ -755,6 +762,24 @@ func (b *searchQueryBuilder) addPagination(vectorSearch bool) {
 		if b.query.Offset > 0 {
 			b.querySQL.WriteString("OFFSET ? ")
 			b.args = append(b.args, b.query.Offset)
+		}
+	}
+}
+
+func (b *searchQueryBuilder) applyPostFilters() {
+	if len(b.query.PostFilters) > 0 {
+		innerQuery := b.querySQL.String()
+
+		b.querySQL.Reset()
+
+		b.querySQL.WriteString("WITH ranked AS (")
+		b.querySQL.WriteString(innerQuery)
+		b.querySQL.WriteString(") SELECT * FROM ranked ")
+
+		postFilterClauses, postFilterArgs := b.store.buildFilters(b.query.PostFilters)
+		if len(postFilterClauses) > 0 {
+			b.querySQL.WriteString("WHERE " + strings.Join(postFilterClauses, " AND ") + " ")
+			b.args = append(b.args, postFilterArgs...)
 		}
 	}
 }

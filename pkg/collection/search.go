@@ -7,8 +7,9 @@ import (
 // SearchQuery is the generic query structure passed to the Store.
 type SearchQuery struct {
 	FullText            string
-	Filters             []Filter
-	Vector              []float32 // For vector similarity search
+	Filters             []Filter // Pre-filters: applied before/during ranking
+	PostFilters         []Filter
+	Vector              []float32
 	SimilarityThreshold float32
 	Limit               int
 	Offset              int

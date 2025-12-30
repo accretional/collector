@@ -91,12 +91,13 @@ message SearchRequest {
 
   string full_text = 3;
   repeated Filter filters = 4;
-  repeated float vector = 5;
-  float similarity_threshold = 6;
-  int32 limit = 7;
-  int32 offset = 8;
-  string order_by = 9;
-  bool ascending = 10;
+  repeated Filter post_filters = 5;
+  repeated float vector = 6;
+  float similarity_threshold = 7;
+  int32 limit = 8;
+  int32 offset = 9;
+  string order_by = 10;
+  bool ascending = 11;
 }
 
 message SearchResponse {
