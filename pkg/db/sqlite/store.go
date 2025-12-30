@@ -628,7 +628,7 @@ func (b *searchQueryBuilder) buildHybrid(ctx context.Context) ([]*collection.Sea
 	b.applyPostFilters()
 	b.addPagination()
 
-	return b.store.executeSearchQuery(ctx, b.querySQL.String(), b.args, true, true)
+	return b.store.executeSearchQuery(ctx, b.querySQL.String(), b.args, true, true, true)
 }
 
 func (b *searchQueryBuilder) buildVector(ctx context.Context) ([]*collection.SearchResult, error) {
@@ -660,7 +660,7 @@ func (b *searchQueryBuilder) buildVector(ctx context.Context) ([]*collection.Sea
 	b.applyPostFilters()
 	b.addPagination()
 
-	return b.store.executeSearchQuery(ctx, b.querySQL.String(), b.args, true, false)
+	return b.store.executeSearchQuery(ctx, b.querySQL.String(), b.args, true, false, true)
 }
 
 func (b *searchQueryBuilder) buildFTS(ctx context.Context) ([]*collection.SearchResult, error) {
@@ -681,11 +681,15 @@ func (b *searchQueryBuilder) buildFTS(ctx context.Context) ([]*collection.Search
 	b.applyPostFilters()
 	b.addPagination()
 
-	return b.store.executeSearchQuery(ctx, b.querySQL.String(), b.args, false, true)
+	return b.store.executeSearchQuery(ctx, b.querySQL.String(), b.args, false, true, true)
 }
 
 func (b *searchQueryBuilder) buildScalar(ctx context.Context) ([]*collection.SearchResult, error) {
-	b.selectFields(`r.id, r.proto_data, r.data_uri, r.created_at, r.updated_at, r.labels, r.jsontext`)
+	if b.store.options.EnableJSON {
+		b.selectFields(`r.id, r.proto_data, r.data_uri, r.created_at, r.updated_at, r.labels, r.jsontext`)
+	} else {
+		b.selectFields(`r.id, r.proto_data, r.data_uri, r.created_at, r.updated_at, r.labels`)
+	}
 	b.fromClause(`records r`)
 
 	b.whereClauses = []string{}
@@ -695,7 +699,7 @@ func (b *searchQueryBuilder) buildScalar(ctx context.Context) ([]*collection.Sea
 	b.applyPostFilters()
 	b.addPagination()
 
-	return b.store.executeSearchQuery(ctx, b.querySQL.String(), b.args, false, false)
+	return b.store.executeSearchQuery(ctx, b.querySQL.String(), b.args, false, false, b.store.options.EnableJSON)
 }
 
 func (b *searchQueryBuilder) selectFields(fields string) {
@@ -723,7 +727,7 @@ func (b *searchQueryBuilder) addSimilarityThreshold() {
 }
 
 func (b *searchQueryBuilder) applyPreFilters() {
-	clauses, args := b.store.buildFilters(b.query.Filters)
+	clauses, args := b.store.buildFilters(b.query.Filters, "r.")
 	b.whereClauses = append(b.whereClauses, clauses...)
 	b.args = append(b.args, args...)
 }
@@ -776,7 +780,7 @@ func (b *searchQueryBuilder) applyPostFilters() {
 		b.querySQL.WriteString(innerQuery)
 		b.querySQL.WriteString(") SELECT * FROM ranked ")
 
-		postFilterClauses, postFilterArgs := b.store.buildFilters(b.query.PostFilters)
+		postFilterClauses, postFilterArgs := b.store.buildFilters(b.query.PostFilters, "")
 		if len(postFilterClauses) > 0 {
 			b.querySQL.WriteString("WHERE " + strings.Join(postFilterClauses, " AND ") + " ")
 			b.args = append(b.args, postFilterArgs...)
@@ -784,22 +788,22 @@ func (b *searchQueryBuilder) applyPostFilters() {
 	}
 }
 
-func (s *Store) buildFilters(filters []collection.Filter) ([]string, []interface{}) {
+func (s *Store) buildFilters(filters []collection.Filter, prefix string) ([]string, []interface{}) {
 	var clauses []string
 	var args []interface{}
 
 	for _, filter := range filters {
-		// Filters with Field starting with "labels." are applied to r.labels,
-		// all other filters are applied to r.jsontext.
+		// Filters with Field starting with "labels." are applied to labels column,
+		// all other filters are applied to jsontext column.
 		if strings.HasPrefix(filter.Field, "labels.") {
 			labelKey := strings.TrimPrefix(filter.Field, "labels.")
 			escapedKey := escapeJSONPathKey(labelKey)
-			clause, clauseArgs := s.buildFilterClause("r.labels", escapedKey, filter)
+			clause, clauseArgs := s.buildFilterClause(prefix+"labels", escapedKey, filter)
 			clauses = append(clauses, clause)
 			args = append(args, clauseArgs...)
 		} else {
 			path := "$." + filter.Field
-			clause, clauseArgs := s.buildFilterClause("r.jsontext", path, filter)
+			clause, clauseArgs := s.buildFilterClause(prefix+"jsontext", path, filter)
 			clauses = append(clauses, clause)
 			args = append(args, clauseArgs...)
 		}
@@ -836,7 +840,7 @@ func escapeJSONPathKey(key string) string {
 }
 
 func (s *Store) executeSearchQuery(ctx context.Context, query string, args []interface{},
-	hasVector, hasFTS bool) ([]*collection.SearchResult, error) {
+	hasVector, hasFTS, hasJSON bool) ([]*collection.SearchResult, error) {
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -850,11 +854,15 @@ func (s *Store) executeSearchQuery(ctx context.Context, query string, args []int
 		var dataURI sql.NullString
 		var createdAt, updatedAt int64
 		var labelsJSON string
+		var jsontext sql.NullString
 		var distance sql.NullFloat64
 		var score sql.NullFloat64
 
 		scanArgs := []interface{}{&r.Id, &r.ProtoData, &dataURI, &createdAt, &updatedAt, &labelsJSON}
 
+		if hasJSON {
+			scanArgs = append(scanArgs, &jsontext)
+		}
 		if hasVector {
 			scanArgs = append(scanArgs, &distance)
 		}
