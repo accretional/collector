@@ -148,9 +148,9 @@ func BenchmarkSearch_JSONBFilter(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		if _, err := coll.Search(ctx, &collection.SearchQuery{
-			Filters: map[string]collection.Filter{
-				"status": {Operator: collection.OpEquals, Value: "active"},
-				"score":  {Operator: collection.OpGreaterThan, Value: 500},
+			Filters: []collection.Filter{
+				{Field: "status", Operator: collection.OpEquals, Value: "active"},
+				{Field: "score", Operator: collection.OpGreaterThan, Value: 500},
 			},
 			Limit: 10,
 		}); err != nil {

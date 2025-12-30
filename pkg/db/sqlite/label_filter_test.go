@@ -67,8 +67,8 @@ func TestSearch_LabelFilters(t *testing.T) {
 	// Test 1: Filter by namespace1
 	t.Run("FilterNamespace1", func(t *testing.T) {
 		query := &collection.SearchQuery{
-			LabelFilters: map[string]string{
-				"namespace": "namespace1",
+			Filters: []collection.Filter{
+				{Field: "labels.namespace", Operator: collection.OpEquals, Value: "namespace1"},
 			},
 		}
 
@@ -91,8 +91,8 @@ func TestSearch_LabelFilters(t *testing.T) {
 	// Test 2: Filter by namespace2
 	t.Run("FilterNamespace2", func(t *testing.T) {
 		query := &collection.SearchQuery{
-			LabelFilters: map[string]string{
-				"namespace": "namespace2",
+			Filters: []collection.Filter{
+				{Field: "labels.namespace", Operator: collection.OpEquals, Value: "namespace2"},
 			},
 		}
 
@@ -109,9 +109,9 @@ func TestSearch_LabelFilters(t *testing.T) {
 	// Test 3: Filter by multiple labels
 	t.Run("FilterMultipleLabels", func(t *testing.T) {
 		query := &collection.SearchQuery{
-			LabelFilters: map[string]string{
-				"namespace": "namespace1",
-				"type":      "test",
+			Filters: []collection.Filter{
+				{Field: "labels.namespace", Operator: collection.OpEquals, Value: "namespace1"},
+				{Field: "labels.type", Operator: collection.OpEquals, Value: "test"},
 			},
 		}
 
@@ -128,8 +128,8 @@ func TestSearch_LabelFilters(t *testing.T) {
 	// Test 4: No matching labels
 	t.Run("NoMatchingLabels", func(t *testing.T) {
 		query := &collection.SearchQuery{
-			LabelFilters: map[string]string{
-				"namespace": "nonexistent",
+			Filters: []collection.Filter{
+				{Field: "labels.namespace", Operator: collection.OpEquals, Value: "nonexistent"},
 			},
 		}
 

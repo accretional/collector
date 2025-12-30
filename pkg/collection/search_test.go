@@ -212,27 +212,27 @@ func TestSearch_JSONBEquals(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		filters     map[string]collection.Filter
+		filters     []collection.Filter
 		expectedIDs []string
 	}{
 		{
 			name: "filter by status=active",
-			filters: map[string]collection.Filter{
-				"status": {Operator: collection.OpEquals, Value: "active"},
+			filters: []collection.Filter{
+				{Field: "status", Operator: collection.OpEquals, Value: "active"},
 			},
 			expectedIDs: []string{"1", "3"},
 		},
 		{
 			name: "filter by age=30",
-			filters: map[string]collection.Filter{
-				"age": {Operator: collection.OpEquals, Value: 30},
+			filters: []collection.Filter{
+				{Field: "age", Operator: collection.OpEquals, Value: 30},
 			},
 			expectedIDs: []string{"1", "3"},
 		},
 		{
 			name: "filter by name=Bob",
-			filters: map[string]collection.Filter{
-				"name": {Operator: collection.OpEquals, Value: "Bob"},
+			filters: []collection.Filter{
+				{Field: "name", Operator: collection.OpEquals, Value: "Bob"},
 			},
 			expectedIDs: []string{"2"},
 		},
@@ -287,34 +287,34 @@ func TestSearch_JSONBComparison(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		filters     map[string]collection.Filter
+		filters     []collection.Filter
 		expectedIDs []string
 	}{
 		{
 			name: "score > 90",
-			filters: map[string]collection.Filter{
-				"score": {Operator: collection.OpGreaterThan, Value: 90},
+			filters: []collection.Filter{
+				{Field: "score", Operator: collection.OpGreaterThan, Value: 90},
 			},
 			expectedIDs: []string{"2", "4"},
 		},
 		{
 			name: "score >= 85",
-			filters: map[string]collection.Filter{
-				"score": {Operator: collection.OpGreaterEqual, Value: 85},
+			filters: []collection.Filter{
+				{Field: "score", Operator: collection.OpGreaterEqual, Value: 85},
 			},
 			expectedIDs: []string{"1", "2", "4"},
 		},
 		{
 			name: "score < 80",
-			filters: map[string]collection.Filter{
-				"score": {Operator: collection.OpLessThan, Value: 80},
+			filters: []collection.Filter{
+				{Field: "score", Operator: collection.OpLessThan, Value: 80},
 			},
 			expectedIDs: []string{"3"},
 		},
 		{
 			name: "score <= 85",
-			filters: map[string]collection.Filter{
-				"score": {Operator: collection.OpLessEqual, Value: 85},
+			filters: []collection.Filter{
+				{Field: "score", Operator: collection.OpLessEqual, Value: 85},
 			},
 			expectedIDs: []string{"1", "3"},
 		},
@@ -373,8 +373,8 @@ func TestSearch_JSONBContains(t *testing.T) {
 	}
 
 	results, err := coll.Search(ctx, &collection.SearchQuery{
-		Filters: map[string]collection.Filter{
-			"email": {Operator: collection.OpContains, Value: "example"},
+		Filters: []collection.Filter{
+			{Field: "email", Operator: collection.OpContains, Value: "example"},
 		},
 		Limit: 10,
 	})
@@ -436,8 +436,8 @@ func TestSearch_JSONBNestedFields(t *testing.T) {
 	}
 
 	results, err := coll.Search(ctx, &collection.SearchQuery{
-		Filters: map[string]collection.Filter{
-			"user.profile.city": {Operator: collection.OpEquals, Value: "San Francisco"},
+		Filters: []collection.Filter{
+			{Field: "user.profile.city", Operator: collection.OpEquals, Value: "San Francisco"},
 		},
 		Limit: 10,
 	})
@@ -490,8 +490,8 @@ func TestSearch_JSONBExists(t *testing.T) {
 
 	// Test EXISTS
 	results, err := coll.Search(ctx, &collection.SearchQuery{
-		Filters: map[string]collection.Filter{
-			"phone": {Operator: collection.OpExists},
+		Filters: []collection.Filter{
+			{Field: "phone", Operator: collection.OpExists},
 		},
 		Limit: 10,
 	})
@@ -507,8 +507,8 @@ func TestSearch_JSONBExists(t *testing.T) {
 
 	// Test NOT_EXISTS
 	results, err = coll.Search(ctx, &collection.SearchQuery{
-		Filters: map[string]collection.Filter{
-			"phone": {Operator: collection.OpNotExists},
+		Filters: []collection.Filter{
+			{Field: "phone", Operator: collection.OpNotExists},
 		},
 		Limit: 10,
 	})
@@ -556,8 +556,8 @@ func TestSearch_CombinedFullTextAndFilters(t *testing.T) {
 	// Search for "Go" by author "Alice"
 	results, err := coll.Search(ctx, &collection.SearchQuery{
 		FullText: "Go",
-		Filters: map[string]collection.Filter{
-			"author": {Operator: collection.OpEquals, Value: "Alice"},
+		Filters: []collection.Filter{
+			{Field: "author", Operator: collection.OpEquals, Value: "Alice"},
 		},
 		Limit: 10,
 	})
@@ -605,9 +605,9 @@ func TestSearch_MultipleFilters(t *testing.T) {
 	}
 
 	results, err := coll.Search(ctx, &collection.SearchQuery{
-		Filters: map[string]collection.Filter{
-			"status": {Operator: collection.OpEquals, Value: "active"},
-			"score":  {Operator: collection.OpGreaterEqual, Value: 90},
+		Filters: []collection.Filter{
+			{Field: "status", Operator: collection.OpEquals, Value: "active"},
+			{Field: "score", Operator: collection.OpGreaterEqual, Value: 90},
 		},
 		Limit: 10,
 	})

@@ -556,9 +556,8 @@ func (s *Store) BackupOnline(ctx context.Context, destPath string, pagesBatchSiz
 
 func (s *Store) Search(ctx context.Context, q *collection.SearchQuery) ([]*collection.SearchResult, error) {
 	// Validate EnableJSON is set when using JSON features
-	hasJSONFilters := len(q.Filters) > 0 || len(q.LabelFilters) > 0
-	if hasJSONFilters && !s.options.EnableJSON {
-		return nil, fmt.Errorf("search with Filters or LabelFilters requires EnableJSON to be true")
+	if len(q.Filters) > 0 && !s.options.EnableJSON {
+		return nil, fmt.Errorf("search with Filters requires EnableJSON to be true")
 	}
 
 	hasVector := len(q.Vector) > 0 && s.options.EnableVector
@@ -717,13 +716,9 @@ func (b *searchQueryBuilder) addSimilarityThreshold() {
 }
 
 func (b *searchQueryBuilder) addFilters() {
-	jsonFilters, jsonArgs := b.store.buildJSONFilters(b.query.Filters)
-	b.whereClauses = append(b.whereClauses, jsonFilters...)
-	b.args = append(b.args, jsonArgs...)
-
-	labelFilters, labelArgs := b.store.buildLabelFilters(b.query.LabelFilters)
-	b.whereClauses = append(b.whereClauses, labelFilters...)
-	b.args = append(b.args, labelArgs...)
+	clauses, args := b.store.buildFilters(b.query.Filters)
+	b.whereClauses = append(b.whereClauses, clauses...)
+	b.args = append(b.args, args...)
 }
 
 func (b *searchQueryBuilder) buildWhere() {
@@ -764,40 +759,41 @@ func (b *searchQueryBuilder) addPagination(vectorSearch bool) {
 	}
 }
 
-func (s *Store) buildJSONFilters(filters map[string]collection.Filter) ([]string, []interface{}) {
+func (s *Store) buildFilters(filters []collection.Filter) ([]string, []interface{}) {
 	var clauses []string
 	var args []interface{}
-	for key, filter := range filters {
-		// For JSON filters, dots are path separators (nested field access)
-		path := "$." + key
-		switch filter.Operator {
-		case collection.OpExists:
-			clauses = append(clauses, `json_extract(r.jsontext, ?) IS NOT NULL`)
-			args = append(args, path)
-		case collection.OpNotExists:
-			clauses = append(clauses, `json_extract(r.jsontext, ?) IS NULL`)
-			args = append(args, path)
-		case collection.OpContains:
-			clauses = append(clauses, `json_extract(r.jsontext, ?) LIKE ?`)
-			args = append(args, path, "%"+fmt.Sprintf("%v", filter.Value)+"%")
-		default:
-			clauses = append(clauses, fmt.Sprintf(`json_extract(r.jsontext, ?) %s ?`, filter.Operator))
-			args = append(args, path, filter.Value)
+
+	for _, filter := range filters {
+		// Filters with Field starting with "labels." are applied to r.labels,
+		// all other filters are applied to r.jsontext.
+		if strings.HasPrefix(filter.Field, "labels.") {
+			labelKey := strings.TrimPrefix(filter.Field, "labels.")
+			escapedKey := escapeJSONPathKey(labelKey)
+			clause, clauseArgs := s.buildFilterClause("r.labels", escapedKey, filter)
+			clauses = append(clauses, clause)
+			args = append(args, clauseArgs...)
+		} else {
+			path := "$." + filter.Field
+			clause, clauseArgs := s.buildFilterClause("r.jsontext", path, filter)
+			clauses = append(clauses, clause)
+			args = append(args, clauseArgs...)
 		}
 	}
+
 	return clauses, args
 }
 
-func (s *Store) buildLabelFilters(labelFilters map[string]string) ([]string, []interface{}) {
-	var clauses []string
-	var args []interface{}
-	for key, value := range labelFilters {
-		// Escape the key for JSON path - use double quotes for keys with special chars
-		escapedKey := escapeJSONPathKey(key)
-		clauses = append(clauses, fmt.Sprintf(`json_extract(r.labels, '%s') = ?`, escapedKey))
-		args = append(args, value)
+func (s *Store) buildFilterClause(column, path string, filter collection.Filter) (string, []interface{}) {
+	switch filter.Operator {
+	case collection.OpExists:
+		return fmt.Sprintf(`json_extract(%s, ?) IS NOT NULL`, column), []interface{}{path}
+	case collection.OpNotExists:
+		return fmt.Sprintf(`json_extract(%s, ?) IS NULL`, column), []interface{}{path}
+	case collection.OpContains:
+		return fmt.Sprintf(`json_extract(%s, ?) LIKE ?`, column), []interface{}{path, "%" + fmt.Sprintf("%v", filter.Value) + "%"}
+	default:
+		return fmt.Sprintf(`json_extract(%s, ?) %s ?`, column, filter.Operator), []interface{}{path, filter.Value}
 	}
-	return clauses, args
 }
 
 // escapeJSONPathKey escapes a key for use in SQLite JSON path expressions.

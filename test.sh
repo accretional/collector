@@ -5,7 +5,7 @@ protoc -I proto --go_out=./gen --go_opt=paths=source_relative \
     proto/*.proto
 
 # Run main
-go run cmd/main.go
+go run -tags sqlite_fts5 cmd/main.go
 
 # Run all durability tests
 go test -tags sqlite_fts5 -v ./pkg/collection/ -run Durability

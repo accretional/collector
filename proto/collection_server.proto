@@ -90,14 +90,13 @@ message SearchRequest {
   string collection_name = 2;
 
   string full_text = 3;
-  map<string, Filter> filters = 4;
-  map<string, string> label_filters = 5;
-  repeated float vector = 6;
-  float similarity_threshold = 7;
-  int32 limit = 8;
-  int32 offset = 9;
-  string order_by = 10;
-  bool ascending = 11;
+  repeated Filter filters = 4;
+  repeated float vector = 5;
+  float similarity_threshold = 6;
+  int32 limit = 7;
+  int32 offset = 8;
+  string order_by = 9;
+  bool ascending = 10;
 }
 
 message SearchResponse {
@@ -113,8 +112,9 @@ message SearchResult {
 }
 
 message Filter {
-  FilterOperator operator = 1;
-  google.protobuf.Value value = 2;
+  string field = 1;
+  FilterOperator operator = 2;
+  google.protobuf.Value value = 3;
 }
 
 enum FilterOperator {

@@ -183,8 +183,7 @@ func (s *CollectionServer) Search(ctx context.Context, req *pb.SearchRequest) (*
 
 	query := &SearchQuery{
 		FullText:            req.FullText,
-		Filters:             make(map[string]Filter),
-		LabelFilters:        req.LabelFilters,
+		Filters:             make([]Filter, 0, len(req.Filters)),
 		Vector:              req.Vector,
 		SimilarityThreshold: req.SimilarityThreshold,
 		Limit:               int(req.Limit),
@@ -193,9 +192,9 @@ func (s *CollectionServer) Search(ctx context.Context, req *pb.SearchRequest) (*
 		Ascending:           req.Ascending,
 	}
 
-	for k, v := range req.Filters {
+	for _, f := range req.Filters {
 		var op FilterOperator
-		switch v.Operator {
+		switch f.Operator {
 		case pb.FilterOperator_OP_EQUALS:
 			op = OpEquals
 		case pb.FilterOperator_OP_NOT_EQUALS:
@@ -217,12 +216,13 @@ func (s *CollectionServer) Search(ctx context.Context, req *pb.SearchRequest) (*
 		case pb.FilterOperator_OP_NOT_EXISTS:
 			op = OpNotExists
 		default:
-			return nil, status.Errorf(codes.InvalidArgument, "unsupported filter operator: %v", v.Operator)
+			return nil, status.Errorf(codes.InvalidArgument, "unsupported filter operator: %v", f.Operator)
 		}
-		query.Filters[k] = Filter{
+		query.Filters = append(query.Filters, Filter{
+			Field:    f.Field,
 			Operator: op,
-			Value:    convertStructpbValue(v.Value),
-		}
+			Value:    convertStructpbValue(f.Value),
+		})
 	}
 
 	results, err := collection.Search(ctx, query)

@@ -58,8 +58,8 @@ type DefaultCollectionRepo struct {
 	store            Store
 	pathConfig       *PathConfig
 	storeFactory     StoreFactory
-	typeValidator    MessageTypeValidator   // Optional: validates message types if set
-	converterFactory JSONConverterFactory   // Optional: creates JSON converters for stores
+	typeValidator    MessageTypeValidator // Optional: validates message types if set
+	converterFactory JSONConverterFactory // Optional: creates JSON converters for stores
 }
 
 // NewCollectionRepo creates a new DefaultCollectionRepo with the given Store, PathConfig, RegistryStore, and StoreFactory.

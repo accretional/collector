@@ -349,7 +349,9 @@ func (s *RegistryServer) LookupProtoByMessageName(ctx context.Context, namespace
 	// Search for protos in this namespace that contain the message name
 	// The messageNames field is stored as a JSON array in the jsontext column
 	results, err := s.registeredProtos.Search(ctx, &collection.SearchQuery{
-		LabelFilters: map[string]string{"namespace": namespace},
+		Filters: []collection.Filter{
+			{Field: "labels.namespace", Operator: collection.OpEquals, Value: namespace},
+		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("search protos: %w", err)
@@ -473,14 +475,16 @@ func (s *RegistryServer) ValidateMethod(ctx context.Context, req *collector.Vali
 
 // ListProtos returns all registered protos, optionally filtered by namespace
 func (s *RegistryServer) ListProtos(ctx context.Context, namespace string) ([]*collector.RegisteredProto, error) {
-	// Use Search with LabelFilters for DB-level filtering (no limit)
+	// Use Search with Filters for DB-level filtering (no limit)
 	query := &collection.SearchQuery{
-		LabelFilters: make(map[string]string),
-		Limit:        0, // No limit - get all matching records
+		Filters: []collection.Filter{},
+		Limit:   0, // No limit - get all matching records
 	}
 
 	if namespace != "" {
-		query.LabelFilters["namespace"] = namespace
+		query.Filters = append(query.Filters, collection.Filter{
+			Field: "labels.namespace", Operator: collection.OpEquals, Value: namespace,
+		})
 	}
 
 	searchResults, err := s.registeredProtos.Search(ctx, query)
@@ -502,14 +506,16 @@ func (s *RegistryServer) ListProtos(ctx context.Context, namespace string) ([]*c
 
 // ListServices returns all registered services, optionally filtered by namespace
 func (s *RegistryServer) ListServices(ctx context.Context, req *collector.ListServicesRequest) (*collector.ListServicesResponse, error) {
-	// Use Search with LabelFilters for DB-level filtering (no limit)
+	// Use Search with Filters for DB-level filtering (no limit)
 	query := &collection.SearchQuery{
-		LabelFilters: make(map[string]string),
-		Limit:        0, // No limit - get all matching records
+		Filters: []collection.Filter{},
+		Limit:   0, // No limit - get all matching records
 	}
 
 	if req.Namespace != "" {
-		query.LabelFilters["namespace"] = req.Namespace
+		query.Filters = append(query.Filters, collection.Filter{
+			Field: "labels.namespace", Operator: collection.OpEquals, Value: req.Namespace,
+		})
 	}
 
 	searchResults, err := s.registeredServices.Search(ctx, query)

@@ -7,8 +7,7 @@ import (
 // SearchQuery is the generic query structure passed to the Store.
 type SearchQuery struct {
 	FullText            string
-	Filters             map[string]Filter // Field path -> Filter
-	LabelFilters        map[string]string
+	Filters             []Filter
 	Vector              []float32 // For vector similarity search
 	SimilarityThreshold float32
 	Limit               int
@@ -24,8 +23,8 @@ type SearchResult struct {
 	Distance float64 // For vector search
 }
 
-// Filter represents a condition on a structured field.
 type Filter struct {
+	Field    string // "status" or "user.name" for JSON paths, "labels.<key>" for label filters
 	Operator FilterOperator
 	Value    interface{}
 }

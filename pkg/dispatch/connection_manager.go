@@ -70,8 +70,8 @@ func (cm *ConnectionManager) RecoverFromRestart(ctx context.Context) error {
 	// Query all connections where we are the source and status is ACTIVE
 	// These are from a previous session that crashed
 	query := &collection.SearchQuery{
-		LabelFilters: map[string]string{
-			"source_collector_id": cm.collectorID,
+		Filters: []collection.Filter{
+			{Field: "labels.source_collector_id", Operator: collection.OpEquals, Value: cm.collectorID},
 		},
 		Limit: 1000, // Reasonable upper bound
 	}
@@ -561,9 +561,9 @@ func (cm *ConnectionManager) getPersistedConnection(ctx context.Context, connect
 // countPreviousConnections counts how many times a source has connected to us.
 func (cm *ConnectionManager) countPreviousConnections(ctx context.Context, sourceCollectorID string) int32 {
 	query := &collection.SearchQuery{
-		LabelFilters: map[string]string{
-			"source_collector_id": sourceCollectorID,
-			"target_collector_id": cm.collectorID,
+		Filters: []collection.Filter{
+			{Field: "labels.source_collector_id", Operator: collection.OpEquals, Value: sourceCollectorID},
+			{Field: "labels.target_collector_id", Operator: collection.OpEquals, Value: cm.collectorID},
 		},
 		Limit: 1000,
 	}
@@ -579,9 +579,9 @@ func (cm *ConnectionManager) countPreviousConnections(ctx context.Context, sourc
 // countPreviousConnectionsToTarget counts how many times we've connected to a target.
 func (cm *ConnectionManager) countPreviousConnectionsToTarget(ctx context.Context, targetCollectorID string) int32 {
 	query := &collection.SearchQuery{
-		LabelFilters: map[string]string{
-			"source_collector_id": cm.collectorID,
-			"target_collector_id": targetCollectorID,
+		Filters: []collection.Filter{
+			{Field: "labels.source_collector_id", Operator: collection.OpEquals, Value: cm.collectorID},
+			{Field: "labels.target_collector_id", Operator: collection.OpEquals, Value: targetCollectorID},
 		},
 		Limit: 1000,
 	}
