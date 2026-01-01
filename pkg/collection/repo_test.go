@@ -2,6 +2,7 @@ package collection_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	pb "github.com/accretional/collector/gen/collector"
@@ -298,8 +299,7 @@ func TestCollectionRepo_SearchCollections(t *testing.T) {
 		t.Fatalf("SearchCollections failed: %v", err)
 	}
 
-	// Implementation returns 501 Not Implemented
-	if resp.Status.Code != 501 {
+	if resp.Status.Code != 200 {
 		t.Logf("SearchCollections returned status %d", resp.Status.Code)
 	}
 }
@@ -336,8 +336,7 @@ func TestCollectionRepo_SearchCollections_WithQuery(t *testing.T) {
 		t.Fatalf("SearchCollections failed: %v", err)
 	}
 
-	// Implementation returns 501 Not Implemented
-	if resp.Status.Code != 501 {
+	if resp.Status.Code != 200 {
 		t.Logf("SearchCollections returned status %d", resp.Status.Code)
 	}
 }
@@ -372,9 +371,562 @@ func TestCollectionRepo_SearchCollections_EmptyNamespace(t *testing.T) {
 		t.Fatalf("SearchCollections failed: %v", err)
 	}
 
-	// Implementation returns 501 Not Implemented
-	if resp.Status.Code != 501 {
+	if resp.Status.Code != 200 {
 		t.Logf("SearchCollections returned status %d", resp.Status.Code)
+	}
+}
+
+// TestCollectionRepo_SearchCollections_FTSAcrossCollections tests full-text search across multiple collections
+func TestCollectionRepo_SearchCollections_FTSAcrossCollections(t *testing.T) {
+	repo, cleanup := setupTestRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Create two collections
+	coll1 := &pb.Collection{Namespace: "docs", Name: "articles"}
+	coll2 := &pb.Collection{Namespace: "docs", Name: "tutorials"}
+
+	if _, err := repo.CreateCollection(ctx, coll1); err != nil {
+		t.Fatalf("CreateCollection failed: %v", err)
+	}
+	if _, err := repo.CreateCollection(ctx, coll2); err != nil {
+		t.Fatalf("CreateCollection failed: %v", err)
+	}
+
+	// Add records to each collection
+	articles, err := repo.GetCollection(ctx, "docs", "articles")
+	if err != nil {
+		t.Fatalf("GetCollection failed: %v", err)
+	}
+	defer articles.Close()
+
+	tutorials, err := repo.GetCollection(ctx, "docs", "tutorials")
+	if err != nil {
+		t.Fatalf("GetCollection failed: %v", err)
+	}
+	defer tutorials.Close()
+
+	// Add article about Go
+	if err := articles.CreateRecord(ctx, &pb.CollectionRecord{
+		Id:        "article-1",
+		ProtoData: []byte(`{"title": "Go Programming", "content": "Go is a powerful language for building systems"}`),
+	}); err != nil {
+		t.Fatalf("CreateRecord failed: %v", err)
+	}
+
+	// Add tutorial about Go
+	if err := tutorials.CreateRecord(ctx, &pb.CollectionRecord{
+		Id:        "tutorial-1",
+		ProtoData: []byte(`{"title": "Go Tutorial", "content": "Learn Go programming step by step with Go examples"}`),
+	}); err != nil {
+		t.Fatalf("CreateRecord failed: %v", err)
+	}
+
+	// Add article about Python (should not match Go search)
+	if err := articles.CreateRecord(ctx, &pb.CollectionRecord{
+		Id:        "article-2",
+		ProtoData: []byte(`{"title": "Python Basics", "content": "Python is great for scripting"}`),
+	}); err != nil {
+		t.Fatalf("CreateRecord failed: %v", err)
+	}
+
+	// Search for "Go" across both collections
+	query := &structpb.Struct{
+		Fields: map[string]*structpb.Value{
+			"full_text": structpb.NewStringValue("Go"),
+		},
+	}
+
+	req := &pb.SearchCollectionsRequest{
+		Namespace: "docs",
+		Query:     query,
+		Limit:     10,
+	}
+
+	resp, err := repo.SearchCollections(ctx, req)
+	if err != nil {
+		t.Fatalf("SearchCollections failed: %v", err)
+	}
+
+	if resp.Status.Code != 200 {
+		t.Fatalf("expected status 200, got %d: %s", resp.Status.Code, resp.Status.Message)
+	}
+
+	// Should find results from both collections
+	if resp.TotalMatches < 2 {
+		t.Errorf("expected at least 2 matches across collections, got %d", resp.TotalMatches)
+	}
+
+	// Verify we have results from both collections
+	foundCollections := make(map[string]bool)
+	for _, result := range resp.Results {
+		foundCollections[result.CollectionName] = true
+	}
+
+	if !foundCollections["docs/articles"] {
+		t.Error("expected results from docs/articles collection")
+	}
+	if !foundCollections["docs/tutorials"] {
+		t.Error("expected results from docs/tutorials collection")
+	}
+}
+
+// TestCollectionRepo_SearchCollections_LimitAcrossCollections tests that limit is applied globally
+func TestCollectionRepo_SearchCollections_LimitAcrossCollections(t *testing.T) {
+	repo, cleanup := setupTestRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Create two collections
+	coll1 := &pb.Collection{Namespace: "test", Name: "coll1"}
+	coll2 := &pb.Collection{Namespace: "test", Name: "coll2"}
+
+	if _, err := repo.CreateCollection(ctx, coll1); err != nil {
+		t.Fatalf("CreateCollection failed: %v", err)
+	}
+	if _, err := repo.CreateCollection(ctx, coll2); err != nil {
+		t.Fatalf("CreateCollection failed: %v", err)
+	}
+
+	// Add multiple records to each collection
+	c1, _ := repo.GetCollection(ctx, "test", "coll1")
+	defer c1.Close()
+	c2, _ := repo.GetCollection(ctx, "test", "coll2")
+	defer c2.Close()
+
+	for i := 0; i < 10; i++ {
+		c1.CreateRecord(ctx, &pb.CollectionRecord{
+			Id:        fmt.Sprintf("c1-%d", i),
+			ProtoData: []byte(fmt.Sprintf(`{"index": %d, "text": "item from collection one"}`, i)),
+		})
+		c2.CreateRecord(ctx, &pb.CollectionRecord{
+			Id:        fmt.Sprintf("c2-%d", i),
+			ProtoData: []byte(fmt.Sprintf(`{"index": %d, "text": "item from collection two"}`, i)),
+		})
+	}
+
+	// Search with a global limit of 5
+	req := &pb.SearchCollectionsRequest{
+		Namespace: "test",
+		Query:     &structpb.Struct{},
+		Limit:     5,
+	}
+
+	resp, err := repo.SearchCollections(ctx, req)
+	if err != nil {
+		t.Fatalf("SearchCollections failed: %v", err)
+	}
+
+	if resp.Status.Code != 200 {
+		t.Fatalf("expected status 200, got %d: %s", resp.Status.Code, resp.Status.Message)
+	}
+
+	// Total matches should be limited to 5
+	if resp.TotalMatches > 5 {
+		t.Errorf("expected at most 5 total matches, got %d", resp.TotalMatches)
+	}
+}
+
+// TestCollectionRepo_SearchCollections_ScoresNormalized tests that scores are normalized for cross-collection ranking
+func TestCollectionRepo_SearchCollections_ScoresNormalized(t *testing.T) {
+	repo, cleanup := setupTestRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Create collection
+	coll := &pb.Collection{Namespace: "test", Name: "docs"}
+	if _, err := repo.CreateCollection(ctx, coll); err != nil {
+		t.Fatalf("CreateCollection failed: %v", err)
+	}
+
+	c, _ := repo.GetCollection(ctx, "test", "docs")
+	defer c.Close()
+
+	// Add records with varying relevance
+	c.CreateRecord(ctx, &pb.CollectionRecord{
+		Id:        "high-relevance",
+		ProtoData: []byte(`{"title": "Go Go Go", "content": "Go programming Go language Go"}`),
+	})
+	c.CreateRecord(ctx, &pb.CollectionRecord{
+		Id:        "low-relevance",
+		ProtoData: []byte(`{"title": "Python", "content": "Sometimes we use Go too"}`),
+	})
+
+	// Search for "Go"
+	query := &structpb.Struct{
+		Fields: map[string]*structpb.Value{
+			"full_text": structpb.NewStringValue("Go"),
+		},
+	}
+
+	req := &pb.SearchCollectionsRequest{
+		Namespace: "test",
+		Query:     query,
+		Limit:     10,
+	}
+
+	resp, err := repo.SearchCollections(ctx, req)
+	if err != nil {
+		t.Fatalf("SearchCollections failed: %v", err)
+	}
+
+	if resp.Status.Code != 200 {
+		t.Fatalf("expected status 200, got %d: %s", resp.Status.Code, resp.Status.Message)
+	}
+
+	// Check that scores are in 0-1 range (normalized)
+	for _, result := range resp.Results {
+		for id, score := range result.Scores {
+			if score < 0 || score > 1 {
+				t.Errorf("score for %s should be normalized (0-1), got %f", id, score)
+			}
+		}
+	}
+}
+
+// TestCollectionRepo_SearchCollections_WithFilters tests search with JSON filters
+func TestCollectionRepo_SearchCollections_WithFilters(t *testing.T) {
+	repo, cleanup := setupTestRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Create collection
+	coll := &pb.Collection{Namespace: "test", Name: "products"}
+	if _, err := repo.CreateCollection(ctx, coll); err != nil {
+		t.Fatalf("CreateCollection failed: %v", err)
+	}
+
+	c, _ := repo.GetCollection(ctx, "test", "products")
+	defer c.Close()
+
+	// Add products with different categories
+	c.CreateRecord(ctx, &pb.CollectionRecord{
+		Id:        "product-1",
+		ProtoData: []byte(`{"name": "Laptop", "category": "electronics", "price": 999}`),
+	})
+	c.CreateRecord(ctx, &pb.CollectionRecord{
+		Id:        "product-2",
+		ProtoData: []byte(`{"name": "Shirt", "category": "clothing", "price": 29}`),
+	})
+	c.CreateRecord(ctx, &pb.CollectionRecord{
+		Id:        "product-3",
+		ProtoData: []byte(`{"name": "Phone", "category": "electronics", "price": 699}`),
+	})
+
+	// Search with filter for electronics category
+	query := &structpb.Struct{
+		Fields: map[string]*structpb.Value{
+			"filters": structpb.NewListValue(&structpb.ListValue{
+				Values: []*structpb.Value{
+					structpb.NewStructValue(&structpb.Struct{
+						Fields: map[string]*structpb.Value{
+							"field":    structpb.NewStringValue("category"),
+							"operator": structpb.NewStringValue("="),
+							"value":    structpb.NewStringValue("electronics"),
+						},
+					}),
+				},
+			}),
+		},
+	}
+
+	req := &pb.SearchCollectionsRequest{
+		Namespace: "test",
+		Query:     query,
+		Limit:     10,
+	}
+
+	resp, err := repo.SearchCollections(ctx, req)
+	if err != nil {
+		t.Fatalf("SearchCollections failed: %v", err)
+	}
+
+	if resp.Status.Code != 200 {
+		t.Fatalf("expected status 200, got %d: %s", resp.Status.Code, resp.Status.Message)
+	}
+
+	// Should find only electronics (2 items)
+	if resp.TotalMatches != 2 {
+		t.Errorf("expected 2 matches for electronics, got %d", resp.TotalMatches)
+	}
+}
+
+// TestCollectionRepo_SearchCollections_NoMatchingCollections tests searching non-existent collections
+func TestCollectionRepo_SearchCollections_NoMatchingCollections(t *testing.T) {
+	repo, cleanup := setupTestRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Search in a namespace with no collections
+	req := &pb.SearchCollectionsRequest{
+		Namespace: "nonexistent",
+		Query:     &structpb.Struct{},
+		Limit:     10,
+	}
+
+	resp, err := repo.SearchCollections(ctx, req)
+	if err != nil {
+		t.Fatalf("SearchCollections failed: %v", err)
+	}
+
+	// Should return OK with empty results
+	if resp.Status.Code != 200 {
+		t.Errorf("expected status 200, got %d: %s", resp.Status.Code, resp.Status.Message)
+	}
+
+	if len(resp.Results) != 0 {
+		t.Errorf("expected 0 results, got %d", len(resp.Results))
+	}
+
+	if resp.TotalMatches != 0 {
+		t.Errorf("expected 0 total matches, got %d", resp.TotalMatches)
+	}
+}
+
+// TestCollectionRepo_SearchCollections_WithPostFilters tests search with post-filters
+func TestCollectionRepo_SearchCollections_WithPostFilters(t *testing.T) {
+	repo, cleanup := setupTestRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Create collection
+	coll := &pb.Collection{Namespace: "test", Name: "items"}
+	if _, err := repo.CreateCollection(ctx, coll); err != nil {
+		t.Fatalf("CreateCollection failed: %v", err)
+	}
+
+	c, _ := repo.GetCollection(ctx, "test", "items")
+	defer c.Close()
+
+	// Add items with different statuses
+	c.CreateRecord(ctx, &pb.CollectionRecord{
+		Id:        "item-1",
+		ProtoData: []byte(`{"name": "Alpha Widget", "status": "active", "priority": 1}`),
+	})
+	c.CreateRecord(ctx, &pb.CollectionRecord{
+		Id:        "item-2",
+		ProtoData: []byte(`{"name": "Beta Widget", "status": "inactive", "priority": 2}`),
+	})
+	c.CreateRecord(ctx, &pb.CollectionRecord{
+		Id:        "item-3",
+		ProtoData: []byte(`{"name": "Gamma Widget", "status": "active", "priority": 3}`),
+	})
+
+	// Search with FTS and post-filter for active status
+	query := &structpb.Struct{
+		Fields: map[string]*structpb.Value{
+			"full_text": structpb.NewStringValue("Widget"),
+			"post_filters": structpb.NewListValue(&structpb.ListValue{
+				Values: []*structpb.Value{
+					structpb.NewStructValue(&structpb.Struct{
+						Fields: map[string]*structpb.Value{
+							"field":    structpb.NewStringValue("status"),
+							"operator": structpb.NewStringValue("="),
+							"value":    structpb.NewStringValue("active"),
+						},
+					}),
+				},
+			}),
+		},
+	}
+
+	req := &pb.SearchCollectionsRequest{
+		Namespace: "test",
+		Query:     query,
+		Limit:     10,
+	}
+
+	resp, err := repo.SearchCollections(ctx, req)
+	if err != nil {
+		t.Fatalf("SearchCollections failed: %v", err)
+	}
+
+	if resp.Status.Code != 200 {
+		t.Fatalf("expected status 200, got %d: %s", resp.Status.Code, resp.Status.Message)
+	}
+
+	// Should find only active items (2 items)
+	if resp.TotalMatches != 2 {
+		t.Errorf("expected 2 matches for active items, got %d", resp.TotalMatches)
+	}
+}
+
+// TestCollectionRepo_SearchCollections_PreAndPostFilters tests combining pre and post filters
+func TestCollectionRepo_SearchCollections_PreAndPostFilters(t *testing.T) {
+	repo, cleanup := setupTestRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Create collection
+	coll := &pb.Collection{Namespace: "test", Name: "products"}
+	if _, err := repo.CreateCollection(ctx, coll); err != nil {
+		t.Fatalf("CreateCollection failed: %v", err)
+	}
+
+	c, _ := repo.GetCollection(ctx, "test", "products")
+	defer c.Close()
+
+	// Add products with category and region
+	c.CreateRecord(ctx, &pb.CollectionRecord{
+		Id:        "p1",
+		ProtoData: []byte(`{"name": "Laptop Pro", "category": "electronics", "region": "US"}`),
+	})
+	c.CreateRecord(ctx, &pb.CollectionRecord{
+		Id:        "p2",
+		ProtoData: []byte(`{"name": "Laptop Basic", "category": "electronics", "region": "EU"}`),
+	})
+	c.CreateRecord(ctx, &pb.CollectionRecord{
+		Id:        "p3",
+		ProtoData: []byte(`{"name": "T-Shirt", "category": "clothing", "region": "US"}`),
+	})
+	c.CreateRecord(ctx, &pb.CollectionRecord{
+		Id:        "p4",
+		ProtoData: []byte(`{"name": "Phone", "category": "electronics", "region": "US"}`),
+	})
+
+	// Pre-filter: category = electronics (narrows search space)
+	// Post-filter: region = US (filters ranked results)
+	query := &structpb.Struct{
+		Fields: map[string]*structpb.Value{
+			"filters": structpb.NewListValue(&structpb.ListValue{
+				Values: []*structpb.Value{
+					structpb.NewStructValue(&structpb.Struct{
+						Fields: map[string]*structpb.Value{
+							"field":    structpb.NewStringValue("category"),
+							"operator": structpb.NewStringValue("="),
+							"value":    structpb.NewStringValue("electronics"),
+						},
+					}),
+				},
+			}),
+			"post_filters": structpb.NewListValue(&structpb.ListValue{
+				Values: []*structpb.Value{
+					structpb.NewStructValue(&structpb.Struct{
+						Fields: map[string]*structpb.Value{
+							"field":    structpb.NewStringValue("region"),
+							"operator": structpb.NewStringValue("="),
+							"value":    structpb.NewStringValue("US"),
+						},
+					}),
+				},
+			}),
+		},
+	}
+
+	req := &pb.SearchCollectionsRequest{
+		Namespace: "test",
+		Query:     query,
+		Limit:     10,
+	}
+
+	resp, err := repo.SearchCollections(ctx, req)
+	if err != nil {
+		t.Fatalf("SearchCollections failed: %v", err)
+	}
+
+	if resp.Status.Code != 200 {
+		t.Fatalf("expected status 200, got %d: %s", resp.Status.Code, resp.Status.Message)
+	}
+
+	// Should find only electronics in US (2 items: Laptop Pro and Phone)
+	if resp.TotalMatches != 2 {
+		t.Errorf("expected 2 matches for electronics in US, got %d", resp.TotalMatches)
+	}
+}
+
+// TestCollectionRepo_SearchCollections_SpecificCollections tests searching specific collection names
+func TestCollectionRepo_SearchCollections_SpecificCollections(t *testing.T) {
+	repo, cleanup := setupTestRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Create three collections
+	for _, name := range []string{"coll1", "coll2", "coll3"} {
+		coll := &pb.Collection{Namespace: "test", Name: name}
+		if _, err := repo.CreateCollection(ctx, coll); err != nil {
+			t.Fatalf("CreateCollection failed: %v", err)
+		}
+
+		c, _ := repo.GetCollection(ctx, "test", name)
+		c.CreateRecord(ctx, &pb.CollectionRecord{
+			Id:        "record-" + name,
+			ProtoData: []byte(fmt.Sprintf(`{"source": "%s"}`, name)),
+		})
+		c.Close()
+	}
+
+	// Search only in coll1 and coll3 (skip coll2)
+	req := &pb.SearchCollectionsRequest{
+		Namespace:       "test",
+		CollectionNames: []string{"coll1", "coll3"},
+		Query:           &structpb.Struct{},
+		Limit:           10,
+	}
+
+	resp, err := repo.SearchCollections(ctx, req)
+	if err != nil {
+		t.Fatalf("SearchCollections failed: %v", err)
+	}
+
+	if resp.Status.Code != 200 {
+		t.Fatalf("expected status 200, got %d: %s", resp.Status.Code, resp.Status.Message)
+	}
+
+	// Should find 2 results (one from each specified collection)
+	if resp.TotalMatches != 2 {
+		t.Errorf("expected 2 matches, got %d", resp.TotalMatches)
+	}
+
+	// Verify no results from coll2
+	for _, result := range resp.Results {
+		if result.CollectionName == "test/coll2" {
+			t.Error("should not have results from coll2")
+		}
+	}
+}
+
+// TestCollectionRepo_SearchCollections_DefaultLimit tests that default limit is applied when not specified
+func TestCollectionRepo_SearchCollections_DefaultLimit(t *testing.T) {
+	repo, cleanup := setupTestRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Create collection with many records
+	coll := &pb.Collection{Namespace: "test", Name: "large"}
+	if _, err := repo.CreateCollection(ctx, coll); err != nil {
+		t.Fatalf("CreateCollection failed: %v", err)
+	}
+
+	c, _ := repo.GetCollection(ctx, "test", "large")
+	defer c.Close()
+
+	// Add 150 records (more than default limit of 100)
+	for i := 0; i < 150; i++ {
+		c.CreateRecord(ctx, &pb.CollectionRecord{
+			Id:        fmt.Sprintf("record-%d", i),
+			ProtoData: []byte(fmt.Sprintf(`{"index": %d}`, i)),
+		})
+	}
+
+	// Search without specifying limit (should default to 100)
+	req := &pb.SearchCollectionsRequest{
+		Namespace: "test",
+		Query:     &structpb.Struct{},
+		Limit:     0, // No limit specified
+	}
+
+	resp, err := repo.SearchCollections(ctx, req)
+	if err != nil {
+		t.Fatalf("SearchCollections failed: %v", err)
+	}
+
+	if resp.Status.Code != 200 {
+		t.Fatalf("expected status 200, got %d: %s", resp.Status.Code, resp.Status.Message)
+	}
+
+	// Should be limited to 100 (default)
+	if resp.TotalMatches > 100 {
+		t.Errorf("expected at most 100 matches (default limit), got %d", resp.TotalMatches)
 	}
 }
 

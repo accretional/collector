@@ -247,7 +247,7 @@ func (r *DefaultCollectionRepo) Route(ctx context.Context, req *pb.RouteRequest)
 
 // SearchCollections searches across multiple collections.
 func (r *DefaultCollectionRepo) SearchCollections(ctx context.Context, req *pb.SearchCollectionsRequest) (*pb.SearchCollectionsResponse, error) {
-	return r.service.SearchCollections(ctx, req)
+	return r.service.SearchCollections(ctx, req, r.GetCollection)
 }
 
 // GetCollection retrieves a Collection instance by namespace and name.

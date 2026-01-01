@@ -4,10 +4,15 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math"
+	"sort"
 	"strings"
 	"sync"
 
 	pb "github.com/accretional/collector/gen/collector"
+	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // CollectionRepoService provides a persistent implementation of the CollectionRepo interface.
@@ -191,52 +196,314 @@ func (s *CollectionRepoService) Route(ctx context.Context, req *pb.RouteRequest)
 	}, nil
 }
 
-// SearchCollections searches across multiple collections.
-func (s *CollectionRepoService) SearchCollections(ctx context.Context, req *pb.SearchCollectionsRequest) (*pb.SearchCollectionsResponse, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+type searchResultWithMeta struct {
+	collectionName  string
+	result          *SearchResult
+	normalizedScore float64
+}
 
-	// Determine which collections to search
+func parseStructToSearchQuery(s *structpb.Struct, limit int) (*SearchQuery, error) {
+	query := &SearchQuery{
+		Limit: limit,
+	}
+
+	if s == nil {
+		return query, nil
+	}
+
+	fields := s.GetFields()
+
+	if v, ok := fields["full_text"]; ok {
+		query.FullText = v.GetStringValue()
+	}
+
+	if v, ok := fields["vector"]; ok {
+		if listVal := v.GetListValue(); listVal != nil {
+			for _, item := range listVal.GetValues() {
+				query.Vector = append(query.Vector, float32(item.GetNumberValue()))
+			}
+		}
+	}
+
+	if v, ok := fields["similarity_threshold"]; ok {
+		query.SimilarityThreshold = float32(v.GetNumberValue())
+	}
+
+	if v, ok := fields["filters"]; ok {
+		filters, err := parseFiltersFromStruct(v)
+		if err != nil {
+			return nil, fmt.Errorf("invalid filters: %w", err)
+		}
+		query.Filters = filters
+	}
+
+	if v, ok := fields["post_filters"]; ok {
+		postFilters, err := parseFiltersFromStruct(v)
+		if err != nil {
+			return nil, fmt.Errorf("invalid post_filters: %w", err)
+		}
+		query.PostFilters = postFilters
+	}
+
+	if v, ok := fields["order_by"]; ok {
+		query.OrderBy = v.GetStringValue()
+	}
+
+	if v, ok := fields["ascending"]; ok {
+		query.Ascending = v.GetBoolValue()
+	}
+
+	return query, nil
+}
+
+func parseFiltersFromStruct(v *structpb.Value) ([]Filter, error) {
+	listVal := v.GetListValue()
+	if listVal == nil {
+		return nil, nil
+	}
+
+	var filters []Filter
+	for _, item := range listVal.GetValues() {
+		filterStruct := item.GetStructValue()
+		if filterStruct == nil {
+			continue
+		}
+
+		fields := filterStruct.GetFields()
+		filter := Filter{}
+
+		if f, ok := fields["field"]; ok {
+			filter.Field = f.GetStringValue()
+		}
+
+		if op, ok := fields["operator"]; ok {
+			filter.Operator = parseFilterOperator(op.GetStringValue())
+		}
+
+		if val, ok := fields["value"]; ok {
+			filter.Value = structValueToInterface(val)
+		}
+
+		filters = append(filters, filter)
+	}
+
+	return filters, nil
+}
+
+func parseFilterOperator(op string) FilterOperator {
+	switch strings.ToUpper(op) {
+	case "=", "EQUALS", "EQ":
+		return OpEquals
+	case "!=", "NOT_EQUALS", "NE":
+		return OpNotEquals
+	case ">", "GREATER_THAN", "GT":
+		return OpGreaterThan
+	case "<", "LESS_THAN", "LT":
+		return OpLessThan
+	case ">=", "GREATER_EQUAL", "GTE":
+		return OpGreaterEqual
+	case "<=", "LESS_EQUAL", "LTE":
+		return OpLessEqual
+	case "CONTAINS", "LIKE":
+		return OpContains
+	case "IN":
+		return OpIn
+	case "EXISTS":
+		return OpExists
+	case "NOT_EXISTS":
+		return OpNotExists
+	default:
+		return OpEquals
+	}
+}
+
+func structValueToInterface(v *structpb.Value) interface{} {
+	if v == nil {
+		return nil
+	}
+	switch v.Kind.(type) {
+	case *structpb.Value_NullValue:
+		return nil
+	case *structpb.Value_NumberValue:
+		return v.GetNumberValue()
+	case *structpb.Value_StringValue:
+		return v.GetStringValue()
+	case *structpb.Value_BoolValue:
+		return v.GetBoolValue()
+	default:
+		return nil
+	}
+}
+
+// Normalizes search scores to a 0-1 range for cross-collection ranking.
+// For FTS (BM25): scores are negative, lower (more negative) is better
+// For Vector (distance): lower distance is better
+func normalizeScore(result *SearchResult, hasVector bool) float64 {
+	if hasVector {
+		if result.Distance >= 0 {
+			return 1.0 / (1.0 + result.Distance)
+		}
+		return 0.0
+	}
+
+	if result.Score != 0 {
+		return 1.0 / (1.0 + math.Exp(result.Score/5.0))
+	}
+
+	return 0.5 // Default score for scalar searches
+}
+
+// We need the collection getter from the repo as the service only holds metadata info
+type CollectionGetter func(ctx context.Context, namespace, name string) (*Collection, error)
+
+func (s *CollectionRepoService) SearchCollections(
+	ctx context.Context,
+	req *pb.SearchCollectionsRequest,
+	getCollection CollectionGetter,
+) (*pb.SearchCollectionsResponse, error) {
+
+	allCollections, err := s.registryStore.ListCollections(ctx, req.Namespace)
+	if err != nil {
+		return &pb.SearchCollectionsResponse{
+			Status: &pb.Status{Code: 500, Message: fmt.Sprintf("failed to list collections: %v", err)},
+		}, nil
+	}
+
 	var collectionsToSearch []*pb.Collection
-
 	if len(req.CollectionNames) > 0 {
-		// Search specific collections
+		nameSet := make(map[string]bool)
 		for _, name := range req.CollectionNames {
-			id := fmt.Sprintf("%s/%s", req.Namespace, name)
-			if coll, exists := s.collections[id]; exists {
-				collectionsToSearch = append(collectionsToSearch, coll)
+			nameSet[name] = true
+		}
+		for _, meta := range allCollections {
+			if nameSet[meta.Collection.Name] {
+				collectionsToSearch = append(collectionsToSearch, meta.Collection)
 			}
 		}
 	} else {
-		// Search all collections in the namespace (or all if namespace is empty)
-		for id, coll := range s.collections {
-			if req.Namespace == "" || strings.HasPrefix(id, req.Namespace+"/") {
-				collectionsToSearch = append(collectionsToSearch, coll)
-			}
+		for _, meta := range allCollections {
+			collectionsToSearch = append(collectionsToSearch, meta.Collection)
 		}
 	}
 
-	// For now, return a placeholder response indicating which collections would be searched
-	// A full implementation would:
-	// 1. Create Collection instances for each collection
-	// 2. Convert req.Query (structpb.Struct) to SearchQuery
-	// 3. Execute searches across all collections
-	// 4. Aggregate and rank results
-	// 5. Apply pagination
-
-	collectionIds := make([]string, len(collectionsToSearch))
-	for i, coll := range collectionsToSearch {
-		collectionIds[i] = fmt.Sprintf("%s/%s", coll.Namespace, coll.Name)
+	if len(collectionsToSearch) == 0 {
+		return &pb.SearchCollectionsResponse{
+			Status:       &pb.Status{Code: 200, Message: "OK"},
+			Results:      []*pb.SearchCollectionsResponse_CollectionResult{},
+			TotalMatches: 0,
+		}, nil
 	}
 
-	// Return empty results with metadata about what would be searched
+	globalLimit := int(req.Limit)
+	if globalLimit <= 0 {
+		globalLimit = 100
+	}
+
+	perCollectionLimit := globalLimit * 2
+	if perCollectionLimit < 50 {
+		perCollectionLimit = 50
+	}
+
+	query, err := parseStructToSearchQuery(req.Query, perCollectionLimit)
+	if err != nil {
+		return &pb.SearchCollectionsResponse{
+			Status: &pb.Status{Code: 400, Message: fmt.Sprintf("invalid query: %v", err)},
+		}, nil
+	}
+
+	hasVector := len(query.Vector) > 0
+
+	// Search collections concurrently
+	var (
+		allResults []searchResultWithMeta
+		resultsMu  sync.Mutex
+		errors     []string
+		errorsMu   sync.Mutex
+	)
+
+	g, gctx := errgroup.WithContext(ctx)
+
+	for _, collMeta := range collectionsToSearch {
+		g.Go(func() error {
+			coll, err := getCollection(gctx, collMeta.Namespace, collMeta.Name)
+			if err != nil {
+				errorsMu.Lock()
+				errors = append(errors, fmt.Sprintf("%s/%s: %v", collMeta.Namespace, collMeta.Name, err))
+				errorsMu.Unlock()
+				return nil
+			}
+			defer coll.Close()
+
+			results, err := coll.Search(gctx, query)
+			if err != nil {
+				errorsMu.Lock()
+				errors = append(errors, fmt.Sprintf("%s/%s: search failed: %v", collMeta.Namespace, collMeta.Name, err))
+				errorsMu.Unlock()
+				return nil
+			}
+
+			collName := fmt.Sprintf("%s/%s", collMeta.Namespace, collMeta.Name)
+			resultsMu.Lock()
+			for _, res := range results {
+				allResults = append(allResults, searchResultWithMeta{
+					collectionName:  collName,
+					result:          res,
+					normalizedScore: normalizeScore(res, hasVector),
+				})
+			}
+			resultsMu.Unlock()
+
+			return nil
+		})
+	}
+
+	_ = g.Wait()
+
+	sort.Slice(allResults, func(i, j int) bool {
+		return allResults[i].normalizedScore > allResults[j].normalizedScore
+	})
+
+	if len(allResults) > globalLimit {
+		allResults = allResults[:globalLimit]
+	}
+
+	collectionResults := make(map[string]*pb.SearchCollectionsResponse_CollectionResult)
+	for _, r := range allResults {
+		cr, exists := collectionResults[r.collectionName]
+		if !exists {
+			cr = &pb.SearchCollectionsResponse_CollectionResult{
+				CollectionName: r.collectionName,
+				Items:          []*anypb.Any{},
+				Scores:         make(map[string]float64),
+			}
+			collectionResults[r.collectionName] = cr
+		}
+
+		item := &anypb.Any{
+			TypeUrl: "type.googleapis.com/collector.record",
+			Value:   r.result.Record.ProtoData,
+		}
+		cr.Items = append(cr.Items, item)
+		cr.Scores[r.result.Record.Id] = r.normalizedScore
+	}
+
+	results := make([]*pb.SearchCollectionsResponse_CollectionResult, 0, len(collectionResults))
+	for _, cr := range collectionResults {
+		results = append(results, cr)
+	}
+
+	statusMsg := "OK"
+	if len(errors) > 0 {
+		statusMsg = fmt.Sprintf("Partial results. Errors: %v", errors)
+	}
+
 	return &pb.SearchCollectionsResponse{
 		Status: &pb.Status{
 			Code:    200,
-			Message: fmt.Sprintf("Would search %d collections: %s", len(collectionsToSearch), strings.Join(collectionIds, ", ")),
+			Message: statusMsg,
 		},
-		Results:      []*pb.SearchCollectionsResponse_CollectionResult{},
-		TotalMatches: 0,
+		Results:      results,
+		TotalMatches: int64(len(allResults)),
 	}, nil
 }
 
