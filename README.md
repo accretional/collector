@@ -865,10 +865,29 @@ The Dispatcher's `Serve` method is designed as an extension point for adding sec
 
 ### Benchmarks
 
-- **CRUD operations**: ~1-2ms per operation
-- **Full-text search**: ~10-50ms for 100k records
-- **Loopback gRPC**: ~100μs-1ms overhead
-- **Remote gRPC**: ~10-100ms depending on network
+The project includes a suite of benchmarks for the CGo-based SQLite driver (`mattn/go-sqlite3`).
+
+#### Running Benchmarks
+
+To run the benchmarks, run this:
+
+```bash
+./benchmarks/benchmark.sh
+```
+
+The script will automatically install all the dependencies and run the benchmark suite. Results are saved in the `benchmarks/results/` directory.
+
+#### Benchmarked Operations
+
+The benchmark suite covers the following operations:
+- **CRUD**: `CreateRecord`, `GetRecord`, `UpdateRecord`, `DeleteRecord`, `ListRecords`
+- **Search**: `Search_FullText`, `Search_JSONBFilter`, `Search_Combined`
+- **Concurrency**: `ConcurrentReads`, `ConcurrentWrites`
+
+#### Troubleshooting
+
+- **"sql: unknown driver 'sqlite3'"**: This error means the `mattn/go-sqlite3` driver is not correctly installed. The benchmark script should handle this, but you can install it manually with `go get github.com/mattn/go-sqlite3`.
+- **"CGo not available"**: The benchmarks require CGo. Ensure you have a C compiler (like `gcc`) installed and that `CGO_ENABLED=1` is set in your environment (which is the default on most systems).
 
 ### Scaling
 

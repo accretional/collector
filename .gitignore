@@ -24,6 +24,9 @@ profile.cov
 go.work
 go.work.sum
 
+# Benchmark results
+benchmarks/results/
+
 # env file
 .env
 
