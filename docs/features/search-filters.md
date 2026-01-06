@@ -37,29 +37,6 @@ message SearchRequest {
 }
 ```
 
-## Query Execution Flow
-
-### Prefilter: Filter First, Search Second
-
-```sql
-SELECT *, bm25(fts) as score
-FROM fts_table JOIN records r
-WHERE r.jsontext->>'status' = 'active'
-ORDER BY score
-```
-
-### Postfilter: Search First, Filter Second
-
-```sql
-WITH ranked AS (
-  SELECT *, bm25(fts) as score
-  FROM fts_table JOIN records r
-  ORDER BY score
-)
-SELECT * FROM ranked
-WHERE jsontext->>'category' = 'tutorial'
-```
-
 ## Trade-offs
 
 ### Prefilter
