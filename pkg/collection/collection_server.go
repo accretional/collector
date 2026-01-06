@@ -105,6 +105,40 @@ func convertStructpbValue(v *structpb.Value) interface{} {
 	}
 }
 
+// convertProtoFilter converts a proto Filter to an internal Filter
+func convertProtoFilter(f *pb.Filter) (Filter, error) {
+	var op FilterOperator
+	switch f.Operator {
+	case pb.FilterOperator_OP_EQUALS:
+		op = OpEquals
+	case pb.FilterOperator_OP_NOT_EQUALS:
+		op = OpNotEquals
+	case pb.FilterOperator_OP_GREATER_THAN:
+		op = OpGreaterThan
+	case pb.FilterOperator_OP_LESS_THAN:
+		op = OpLessThan
+	case pb.FilterOperator_OP_GREATER_EQUAL:
+		op = OpGreaterEqual
+	case pb.FilterOperator_OP_LESS_EQUAL:
+		op = OpLessEqual
+	case pb.FilterOperator_OP_CONTAINS:
+		op = OpContains
+	case pb.FilterOperator_OP_IN:
+		op = OpIn
+	case pb.FilterOperator_OP_EXISTS:
+		op = OpExists
+	case pb.FilterOperator_OP_NOT_EXISTS:
+		op = OpNotExists
+	default:
+		return Filter{}, status.Errorf(codes.InvalidArgument, "unsupported filter operator: %v", f.Operator)
+	}
+	return Filter{
+		Field:    f.Field,
+		Operator: op,
+		Value:    convertStructpbValue(f.Value),
+	}, nil
+}
+
 func (s *CollectionServer) Update(ctx context.Context, req *pb.UpdateRequest) (*pb.UpdateResponse, error) {
 	collection, err := s.repo.GetCollection(ctx, req.Namespace, req.CollectionName)
 	if err != nil {
@@ -184,6 +218,7 @@ func (s *CollectionServer) Search(ctx context.Context, req *pb.SearchRequest) (*
 	query := &SearchQuery{
 		FullText:            req.FullText,
 		Filters:             make([]Filter, 0, len(req.Filters)),
+		PostFilters:         make([]Filter, 0, len(req.PostFilters)),
 		Vector:              req.Vector,
 		SimilarityThreshold: req.SimilarityThreshold,
 		Limit:               int(req.Limit),
@@ -193,36 +228,19 @@ func (s *CollectionServer) Search(ctx context.Context, req *pb.SearchRequest) (*
 	}
 
 	for _, f := range req.Filters {
-		var op FilterOperator
-		switch f.Operator {
-		case pb.FilterOperator_OP_EQUALS:
-			op = OpEquals
-		case pb.FilterOperator_OP_NOT_EQUALS:
-			op = OpNotEquals
-		case pb.FilterOperator_OP_GREATER_THAN:
-			op = OpGreaterThan
-		case pb.FilterOperator_OP_LESS_THAN:
-			op = OpLessThan
-		case pb.FilterOperator_OP_GREATER_EQUAL:
-			op = OpGreaterEqual
-		case pb.FilterOperator_OP_LESS_EQUAL:
-			op = OpLessEqual
-		case pb.FilterOperator_OP_CONTAINS:
-			op = OpContains
-		case pb.FilterOperator_OP_IN:
-			op = OpIn
-		case pb.FilterOperator_OP_EXISTS:
-			op = OpExists
-		case pb.FilterOperator_OP_NOT_EXISTS:
-			op = OpNotExists
-		default:
-			return nil, status.Errorf(codes.InvalidArgument, "unsupported filter operator: %v", f.Operator)
+		filter, err := convertProtoFilter(f)
+		if err != nil {
+			return nil, err
 		}
-		query.Filters = append(query.Filters, Filter{
-			Field:    f.Field,
-			Operator: op,
-			Value:    convertStructpbValue(f.Value),
-		})
+		query.Filters = append(query.Filters, filter)
+	}
+
+	for _, f := range req.PostFilters {
+		filter, err := convertProtoFilter(f)
+		if err != nil {
+			return nil, err
+		}
+		query.PostFilters = append(query.PostFilters, filter)
 	}
 
 	results, err := collection.Search(ctx, query)

@@ -1,24 +1,19 @@
 # Search Filters: Prefilter vs Postfilter
 
-The Search feature in Collector supports two filtering strategies applied at different stages of query execution.
-
-| Filter Type | When Applied | Purpose |
-|-------------|--------------|---------|
-| `filters` (Prefilter) | Before ranking | Narrow the candidate set |
-| `post_filters` (Postfilter) | After ranking | Filter ranked results |
+Collector supports two filter types: `filters` (prefilter) and `post_filters` (postfilter).
 
 ## Usage
-
-### Go API
 
 ```go
 results, err := coll.Search(ctx, &collection.SearchQuery{
     FullText: "distributed systems",
 
+    // Pre-filtering
     Filters: []collection.Filter{
         {Field: "status", Operator: collection.OpEquals, Value: "active"},
     },
 
+    // Post-filtering
     PostFilters: []collection.Filter{
         {Field: "region", Operator: collection.OpEquals, Value: "US"},
     },
@@ -27,77 +22,33 @@ results, err := coll.Search(ctx, &collection.SearchQuery{
 })
 ```
 
-### Proto/gRPC
+## How Collector Implements Filtering
 
-```protobuf
-message SearchRequest {
-  string full_text = 3;
-  repeated Filter filters = 4;       // Prefilters
-  repeated Filter post_filters = 5;  // Postfilters
-}
-```
+Both the filters are applied in the SQLite Search query build.
 
-## Trade-offs
+**Prefilters** (`filters`) are applied in `WHERE` clause for SQL Search query before rankings are generated. For vector search, the filters are applied before KNN (so vector index operates on filtered subset).
 
-### Prefilter
+**Postfilters** (`post_filters`) are applied once the rankings are generated via CTE wrapper.
 
-**Advantages:**
-- **Guaranteed accuracy**: All returned results strictly match the filter. No relevant items missed.
-- **Smaller search space**: If filters are highly selective, search operates on fewer candidates.
+## Tradeoffs
 
-**Disadvantages:**
-- **Filtering bottleneck**: Identifying matching records can be slower than the search itself, especially with complex filters.
-- **Index efficiency impact**: (Once we have vector indexing in place) ANN indexes are optimized for the full dataset. They don't appreciate searching arbitrary subsets, potentially degrading to less efficient paths or full scans.
+- **Vector search index efficiency**: sqlite-vec indices are optimized for full-dataset search. Prefilters force KNN to work on filtered subsets, which will disrupt optimization and slow down the performance. It's **preferred to use postfilters**, though we might risk missing true nearest neighbors if they fall outside initial k candidates.
 
-### Postfilter
+- **JSON extraction cost**: Filtering uses `json_extract()` which essentially does table scans. Prefiltering runs on all records while **postfiltering runs only on top-k results**, making it more cost effective.
 
-**Advantages:**
-- **Faster ANN search**: Operates on the full, optimized index structure without subset constraints.
-- **Simpler implementation**: Search and filter are separate sequential steps.
+- **Recall vs Performance**:
+    - Prefilters have much higher recall (guarantee all matching records are found) but compromises on performance (slower vector search and higher JSON overhead).
+    - Postfilters optimize performance but may miss true nearest neighbors outside initial k candidates.
 
-**Disadvantages:**
-- **Recall issues**: Initial search retrieves K' candidates, but true nearest neighbors matching the filter might fall outside this set and be lost.
-- **Wasted computation**: Many retrieved candidates may be discarded after filtering.
+## When to Use The Filters
 
-## Choosing the Right Filter Strategy
+### Use Prefilters for hard constraints
 
-### Prefilter: Hard Constraints
+- **`labels.namespace`**: Enforce tenant boundaries, as vector similarity across tenants is meaningless.
+- **`labels.type`**: Filter by proto message type in polymorphic collections (comparing vectors of different types produces garbage results).
+- **`created_at`/`updated_at`**: For time bounded queries where records outside the window should not be considered.
 
-Use prefilter when records must satisfy the condition. Non-matching records are completely excluded.
+### Use Postfilters for soft constraints
 
-- Tenant isolation: `tenant_id = "acme"`
-- Access control: `visibility = "public"`
-- Data partitioning: `region = "EU"`
-
-### Postfilter: Soft Constraints
-
-Use postfilter when you want global ranking preserved but only show matching results. All records are ranked first, then filtered.
-
-- Availability: `in_stock = true`
-- Recency: `updated_at > last_week`
-- Feature flags: `beta_enabled = true`
-
-### Filter Selectivity
-
-| Selectivity | Recommendation |
-|-------------|----------------|
-| High (>50% filtered out) | Use prefilter |
-| Low (<20% filtered out) | Use postfilter |
-
-## Supported Operators
-
-| Operator | Description |
-|----------|-------------|
-| `=` | Equals |
-| `!=` | Not equals |
-| `>`, `>=`, `<`, `<=` | Comparison |
-| `CONTAINS` | String contains |
-| `IN` | Value in list |
-| `EXISTS` | Field exists |
-| `NOT_EXISTS` | Field missing |
-
-## Implementation
-
-- **Source**: `pkg/collection/search.go`
-- **SQL Builder**: `pkg/db/sqlite/store.go`
-- **Tests**: `pkg/collection/search_test.go`
+- **`confidence_score` or rating fields**: Apply numeric thresholds after the ranking is computed.
+- **`labels.category`/`labels.source`**: Let vector search run on full dataset, then narrow results for most of the filters.
