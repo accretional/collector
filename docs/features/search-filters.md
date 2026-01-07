@@ -24,13 +24,13 @@ results, err := coll.Search(ctx, &collection.SearchQuery{
 
 ## How Collector Implements Filtering
 
-Both the filters are applied in the SQLite Search query build.
+Both filter types are applied during SQL Search query construction (`pkg/db/sqlite/store.go`).
 
-**Prefilters** (`filters`) are applied in `WHERE` clause for SQL Search query before rankings are generated. For vector search, the filters are applied before KNN (so vector index operates on filtered subset).
+**Prefilters** (`filters`) are applied in `WHERE` clause before rankings are generated. For full-text search, this filters rows before BM25 scoring. For vector search, the filters are applied before KNN (so vector index operates on filtered subset).
 
 **Postfilters** (`post_filters`) are applied once the rankings are generated via CTE wrapper.
 
-## Tradeoffs
+## Tradeoffs in Collector
 
 - **Vector search index efficiency**: sqlite-vec indices are optimized for full-dataset search. Prefilters force KNN to work on filtered subsets, which will disrupt optimization and slow down the performance. It's **preferred to use postfilters**, though we might risk missing true nearest neighbors if they fall outside initial k candidates.
 
@@ -50,5 +50,5 @@ Both the filters are applied in the SQLite Search query build.
 
 ### Use Postfilters for soft constraints
 
-- **`confidence_score` or rating fields**: Apply numeric thresholds after the ranking is computed.
+- **`confidence_score`**: Apply numeric thresholds after the ranking is computed.
 - **`labels.category`/`labels.source`**: Let vector search run on full dataset, then narrow results for most of the filters.
