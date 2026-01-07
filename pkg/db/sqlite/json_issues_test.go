@@ -46,7 +46,9 @@ func TestIssue1_JSONSchemaErrorHandling(t *testing.T) {
 
 		// Verify we can search using JSON features
 		results, err := store.Search(ctx, &collection.SearchQuery{
-			LabelFilters: map[string]string{"env": "test"},
+			Filters: []collection.Filter{
+				{Field: "labels.env", Operator: collection.OpEquals, Value: "test"},
+			},
 		})
 		if err != nil {
 			t.Fatalf("Search failed: %v", err)
@@ -196,7 +198,9 @@ func TestIssue2_EnableJSONValidationBeforeSearch(t *testing.T) {
 		// Try to search with label filters - this uses json_extract on labels column
 		// which doesn't exist when EnableJSON is false
 		_, err = store.Search(ctx, &collection.SearchQuery{
-			LabelFilters: map[string]string{"namespace": "test"},
+			Filters: []collection.Filter{
+				{Field: "labels.namespace", Operator: collection.OpEquals, Value: "test"},
+			},
 		})
 
 		// Should get a clear error message about EnableJSON
@@ -226,8 +230,8 @@ func TestIssue2_EnableJSONValidationBeforeSearch(t *testing.T) {
 
 		// Try to search with field filters - this uses json_extract on jsontext column
 		_, err = store.Search(ctx, &collection.SearchQuery{
-			Filters: map[string]collection.Filter{
-				"status": {Operator: collection.OpEquals, Value: "active"},
+			Filters: []collection.Filter{
+				{Field: "status", Operator: collection.OpEquals, Value: "active"},
 			},
 		})
 
@@ -302,8 +306,8 @@ func TestIssue3_InvalidJSONHandling(t *testing.T) {
 
 		// Should be searchable by JSON field
 		results, err := store.Search(ctx, &collection.SearchQuery{
-			Filters: map[string]collection.Filter{
-				"status": {Operator: collection.OpEquals, Value: "active"},
+			Filters: []collection.Filter{
+				{Field: "status", Operator: collection.OpEquals, Value: "active"},
 			},
 		})
 		if err != nil {
@@ -398,8 +402,8 @@ func TestIssue3_InvalidJSONHandling(t *testing.T) {
 
 		// Search should find the record using converted JSON
 		results, err := store.Search(ctx, &collection.SearchQuery{
-			Filters: map[string]collection.Filter{
-				"namespace": {Operator: collection.OpEquals, Value: "test"},
+			Filters: []collection.Filter{
+				{Field: "namespace", Operator: collection.OpEquals, Value: "test"},
 			},
 		})
 		if err != nil {
@@ -481,8 +485,8 @@ func TestIssue6_LabelKeyEscaping(t *testing.T) {
 
 		// Search by dotted label key
 		results, err := store.Search(ctx, &collection.SearchQuery{
-			LabelFilters: map[string]string{
-				"app.kubernetes.io/name": "myapp",
+			Filters: []collection.Filter{
+				{Field: "labels.app.kubernetes.io/name", Operator: collection.OpEquals, Value: "myapp"},
 			},
 		})
 		if err != nil {
@@ -526,8 +530,8 @@ func TestIssue6_LabelKeyEscaping(t *testing.T) {
 
 		// Search by key with quotes
 		results, err := store.Search(ctx, &collection.SearchQuery{
-			LabelFilters: map[string]string{
-				`key"with"quotes`: "value",
+			Filters: []collection.Filter{
+				{Field: `labels.key"with"quotes`, Operator: collection.OpEquals, Value: "value"},
 			},
 		})
 		if err != nil {
@@ -571,8 +575,8 @@ func TestIssue6_LabelKeyEscaping(t *testing.T) {
 
 		// Search by key with brackets
 		results, err := store.Search(ctx, &collection.SearchQuery{
-			LabelFilters: map[string]string{
-				"key[0]": "first",
+			Filters: []collection.Filter{
+				{Field: "labels.key[0]", Operator: collection.OpEquals, Value: "first"},
 			},
 		})
 		if err != nil {

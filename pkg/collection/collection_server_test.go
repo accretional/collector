@@ -497,8 +497,9 @@ func TestCollectionServer_Search_WithFilters(t *testing.T) {
 	searchReq := &pb.SearchRequest{
 		Namespace:      "test",
 		CollectionName: "items",
-		Filters: map[string]*pb.Filter{
-			"year": {
+		Filters: []*pb.Filter{
+			{
+				Field:    "year",
 				Operator: pb.FilterOperator_OP_GREATER_EQUAL,
 				Value:    structpb.NewNumberValue(2023),
 			},

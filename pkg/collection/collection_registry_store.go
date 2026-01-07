@@ -131,8 +131,8 @@ func (s *CollectionRegistryStore) ListCollections(ctx context.Context, namespace
 
 	if namespace != "" {
 		query = &SearchQuery{
-			LabelFilters: map[string]string{
-				"namespace": namespace,
+			Filters: []Filter{
+				{Field: "labels.namespace", Operator: OpEquals, Value: namespace},
 			},
 		}
 	} else {

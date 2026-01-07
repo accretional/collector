@@ -212,27 +212,27 @@ func TestSearch_JSONBEquals(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		filters     map[string]collection.Filter
+		filters     []collection.Filter
 		expectedIDs []string
 	}{
 		{
 			name: "filter by status=active",
-			filters: map[string]collection.Filter{
-				"status": {Operator: collection.OpEquals, Value: "active"},
+			filters: []collection.Filter{
+				{Field: "status", Operator: collection.OpEquals, Value: "active"},
 			},
 			expectedIDs: []string{"1", "3"},
 		},
 		{
 			name: "filter by age=30",
-			filters: map[string]collection.Filter{
-				"age": {Operator: collection.OpEquals, Value: 30},
+			filters: []collection.Filter{
+				{Field: "age", Operator: collection.OpEquals, Value: 30},
 			},
 			expectedIDs: []string{"1", "3"},
 		},
 		{
 			name: "filter by name=Bob",
-			filters: map[string]collection.Filter{
-				"name": {Operator: collection.OpEquals, Value: "Bob"},
+			filters: []collection.Filter{
+				{Field: "name", Operator: collection.OpEquals, Value: "Bob"},
 			},
 			expectedIDs: []string{"2"},
 		},
@@ -287,34 +287,34 @@ func TestSearch_JSONBComparison(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		filters     map[string]collection.Filter
+		filters     []collection.Filter
 		expectedIDs []string
 	}{
 		{
 			name: "score > 90",
-			filters: map[string]collection.Filter{
-				"score": {Operator: collection.OpGreaterThan, Value: 90},
+			filters: []collection.Filter{
+				{Field: "score", Operator: collection.OpGreaterThan, Value: 90},
 			},
 			expectedIDs: []string{"2", "4"},
 		},
 		{
 			name: "score >= 85",
-			filters: map[string]collection.Filter{
-				"score": {Operator: collection.OpGreaterEqual, Value: 85},
+			filters: []collection.Filter{
+				{Field: "score", Operator: collection.OpGreaterEqual, Value: 85},
 			},
 			expectedIDs: []string{"1", "2", "4"},
 		},
 		{
 			name: "score < 80",
-			filters: map[string]collection.Filter{
-				"score": {Operator: collection.OpLessThan, Value: 80},
+			filters: []collection.Filter{
+				{Field: "score", Operator: collection.OpLessThan, Value: 80},
 			},
 			expectedIDs: []string{"3"},
 		},
 		{
 			name: "score <= 85",
-			filters: map[string]collection.Filter{
-				"score": {Operator: collection.OpLessEqual, Value: 85},
+			filters: []collection.Filter{
+				{Field: "score", Operator: collection.OpLessEqual, Value: 85},
 			},
 			expectedIDs: []string{"1", "3"},
 		},
@@ -373,8 +373,8 @@ func TestSearch_JSONBContains(t *testing.T) {
 	}
 
 	results, err := coll.Search(ctx, &collection.SearchQuery{
-		Filters: map[string]collection.Filter{
-			"email": {Operator: collection.OpContains, Value: "example"},
+		Filters: []collection.Filter{
+			{Field: "email", Operator: collection.OpContains, Value: "example"},
 		},
 		Limit: 10,
 	})
@@ -436,8 +436,8 @@ func TestSearch_JSONBNestedFields(t *testing.T) {
 	}
 
 	results, err := coll.Search(ctx, &collection.SearchQuery{
-		Filters: map[string]collection.Filter{
-			"user.profile.city": {Operator: collection.OpEquals, Value: "San Francisco"},
+		Filters: []collection.Filter{
+			{Field: "user.profile.city", Operator: collection.OpEquals, Value: "San Francisco"},
 		},
 		Limit: 10,
 	})
@@ -490,8 +490,8 @@ func TestSearch_JSONBExists(t *testing.T) {
 
 	// Test EXISTS
 	results, err := coll.Search(ctx, &collection.SearchQuery{
-		Filters: map[string]collection.Filter{
-			"phone": {Operator: collection.OpExists},
+		Filters: []collection.Filter{
+			{Field: "phone", Operator: collection.OpExists},
 		},
 		Limit: 10,
 	})
@@ -507,8 +507,8 @@ func TestSearch_JSONBExists(t *testing.T) {
 
 	// Test NOT_EXISTS
 	results, err = coll.Search(ctx, &collection.SearchQuery{
-		Filters: map[string]collection.Filter{
-			"phone": {Operator: collection.OpNotExists},
+		Filters: []collection.Filter{
+			{Field: "phone", Operator: collection.OpNotExists},
 		},
 		Limit: 10,
 	})
@@ -556,8 +556,8 @@ func TestSearch_CombinedFullTextAndFilters(t *testing.T) {
 	// Search for "Go" by author "Alice"
 	results, err := coll.Search(ctx, &collection.SearchQuery{
 		FullText: "Go",
-		Filters: map[string]collection.Filter{
-			"author": {Operator: collection.OpEquals, Value: "Alice"},
+		Filters: []collection.Filter{
+			{Field: "author", Operator: collection.OpEquals, Value: "Alice"},
 		},
 		Limit: 10,
 	})
@@ -605,9 +605,9 @@ func TestSearch_MultipleFilters(t *testing.T) {
 	}
 
 	results, err := coll.Search(ctx, &collection.SearchQuery{
-		Filters: map[string]collection.Filter{
-			"status": {Operator: collection.OpEquals, Value: "active"},
-			"score":  {Operator: collection.OpGreaterEqual, Value: 90},
+		Filters: []collection.Filter{
+			{Field: "status", Operator: collection.OpEquals, Value: "active"},
+			{Field: "score", Operator: collection.OpGreaterEqual, Value: 90},
 		},
 		Limit: 10,
 	})
@@ -885,5 +885,377 @@ func TestSearch_DeleteRemovesFromFTS(t *testing.T) {
 
 	if len(results) > 0 && results[0].Record.Id != "2" {
 		t.Errorf("expected record 2, got %s", results[0].Record.Id)
+	}
+}
+
+// Post-Filter Tests
+
+func TestSearch_PostFilterWithFTS(t *testing.T) {
+	coll, cleanup := setupTestCollection(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Create records with varying relevance and categories
+	records := []*pb.CollectionRecord{
+		createTestRecord(t, "1", map[string]interface{}{
+			"title":    "Go Programming Basics",
+			"content":  "Learn Go programming language fundamentals",
+			"category": "tutorial",
+			"rating":   4.5,
+		}),
+		createTestRecord(t, "2", map[string]interface{}{
+			"title":    "Advanced Go Patterns",
+			"content":  "Go design patterns and best practices for Go developers",
+			"category": "advanced",
+			"rating":   4.8,
+		}),
+		createTestRecord(t, "3", map[string]interface{}{
+			"title":    "Go Web Development",
+			"content":  "Building web applications with Go",
+			"category": "tutorial",
+			"rating":   4.2,
+		}),
+		createTestRecord(t, "4", map[string]interface{}{
+			"title":    "Python Basics",
+			"content":  "Learn Python programming",
+			"category": "tutorial",
+			"rating":   4.0,
+		}),
+	}
+
+	for _, record := range records {
+		if err := coll.CreateRecord(ctx, record); err != nil {
+			t.Fatalf("failed to create record: %v", err)
+		}
+	}
+
+	// FTS search for "Go" then post-filter by category
+	// This should rank by relevance first, then filter
+	results, err := coll.Search(ctx, &collection.SearchQuery{
+		FullText: "Go",
+		PostFilters: []collection.Filter{
+			{Field: "category", Operator: collection.OpEquals, Value: "tutorial"},
+		},
+		Limit: 10,
+	})
+
+	if err != nil {
+		t.Fatalf("search failed: %v", err)
+	}
+
+	// Should only get Go tutorials (records 1 and 3), not advanced or Python
+	expectedIDs := map[string]bool{"1": true, "3": true}
+	if len(results) != 2 {
+		t.Errorf("expected 2 results, got %d", len(results))
+	}
+
+	for _, result := range results {
+		if !expectedIDs[result.Record.Id] {
+			t.Errorf("unexpected record %s in results", result.Record.Id)
+		}
+	}
+}
+
+func TestSearch_PostFilterWithScalarSearch(t *testing.T) {
+	coll, cleanup := setupTestCollection(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	records := []*pb.CollectionRecord{
+		createTestRecord(t, "1", map[string]interface{}{"name": "Alice", "score": 85, "level": "senior"}),
+		createTestRecord(t, "2", map[string]interface{}{"name": "Bob", "score": 92, "level": "junior"}),
+		createTestRecord(t, "3", map[string]interface{}{"name": "Charlie", "score": 78, "level": "senior"}),
+		createTestRecord(t, "4", map[string]interface{}{"name": "Diana", "score": 95, "level": "senior"}),
+	}
+
+	for _, record := range records {
+		if err := coll.CreateRecord(ctx, record); err != nil {
+			t.Fatalf("failed to create record: %v", err)
+		}
+	}
+
+	// Get all records, then post-filter by level
+	results, err := coll.Search(ctx, &collection.SearchQuery{
+		PostFilters: []collection.Filter{
+			{Field: "level", Operator: collection.OpEquals, Value: "senior"},
+		},
+		Limit: 10,
+	})
+
+	if err != nil {
+		t.Fatalf("search failed: %v", err)
+	}
+
+	expectedIDs := map[string]bool{"1": true, "3": true, "4": true}
+	if len(results) != 3 {
+		t.Errorf("expected 3 results, got %d", len(results))
+	}
+
+	for _, result := range results {
+		if !expectedIDs[result.Record.Id] {
+			t.Errorf("unexpected record %s in results", result.Record.Id)
+		}
+	}
+}
+
+func TestSearch_PreAndPostFilters(t *testing.T) {
+	coll, cleanup := setupTestCollection(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	records := []*pb.CollectionRecord{
+		createTestRecord(t, "1", map[string]interface{}{"status": "active", "score": 85, "region": "US"}),
+		createTestRecord(t, "2", map[string]interface{}{"status": "active", "score": 92, "region": "EU"}),
+		createTestRecord(t, "3", map[string]interface{}{"status": "inactive", "score": 88, "region": "US"}),
+		createTestRecord(t, "4", map[string]interface{}{"status": "active", "score": 78, "region": "US"}),
+		createTestRecord(t, "5", map[string]interface{}{"status": "active", "score": 95, "region": "US"}),
+	}
+
+	for _, record := range records {
+		if err := coll.CreateRecord(ctx, record); err != nil {
+			t.Fatalf("failed to create record: %v", err)
+		}
+	}
+
+	// Pre-filter: status=active (filters before ranking)
+	// Post-filter: region=US (filters after ranking)
+	results, err := coll.Search(ctx, &collection.SearchQuery{
+		Filters: []collection.Filter{
+			{Field: "status", Operator: collection.OpEquals, Value: "active"},
+		},
+		PostFilters: []collection.Filter{
+			{Field: "region", Operator: collection.OpEquals, Value: "US"},
+		},
+		Limit: 10,
+	})
+
+	if err != nil {
+		t.Fatalf("search failed: %v", err)
+	}
+
+	// Should get active users in US region: 1, 4, 5 (not 2 EU, not 3 inactive)
+	expectedIDs := map[string]bool{"1": true, "4": true, "5": true}
+	if len(results) != 3 {
+		t.Errorf("expected 3 results, got %d", len(results))
+	}
+
+	for _, result := range results {
+		if !expectedIDs[result.Record.Id] {
+			t.Errorf("unexpected record %s in results", result.Record.Id)
+		}
+	}
+}
+
+func TestSearch_PostFilterWithPagination(t *testing.T) {
+	coll, cleanup := setupTestCollection(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Create 10 records, 6 with type=A, 4 with type=B
+	for i := 1; i <= 10; i++ {
+		recordType := "A"
+		if i > 6 {
+			recordType = "B"
+		}
+		record := createTestRecord(t, fmt.Sprintf("%d", i), map[string]interface{}{
+			"index": i,
+			"type":  recordType,
+		})
+		if err := coll.CreateRecord(ctx, record); err != nil {
+			t.Fatalf("failed to create record: %v", err)
+		}
+	}
+
+	// Get first page of type=A records
+	page1, err := coll.Search(ctx, &collection.SearchQuery{
+		PostFilters: []collection.Filter{
+			{Field: "type", Operator: collection.OpEquals, Value: "A"},
+		},
+		Limit:  3,
+		Offset: 0,
+	})
+
+	if err != nil {
+		t.Fatalf("search failed: %v", err)
+	}
+
+	if len(page1) != 3 {
+		t.Errorf("expected 3 results in page 1, got %d", len(page1))
+	}
+
+	// Get second page
+	page2, err := coll.Search(ctx, &collection.SearchQuery{
+		PostFilters: []collection.Filter{
+			{Field: "type", Operator: collection.OpEquals, Value: "A"},
+		},
+		Limit:  3,
+		Offset: 3,
+	})
+
+	if err != nil {
+		t.Fatalf("search failed: %v", err)
+	}
+
+	if len(page2) != 3 {
+		t.Errorf("expected 3 results in page 2, got %d", len(page2))
+	}
+
+	// Ensure no overlap between pages
+	page1IDs := make(map[string]bool)
+	for _, result := range page1 {
+		page1IDs[result.Record.Id] = true
+	}
+
+	for _, result := range page2 {
+		if page1IDs[result.Record.Id] {
+			t.Errorf("record %s appears in both pages", result.Record.Id)
+		}
+	}
+
+	// Get third page (should have 0 results since only 6 type=A records)
+	page3, err := coll.Search(ctx, &collection.SearchQuery{
+		PostFilters: []collection.Filter{
+			{Field: "type", Operator: collection.OpEquals, Value: "A"},
+		},
+		Limit:  3,
+		Offset: 6,
+	})
+
+	if err != nil {
+		t.Fatalf("search failed: %v", err)
+	}
+
+	if len(page3) != 0 {
+		t.Errorf("expected 0 results in page 3, got %d", len(page3))
+	}
+}
+
+func TestSearch_PostFilterComparison(t *testing.T) {
+	coll, cleanup := setupTestCollection(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	records := []*pb.CollectionRecord{
+		createTestRecord(t, "1", map[string]interface{}{"name": "Item 1", "price": 100, "rating": 4.5}),
+		createTestRecord(t, "2", map[string]interface{}{"name": "Item 2", "price": 200, "rating": 3.8}),
+		createTestRecord(t, "3", map[string]interface{}{"name": "Item 3", "price": 150, "rating": 4.2}),
+		createTestRecord(t, "4", map[string]interface{}{"name": "Item 4", "price": 300, "rating": 4.9}),
+	}
+
+	for _, record := range records {
+		if err := coll.CreateRecord(ctx, record); err != nil {
+			t.Fatalf("failed to create record: %v", err)
+		}
+	}
+
+	tests := []struct {
+		name        string
+		postFilters []collection.Filter
+		expectedIDs []string
+	}{
+		{
+			name: "post-filter price > 150",
+			postFilters: []collection.Filter{
+				{Field: "price", Operator: collection.OpGreaterThan, Value: 150},
+			},
+			expectedIDs: []string{"2", "4"},
+		},
+		{
+			name: "post-filter rating >= 4.2",
+			postFilters: []collection.Filter{
+				{Field: "rating", Operator: collection.OpGreaterEqual, Value: 4.2},
+			},
+			expectedIDs: []string{"1", "3", "4"},
+		},
+		{
+			name: "post-filter multiple conditions",
+			postFilters: []collection.Filter{
+				{Field: "price", Operator: collection.OpLessEqual, Value: 200},
+				{Field: "rating", Operator: collection.OpGreaterThan, Value: 4.0},
+			},
+			expectedIDs: []string{"1", "3"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			results, err := coll.Search(ctx, &collection.SearchQuery{
+				PostFilters: tt.postFilters,
+				Limit:       10,
+			})
+
+			if err != nil {
+				t.Fatalf("search failed: %v", err)
+			}
+
+			if len(results) != len(tt.expectedIDs) {
+				t.Errorf("expected %d results, got %d", len(tt.expectedIDs), len(results))
+			}
+
+			foundIDs := make(map[string]bool)
+			for _, result := range results {
+				foundIDs[result.Record.Id] = true
+			}
+
+			for _, expectedID := range tt.expectedIDs {
+				if !foundIDs[expectedID] {
+					t.Errorf("expected to find record %s", expectedID)
+				}
+			}
+		})
+	}
+}
+
+func TestSearch_PostFilterFTSPreservesRanking(t *testing.T) {
+	coll, cleanup := setupTestCollection(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Create records with varying relevance to "database"
+	records := []*pb.CollectionRecord{
+		createTestRecord(t, "1", map[string]interface{}{
+			"title":    "Database Design",
+			"content":  "Database database database - all about databases",
+			"approved": true,
+		}),
+		createTestRecord(t, "2", map[string]interface{}{
+			"title":    "Web Development",
+			"content":  "Building apps with a database backend",
+			"approved": true,
+		}),
+		createTestRecord(t, "3", map[string]interface{}{
+			"title":    "Database Administration",
+			"content":  "Managing database systems",
+			"approved": false,
+		}),
+	}
+
+	for _, record := range records {
+		if err := coll.CreateRecord(ctx, record); err != nil {
+			t.Fatalf("failed to create record: %v", err)
+		}
+	}
+
+	// Search for "database" and post-filter by approved=true
+	results, err := coll.Search(ctx, &collection.SearchQuery{
+		FullText: "database",
+		PostFilters: []collection.Filter{
+			{Field: "approved", Operator: collection.OpEquals, Value: true},
+		},
+		Limit: 10,
+	})
+
+	if err != nil {
+		t.Fatalf("search failed: %v", err)
+	}
+
+	// Should get records 1 and 2 (approved), not 3
+	if len(results) != 2 {
+		t.Errorf("expected 2 results, got %d", len(results))
+	}
+
+	// Record 1 should rank higher (more mentions of "database")
+	if len(results) >= 2 && results[0].Record.Id != "1" {
+		t.Errorf("expected record 1 to rank first, got %s", results[0].Record.Id)
 	}
 }

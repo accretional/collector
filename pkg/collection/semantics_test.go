@@ -379,8 +379,8 @@ func TestSemanticEngine_FindSimilar_WithFilters(t *testing.T) {
 
 	filteredResults, err := coll.Search(ctx, &collection.SearchQuery{
 		Vector: queryVec,
-		Filters: map[string]collection.Filter{
-			"category": {Operator: collection.OpEquals, Value: "technology"},
+		Filters: []collection.Filter{
+			{Field: "category", Operator: collection.OpEquals, Value: "technology"},
 		},
 		Limit: 10,
 	})
