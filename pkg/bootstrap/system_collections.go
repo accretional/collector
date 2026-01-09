@@ -101,11 +101,11 @@ func (sc *SystemCollections) bootstrapCollectionRegistry(ctx context.Context) er
 	}
 
 	// Create store
-	storeOpts := collection.Options{
-		EnableFTS:  true,
-		EnableJSON: true,
+	storeOpts := &pb.SearchConfig{
+		EnableFts:  true,
+		EnableJson: true,
 	}
-	store, err := sqlite.NewStore(dbPath, storeOpts)
+	store, err := sqlite.NewStore(dbPath, storeOpts, nil)
 	if err != nil {
 		return fmt.Errorf("init sqlite: %w", err)
 	}

@@ -359,7 +359,7 @@ func TestRecovery_AfterAbnormalClose(t *testing.T) {
 	store, err := db.NewStore(context.Background(), db.Config{
 		Type:       db.DBTypeSQLite,
 		SQLitePath: dbPath,
-		Options:    collection.Options{EnableJSON: true},
+		Options:    &pb.SearchConfig{EnableJson: true}, nil,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -397,7 +397,7 @@ func TestRecovery_AfterAbnormalClose(t *testing.T) {
 	newStore, err := db.NewStore(context.Background(), db.Config{
 		Type:       db.DBTypeSQLite,
 		SQLitePath: dbPath,
-		Options:    collection.Options{EnableJSON: true},
+		Options:    &pb.SearchConfig{EnableJson: true}, nil,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -776,7 +776,7 @@ func TestMetadataConsistency(t *testing.T) {
 	store, _ := db.NewStore(context.Background(), db.Config{
 		Type:       db.DBTypeSQLite,
 		SQLitePath: dbPath,
-		Options:    collection.Options{EnableJSON: true},
+		Options:    &pb.SearchConfig{EnableJson: true}, nil,
 	})
 	fs, _ := collection.NewLocalFileSystem(filepath.Join(tempDir, "files"))
 
@@ -808,7 +808,7 @@ func TestMetadataConsistency(t *testing.T) {
 	newStore, _ := db.NewStore(context.Background(), db.Config{
 		Type:       db.DBTypeSQLite,
 		SQLitePath: dbPath,
-		Options:    collection.Options{EnableJSON: true},
+		Options:    &pb.SearchConfig{EnableJson: true}, nil,
 	})
 	reopened, err := collection.NewCollection(proto, newStore, fs)
 	if err != nil {

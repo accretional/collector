@@ -187,7 +187,7 @@ import (
 protosStore, _ := db.NewStore(ctx, db.Config{
     Type:       db.DBTypeSQLite,
     SQLitePath: "./data/protos.db",
-    Options:    collection.Options{EnableJSON: true},
+    Options:    &pb.SearchConfig{EnableJson: true}, nil,
 })
 
 registeredProtos, _ := collection.NewCollection(
@@ -206,7 +206,7 @@ registeredProtos, _ := collection.NewCollection(
 servicesStore, _ := db.NewStore(ctx, db.Config{
     Type:       db.DBTypeSQLite,
     SQLitePath: "./data/services.db",
-    Options:    collection.Options{EnableJSON: true},
+    Options:    &pb.SearchConfig{EnableJson: true}, nil,
 })
 
 registeredServices, _ := collection.NewCollection(
@@ -423,12 +423,12 @@ func main() {
     protosStore, _ := db.NewStore(ctx, db.Config{
         Type:       db.DBTypeSQLite,
         SQLitePath: "./data/protos.db",
-        Options:    collection.Options{EnableJSON: true},
+        Options:    &pb.SearchConfig{EnableJson: true}, nil,
     })
     servicesStore, _ := db.NewStore(ctx, db.Config{
         Type:       db.DBTypeSQLite,
         SQLitePath: "./data/services.db",
-        Options:    collection.Options{EnableJSON: true},
+        Options:    &pb.SearchConfig{EnableJson: true}, nil,
     })
 
     registeredProtos, _ := collection.NewCollection(

@@ -37,7 +37,7 @@ func TestTypeValidationIntegration(t *testing.T) {
 	if err := ensureDir(registryStorePath); err != nil {
 		t.Fatalf("Create registry dir failed: %v", err)
 	}
-	registryDBStore, err := sqlite.NewStore(registryStorePath, collection.Options{EnableJSON: true})
+	registryDBStore, err := sqlite.NewStore(registryStorePath, &pb.SearchConfig{EnableJson: true}, nil)
 	if err != nil {
 		t.Fatalf("Create registry db store failed: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestTypeValidationIntegration(t *testing.T) {
 	defer registryStore.Close()
 
 	// Create collection repo
-	dummyStore, err := sqlite.NewStore(":memory:", collection.Options{})
+	dummyStore, err := sqlite.NewStore(":memory:", &pb.SearchConfig{}, nil)
 	if err != nil {
 		t.Fatalf("Create dummy store failed: %v", err)
 	}

@@ -49,7 +49,7 @@ type JSONConverterSetter interface {
 }
 
 // StoreFactory is a function that creates a new Store instance at the given path with the given options.
-type StoreFactory func(path string, opts Options) (Store, error)
+type StoreFactory func(path string, searchConfig *pb.SearchConfig) (Store, error)
 
 // DefaultCollectionRepo is a facade that provides a simple interface for managing collections.
 // It uses a CollectionRepoService and a Store to do the heavy lifting.
@@ -58,8 +58,8 @@ type DefaultCollectionRepo struct {
 	store            Store
 	pathConfig       *PathConfig
 	storeFactory     StoreFactory
-	typeValidator    MessageTypeValidator   // Optional: validates message types if set
-	converterFactory JSONConverterFactory   // Optional: creates JSON converters for stores
+	typeValidator    MessageTypeValidator // Optional: validates message types if set
+	converterFactory JSONConverterFactory // Optional: creates JSON converters for stores
 }
 
 // NewCollectionRepo creates a new DefaultCollectionRepo with the given Store, PathConfig, RegistryStore, and StoreFactory.
@@ -126,8 +126,9 @@ func (r *DefaultCollectionRepo) CreateCollection(ctx context.Context, collection
 		return nil, fmt.Errorf("failed to create files directory: %w", err)
 	}
 
-	// Create the database file by opening it with the store factory
-	store, err := r.storeFactory(dbPath, Options{EnableJSON: true, EnableFTS: true})
+	searchConfig := collection.GetCollectionConfig().GetSearchConfig()
+
+	store, err := r.storeFactory(dbPath, searchConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create database: %w", err)
 	}
@@ -265,7 +266,10 @@ func (r *DefaultCollectionRepo) GetCollection(ctx context.Context, namespace, na
 	if err != nil {
 		return nil, fmt.Errorf("invalid collection path: %w", err)
 	}
-	store, err := r.storeFactory(dbPath, Options{EnableJSON: true, EnableFTS: true})
+
+	searchConfig := metadata.Collection.GetCollectionConfig().GetSearchConfig()
+
+	store, err := r.storeFactory(dbPath, searchConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database at %s: %w", dbPath, err)
 	}

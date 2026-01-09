@@ -1,14 +1,5 @@
 package collection
 
-// Options configures the feature set for a Collection.
-type Options struct {
-	EnableFTS        bool
-	EnableJSON       bool
-	EnableVector     bool
-	VectorDimensions int
-	Embedder         Embedder // Required when EnableVector is true
-}
-
 // ProtoToJSONConverter is a function that converts binary protobuf data to JSON string.
 // It should return a valid JSON representation of the protobuf message.
 type ProtoToJSONConverter func(protoData []byte) (string, error)
