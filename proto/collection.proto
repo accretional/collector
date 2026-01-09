@@ -56,10 +56,10 @@ message BackupPolicy {
 }
 
 message SearchConfig {
-	bool enable_fts
-	bool enable_json
-	bool enable_vector
-	int64 vector_dim
+	bool enable_fts = 1;
+	bool enable_json = 2;
+	bool enable_vector = 3;
+	int32  vector_dimensions = 4;
 }
 
 message CollectionConfig {
@@ -83,5 +83,5 @@ message Collection {
   // after each new backup based on age and count rules.
   BackupPolicy backup_policy = 7;
 
-  CollectionConfig config = 8;
+  CollectionConfig collection_config = 8;
 }
