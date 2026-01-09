@@ -71,18 +71,13 @@ func run() error {
 		return fmt.Errorf("create db dir: %w", err)
 	}
 
-	genericStore, err := db.NewStore(ctx, db.Config{
+	store, err := db.NewStore(ctx, db.Config{
 		Type:         db.DBTypeSQLite,
 		SQLitePath:   dbPath,
 		SearchConfig: searchConfig,
 	})
 	if err != nil {
 		return fmt.Errorf("init store: %w", err)
-	}
-
-	store, ok := genericStore.(collection.Store)
-	if !ok {
-		return fmt.Errorf("returned store does not implement collection.Store interface")
 	}
 	defer store.Close()
 

@@ -565,6 +565,10 @@ func (s *Store) Search(ctx context.Context, q *collection.SearchQuery) ([]*colle
 		return nil, fmt.Errorf("search with Filters or LabelFilters requires EnableJson to be true")
 	}
 
+	if q.SemanticText != "" && !s.searchConfig.EnableVector {
+		return nil, fmt.Errorf("SemanticText provided but vector search is disabled (enable_vector must be true)")
+	}
+
 	// Generate vector from SemanticText if provided
 	var queryVector []float32
 	if q.SemanticText != "" && s.searchConfig.EnableVector {
