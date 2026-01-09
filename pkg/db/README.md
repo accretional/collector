@@ -26,11 +26,15 @@ import (
 store, err := db.NewStore(ctx, db.Config{
     Type:       db.DBTypeSQLite,
     SQLitePath: "/path/to/database.db",
-    Options: collection.Options{
-        EnableJSON:   true,
-        EnableFTS:    true,
-        EnableVector: true,
-        VectorDimensions: 384,
+    StoreConfig: collection.StoreConfig{
+        Search: &pb.SearchConfig{
+            EnableFts:          true,
+            EnableJson:         true,
+            EnableVectorSearch: true
+        },
+        Vector: &pb.VectorConfig{
+            Dimensions: 384
+        }
     },
 })
 ```
@@ -107,7 +111,7 @@ func newPostgresStore(ctx context.Context, config Config) (collection.Store, err
         config.PostgresHost,
         config.PostgresPort,
         // ... other config
-        config.Options,
+        config.StoreConfig,
     )
 }
 ```
@@ -132,7 +136,7 @@ type Config struct {
     PostgresSSLMode  string
 
     // Common
-    Options collection.Options
+    StoreConfig collection.StoreConfig
 }
 ```
 

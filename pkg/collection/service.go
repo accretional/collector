@@ -216,13 +216,19 @@ func (s *CollectionRepoService) SearchCollections(ctx context.Context, req *pb.S
 		}
 	}
 
-	// For now, return a placeholder response indicating which collections would be searched
-	// A full implementation would:
-	// 1. Create Collection instances for each collection
-	// 2. Convert req.Query (structpb.Struct) to SearchQuery
-	// 3. Execute searches across all collections
-	// 4. Aggregate and rank results
-	// 5. Apply pagination
+	// TODO: Convert req.Query (structpb.Struct) to SearchQuery
+	// For now, capability checking is deferred until query conversion is implemented
+	// When implemented, filter collections by capabilities:
+	//   compatible := []*pb.Collection{}
+	//   for _, coll := range collectionsToSearch {
+	//       // Get capabilities from collection proto
+	//       caps := getCapabilitiesFromProto(coll)
+	//       // Convert req.Query to SearchQuery (when implemented)
+	//       // query := convertStructToSearchQuery(req.Query)
+	//       // if err := IsQueryCompatible(query, caps); err == nil {
+	//       //     compatible = append(compatible, coll)
+	//       // }
+	//   }
 
 	collectionIds := make([]string, len(collectionsToSearch))
 	for i, coll := range collectionsToSearch {
@@ -238,6 +244,36 @@ func (s *CollectionRepoService) SearchCollections(ctx context.Context, req *pb.S
 		Results:      []*pb.SearchCollectionsResponse_CollectionResult{},
 		TotalMatches: 0,
 	}, nil
+}
+
+// getCapabilitiesFromProto extracts SearchCapabilities from a Collection proto.
+// This is a helper for cross-collection search that doesn't require creating a full Collection instance.
+func getCapabilitiesFromProto(coll *pb.Collection) SearchCapabilities {
+	cfg := coll.GetCollectionConfig()
+	if cfg == nil || cfg.GetSearch() == nil {
+		return SearchCapabilities{
+			FTSEnabled:          false,
+			JSONEnabled:         false,
+			VectorSearchEnabled: false,
+			VectorDimensions:    0,
+		}
+	}
+
+	searchCfg := cfg.GetSearch()
+	capabilities := SearchCapabilities{
+		FTSEnabled:          searchCfg.GetEnableFts(),
+		JSONEnabled:         searchCfg.GetEnableJson(),
+		VectorSearchEnabled: searchCfg.GetEnableVectorSearch(),
+		VectorDimensions:    0,
+	}
+
+	if capabilities.VectorSearchEnabled {
+		if vectorCfg := cfg.GetVector(); vectorCfg != nil {
+			capabilities.VectorDimensions = int(vectorCfg.GetDimensions())
+		}
+	}
+
+	return capabilities
 }
 
 // loadFromRegistry loads existing collections from the registry store into the in-memory cache.

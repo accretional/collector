@@ -116,13 +116,15 @@ import (
     pb "github.com/accretional/collector/gen/collector"
 )
 
-// Create SQLite store
+// Create SQLite store with search features enabled
 store, err := db.NewStore(ctx, db.Config{
 	Type:       db.DBTypeSQLite,
     SQLitePath: "./data/users.db",
-    Options: collection.Options{
-        EnableJSON: true,  // Enable JSONB indexing
-        EnableFTS:  true,  // Enable full-text search
+    StoreConfig: collection.StoreConfig{
+        Search: &pb.SearchConfig{
+            EnableFts:  true,  // Enable full-text search
+            EnableJson: true,  // Enable JSON querying via json_extract()
+        },
     },
 })
 
@@ -565,15 +567,17 @@ type Store interface {
 ### Configuration
 
 ```go
-options := collection.Options{
-    EnableJSON: true,   // Enable JSON indexing (adds jsontext column)
-    EnableFTS:  true,   // Enable full-text search
+storeConfig: collection.StoreConfig{
+    Search: &pb.SearchConfig{
+        EnableFts:  true,  // Enable full-text search
+        EnableJson: true,  // Enable JSON querying via json_extract()
+    },
 }
 
 store, err := db.NewStore(ctx, db.Config{
-    Type: db.DBTypeSQLite,
-    SQLitePath: dbPath,
-    Options:    options,
+    Type:           db.DBTypeSQLite,
+    SQLitePath:     dbPath,
+    StoreConfig:    storeConfig,
 })
 
 // For JSON search to work properly, set a converter for the collection's type:
