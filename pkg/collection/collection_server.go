@@ -182,12 +182,10 @@ func (s *CollectionServer) Search(ctx context.Context, req *pb.SearchRequest) (*
 	}
 
 	query := &SearchQuery{
-		FullText:     req.FullText,
-		Filters:      make(map[string]Filter),
-		LabelFilters: req.LabelFilters,
-		// Note: req.Vector is deprecated - use semantic_text in proto instead
-		// For now, if vector is provided, we ignore it since SearchQuery no longer has Vector field
-		// TODO: Add semantic_text field to SearchRequest proto and use it here
+		FullText:            req.FullText,
+		SemanticText:        req.SemanticText,
+		Filters:             make(map[string]Filter),
+		LabelFilters:        req.LabelFilters,
 		SimilarityThreshold: req.SimilarityThreshold,
 		Limit:               int(req.Limit),
 		Offset:              int(req.Offset),

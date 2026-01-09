@@ -74,10 +74,6 @@ func TestSemanticEngine_FindSimilar_Basic(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	engine := &collection.SemanticEngine{
-		Collection: coll,
-	}
-
 	now := timestamppb.New(time.Now())
 	records := []*pb.CollectionRecord{
 		{
@@ -112,9 +108,12 @@ func TestSemanticEngine_FindSimilar_Basic(t *testing.T) {
 		}
 	}
 
-	results, err := engine.FindSimilar(ctx, "artificial intelligence", 10)
+	results, err := coll.Search(ctx, &collection.SearchQuery{
+		SemanticText: "artificial intelligence",
+		Limit:        10,
+	})
 	if err != nil {
-		t.Fatalf("FindSimilar failed: %v", err)
+		t.Fatalf("Search failed: %v", err)
 	}
 
 	if len(results) == 0 {
@@ -165,10 +164,6 @@ func TestSemanticEngine_FindSimilar_Ordering(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	engine := &collection.SemanticEngine{
-		Collection: coll,
-	}
-
 	// Create records with varying similarity to query
 	now := timestamppb.New(time.Now())
 	records := []*pb.CollectionRecord{
@@ -204,9 +199,12 @@ func TestSemanticEngine_FindSimilar_Ordering(t *testing.T) {
 		}
 	}
 
-	results, err := engine.FindSimilar(ctx, "python programming", 10)
+	results, err := coll.Search(ctx, &collection.SearchQuery{
+		SemanticText: "python programming",
+		Limit:        10,
+	})
 	if err != nil {
-		t.Fatalf("FindSimilar failed: %v", err)
+		t.Fatalf("Search failed: %v", err)
 	}
 
 	if len(results) < 2 {
@@ -230,10 +228,6 @@ func TestSemanticEngine_FindSimilar_Limit(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	engine := &collection.SemanticEngine{
-		Collection: coll,
-	}
-
 	now := timestamppb.New(time.Now())
 	for i := 0; i < 10; i++ {
 		record := &pb.CollectionRecord{
@@ -249,9 +243,12 @@ func TestSemanticEngine_FindSimilar_Limit(t *testing.T) {
 		}
 	}
 
-	results, err := engine.FindSimilar(ctx, "test document", 3)
+	results, err := coll.Search(ctx, &collection.SearchQuery{
+		SemanticText: "test document",
+		Limit:        3,
+	})
 	if err != nil {
-		t.Fatalf("FindSimilar failed: %v", err)
+		t.Fatalf("Search failed: %v", err)
 	}
 
 	if len(results) > 3 {
@@ -264,13 +261,12 @@ func TestSemanticEngine_FindSimilar_NoResults(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	engine := &collection.SemanticEngine{
-		Collection: coll,
-	}
-
-	results, err := engine.FindSimilar(ctx, "any query", 10)
+	results, err := coll.Search(ctx, &collection.SearchQuery{
+		SemanticText: "any query",
+		Limit:        10,
+	})
 	if err != nil {
-		t.Fatalf("FindSimilar failed: %v", err)
+		t.Fatalf("Search failed: %v", err)
 	}
 
 	if len(results) != 0 {
@@ -278,18 +274,10 @@ func TestSemanticEngine_FindSimilar_NoResults(t *testing.T) {
 	}
 }
 
-// TestSemanticEngine_FindSimilar_EmbedderError removed:
-// Embedding is now handled by Store, so embedder errors would come from Store.
-// Store-level error handling should be tested in Store tests.
-
 func TestSemanticEngine_FindSimilar_WithFilters(t *testing.T) {
 	coll, cleanup := setupTestCollectionWithVector(t)
 	defer cleanup()
 	ctx := context.Background()
-
-	engine := &collection.SemanticEngine{
-		Collection: coll,
-	}
 
 	now := timestamppb.New(time.Now())
 	records := []*pb.CollectionRecord{
@@ -325,9 +313,12 @@ func TestSemanticEngine_FindSimilar_WithFilters(t *testing.T) {
 		}
 	}
 
-	results, err := engine.FindSimilar(ctx, "learning algorithms", 10)
+	results, err := coll.Search(ctx, &collection.SearchQuery{
+		SemanticText: "learning algorithms",
+		Limit:        10,
+	})
 	if err != nil {
-		t.Fatalf("FindSimilar failed: %v", err)
+		t.Fatalf("Search failed: %v", err)
 	}
 
 	if len(results) == 0 {
@@ -433,10 +424,6 @@ func TestSemanticEngine_FindSimilar_UpdateMaintainsVectors(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	engine := &collection.SemanticEngine{
-		Collection: coll,
-	}
-
 	now := timestamppb.New(time.Now())
 	record := &pb.CollectionRecord{
 		Id:        "doc-1",
@@ -451,9 +438,12 @@ func TestSemanticEngine_FindSimilar_UpdateMaintainsVectors(t *testing.T) {
 		t.Fatalf("failed to create record: %v", err)
 	}
 
-	results, err := engine.FindSimilar(ctx, "machine learning", 10)
+	results, err := coll.Search(ctx, &collection.SearchQuery{
+		SemanticText: "machine learning",
+		Limit:        10,
+	})
 	if err != nil {
-		t.Fatalf("FindSimilar failed: %v", err)
+		t.Fatalf("Search failed: %v", err)
 	}
 
 	if len(results) == 0 {
@@ -473,9 +463,12 @@ func TestSemanticEngine_FindSimilar_UpdateMaintainsVectors(t *testing.T) {
 		t.Fatalf("failed to update record: %v", err)
 	}
 
-	updatedResults, err := engine.FindSimilar(ctx, "cooking recipes", 10)
+	updatedResults, err := coll.Search(ctx, &collection.SearchQuery{
+		SemanticText: "cooking recipes",
+		Limit:        10,
+	})
 	if err != nil {
-		t.Fatalf("FindSimilar failed: %v", err)
+		t.Fatalf("Search failed: %v", err)
 	}
 
 	found := false
@@ -490,9 +483,12 @@ func TestSemanticEngine_FindSimilar_UpdateMaintainsVectors(t *testing.T) {
 		t.Error("expected to find updated record")
 	}
 
-	originalResults, err := engine.FindSimilar(ctx, "machine learning", 10)
+	originalResults, err := coll.Search(ctx, &collection.SearchQuery{
+		SemanticText: "machine learning",
+		Limit:        10,
+	})
 	if err != nil {
-		t.Fatalf("FindSimilar failed: %v", err)
+		t.Fatalf("Search failed: %v", err)
 	}
 
 	stillHighSimilarity := false
