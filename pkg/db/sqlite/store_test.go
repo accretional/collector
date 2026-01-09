@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	pb "github.com/accretional/collector/gen/collector"
+	"github.com/accretional/collector/pkg/collection"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -294,5 +295,245 @@ func TestStore_Checkpoint(t *testing.T) {
 	// Checkpoint should not error
 	if err := store.Checkpoint(ctx); err != nil {
 		t.Errorf("Checkpoint failed: %v", err)
+	}
+}
+
+func TestStore_Embedder_CreatedWhenVectorEnabled(t *testing.T) {
+	store, cleanup := setupTestStore(t, &pb.SearchConfig{
+		EnableVector:     true,
+		VectorDimensions: 16,
+	})
+	defer cleanup()
+
+	// Store should have created embedder internally
+	// We can verify this by performing a semantic search
+	ctx := context.Background()
+
+	// Create a record
+	record := createTestRecord("test-1", `{"text": "machine learning"}`, nil)
+	if err := store.CreateRecord(ctx, record); err != nil {
+		t.Fatalf("CreateRecord failed: %v", err)
+	}
+
+	// Search with SemanticText should work (proves embedder exists)
+	results, err := store.Search(ctx, &collection.SearchQuery{
+		SemanticText: "artificial intelligence",
+		Limit:        10,
+	})
+	if err != nil {
+		t.Fatalf("Search with SemanticText failed: %v", err)
+	}
+
+	// Should find the record (even if similarity is low)
+	if len(results) == 0 {
+		t.Error("expected at least one result from semantic search")
+	}
+}
+
+func TestStore_Embedder_NotCreatedWhenVectorDisabled(t *testing.T) {
+	store, cleanup := setupTestStore(t, &pb.SearchConfig{
+		EnableVector: false,
+	})
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create a record
+	record := createTestRecord("test-1", `{"text": "machine learning"}`, nil)
+	if err := store.CreateRecord(ctx, record); err != nil {
+		t.Fatalf("CreateRecord failed: %v", err)
+	}
+
+	// Search with SemanticText should fail when vector search is disabled
+	_, err := store.Search(ctx, &collection.SearchQuery{
+		SemanticText: "artificial intelligence",
+		Limit:        10,
+	})
+	if err == nil {
+		t.Error("expected error when SemanticText provided but vector search disabled")
+	}
+}
+
+func TestStore_Search_EmbedsSemanticText(t *testing.T) {
+	store, cleanup := setupTestStore(t, &pb.SearchConfig{
+		EnableVector:     true,
+		VectorDimensions: 16,
+	})
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create records with different content
+	records := []*pb.CollectionRecord{
+		createTestRecord("doc-1", `{"text": "machine learning and neural networks"}`, nil),
+		createTestRecord("doc-2", `{"text": "cooking recipes and food preparation"}`, nil),
+		createTestRecord("doc-3", `{"text": "artificial intelligence algorithms"}`, nil),
+	}
+
+	for _, record := range records {
+		if err := store.CreateRecord(ctx, record); err != nil {
+			t.Fatalf("CreateRecord failed: %v", err)
+		}
+	}
+
+	// Search with SemanticText - should embed and find similar records
+	results, err := store.Search(ctx, &collection.SearchQuery{
+		SemanticText: "artificial intelligence",
+		Limit:        10,
+	})
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
+
+	if len(results) == 0 {
+		t.Fatal("expected at least one result")
+	}
+
+	// Results should be ordered by similarity (distance)
+	for i := 1; i < len(results); i++ {
+		if results[i].Distance < results[i-1].Distance {
+			t.Errorf("results not properly ordered: result[%d].Distance=%f < result[%d].Distance=%f",
+				i, results[i].Distance, i-1, results[i-1].Distance)
+		}
+	}
+}
+
+func TestStore_Search_SemanticTextWithoutVectorEnabled(t *testing.T) {
+	store, cleanup := setupTestStore(t, &pb.SearchConfig{
+		EnableVector: false,
+	})
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// SemanticText should be ignored when vector search is disabled
+	results, err := store.Search(ctx, &collection.SearchQuery{
+		SemanticText: "test query",
+		Limit:        10,
+	})
+	if err != nil {
+		// This is acceptable - store may return error or ignore SemanticText
+		// The important thing is it doesn't crash
+		return
+	}
+
+	// If no error, results should be empty or based on other search criteria
+	_ = results // Results may be empty, which is fine
+}
+
+func TestStore_Search_EmptySemanticText(t *testing.T) {
+	store, cleanup := setupTestStore(t, &pb.SearchConfig{
+		EnableVector:     true,
+		VectorDimensions: 16,
+	})
+	defer cleanup()
+
+	ctx := context.Background()
+
+	record := createTestRecord("test-1", `{"text": "test"}`, nil)
+	if err := store.CreateRecord(ctx, record); err != nil {
+		t.Fatalf("CreateRecord failed: %v", err)
+	}
+
+	// Empty SemanticText should not cause errors
+	results, err := store.Search(ctx, &collection.SearchQuery{
+		SemanticText: "",
+		Limit:        10,
+	})
+	if err != nil {
+		t.Fatalf("Search with empty SemanticText failed: %v", err)
+	}
+
+	// Should return all records (no semantic filtering)
+	if len(results) == 0 {
+		t.Error("expected at least one result")
+	}
+}
+
+func TestStore_Search_SemanticTextWithFullText(t *testing.T) {
+	store, cleanup := setupTestStore(t, &pb.SearchConfig{
+		EnableVector:     true,
+		VectorDimensions: 16,
+		EnableFts:        true,
+	})
+	defer cleanup()
+
+	ctx := context.Background()
+
+	records := []*pb.CollectionRecord{
+		createTestRecord("doc-1", `{"text": "machine learning algorithms"}`, nil),
+		createTestRecord("doc-2", `{"text": "deep learning networks"}`, nil),
+	}
+
+	for _, record := range records {
+		if err := store.CreateRecord(ctx, record); err != nil {
+			t.Fatalf("CreateRecord failed: %v", err)
+		}
+	}
+
+	// Hybrid search: both FullText and SemanticText
+	results, err := store.Search(ctx, &collection.SearchQuery{
+		FullText:     "algorithms",
+		SemanticText: "neural networks",
+		Limit:        10,
+	})
+	if err != nil {
+		t.Fatalf("Hybrid search failed: %v", err)
+	}
+
+	if len(results) == 0 {
+		t.Error("expected at least one result from hybrid search")
+	}
+}
+
+func TestStore_Search_SimilarityThreshold(t *testing.T) {
+	store, cleanup := setupTestStore(t, &pb.SearchConfig{
+		EnableVector:     true,
+		VectorDimensions: 16,
+	})
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create records with varying similarity
+	records := []*pb.CollectionRecord{
+		createTestRecord("similar", `{"text": "artificial intelligence machine learning"}`, nil),
+		createTestRecord("different", `{"text": "cooking recipes food preparation"}`, nil),
+	}
+
+	for _, record := range records {
+		if err := store.CreateRecord(ctx, record); err != nil {
+			t.Fatalf("CreateRecord failed: %v", err)
+		}
+	}
+
+	// Search without threshold - should get all results
+	allResults, err := store.Search(ctx, &collection.SearchQuery{
+		SemanticText: "artificial intelligence",
+		Limit:        10,
+	})
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
+
+	if len(allResults) == 0 {
+		t.Fatal("expected at least one result")
+	}
+
+	// Search with high threshold - should filter out less similar results
+	// Note: SimilarityThreshold is 1 - distance, so higher threshold = lower distance
+	thresholdResults, err := store.Search(ctx, &collection.SearchQuery{
+		SemanticText:        "artificial intelligence",
+		SimilarityThreshold: 0.9, // High threshold
+		Limit:               10,
+	})
+	if err != nil {
+		t.Fatalf("Search with threshold failed: %v", err)
+	}
+
+	// Threshold should reduce or keep same number of results
+	if len(thresholdResults) > len(allResults) {
+		t.Errorf("threshold should not increase results: got %d, expected <= %d",
+			len(thresholdResults), len(allResults))
 	}
 }
