@@ -55,6 +55,34 @@ message BackupPolicy {
   bool enabled = 3;               // Enable automatic cleanup (false = manual only)
 }
 
+// ============================================================================
+// Collection Configuration Types
+// ============================================================================
+
+// SearchConfig configures search-related features for a Collection.
+message SearchConfig {
+  bool enable_fts = 1;    // Enable full-text search
+  bool enable_json = 2;   // Enable JSON querying via json_extract()
+  bool enable_vector_search = 3; // Enable vector similarity search. Needs VectorConfig
+}
+
+// VectorConfig configures vector/embedding settings for a Collection.
+message VectorConfig {
+  int32 dimensions = 1;     // Vector dimensions (required)
+  string embedder_type = 2; // Embedder type name for registry lookup
+}
+
+// CollectionConfig is the top-level configuration for Collection features.
+// It groups related configuration domains for extensibility.
+message CollectionConfig {
+  SearchConfig search = 1;  // Search feature flags (FTS, JSON, Vector)
+  VectorConfig vector = 2;  // Vector schema requirements (dimensions, embedder_type)
+}
+
+// ============================================================================
+// Collection Entity
+// ============================================================================
+
 // The Collection itself: table (inode) + optional filesystem
 message Collection {
   string namespace = 1;
@@ -71,4 +99,7 @@ message Collection {
   // When set and enabled=true, old backups are automatically cleaned up
   // after each new backup based on age and count rules.
   BackupPolicy backup_policy = 7;
+
+  // Configuration for Collection features and schema requirements
+  CollectionConfig collection_config = 8;
 }
