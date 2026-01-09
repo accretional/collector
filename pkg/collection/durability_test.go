@@ -360,7 +360,7 @@ func TestRecovery_AfterAbnormalClose(t *testing.T) {
 		Type:         db.DBTypeSQLite,
 		SQLitePath:   dbPath,
 		SearchConfig: &pb.SearchConfig{EnableJson: true},
-	}, nil)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -398,7 +398,7 @@ func TestRecovery_AfterAbnormalClose(t *testing.T) {
 		Type:         db.DBTypeSQLite,
 		SQLitePath:   dbPath,
 		SearchConfig: &pb.SearchConfig{EnableJson: true},
-	}, nil)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -449,7 +449,7 @@ func TestRecovery_FTSIndexConsistency(t *testing.T) {
 		Type:         db.DBTypeSQLite,
 		SQLitePath:   dbPath,
 		SearchConfig: searchConfig,
-	}, nil)
+	})
 	fs, _ := collection.NewLocalFileSystem(filepath.Join(tempDir, "files"))
 	proto := &pb.Collection{Namespace: "fts", Name: "test"}
 
@@ -477,7 +477,7 @@ func TestRecovery_FTSIndexConsistency(t *testing.T) {
 		Type:         db.DBTypeSQLite,
 		SQLitePath:   dbPath,
 		SearchConfig: searchConfig,
-	}, nil)
+	})
 	reopened, err := collection.NewCollection(proto, newStore, fs)
 	if err != nil {
 		t.Fatalf("failed to reopen collection: %v", err)
@@ -777,7 +777,7 @@ func TestMetadataConsistency(t *testing.T) {
 		Type:         db.DBTypeSQLite,
 		SQLitePath:   dbPath,
 		SearchConfig: &pb.SearchConfig{EnableJson: true},
-	}, nil)
+	})
 	fs, _ := collection.NewLocalFileSystem(filepath.Join(tempDir, "files"))
 
 	proto := &pb.Collection{
@@ -809,7 +809,7 @@ func TestMetadataConsistency(t *testing.T) {
 		Type:         db.DBTypeSQLite,
 		SQLitePath:   dbPath,
 		SearchConfig: &pb.SearchConfig{EnableJson: true},
-	}, nil)
+	})
 	reopened, err := collection.NewCollection(proto, newStore, fs)
 	if err != nil {
 		t.Fatalf("failed to reopen: %v", err)

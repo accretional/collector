@@ -149,7 +149,7 @@ func New(config Config) (*Server, error) {
 
 	// Registry protos collection
 	protosDBPath := filepath.Join(registryPath, "protos.db")
-	protosStore, err := sqlite.NewStore(protosDBPath, &pb.SearchConfig{EnableJson: true}, nil)
+	protosStore, err := sqlite.NewStore(protosDBPath, &pb.SearchConfig{EnableJson: true})
 	if err != nil {
 		return nil, fmt.Errorf("init protos store: %w", err)
 	}
@@ -174,7 +174,7 @@ func New(config Config) (*Server, error) {
 
 	// Registry services collection
 	servicesDBPath := filepath.Join(registryPath, "services.db")
-	servicesStore, err := sqlite.NewStore(servicesDBPath, &pb.SearchConfig{EnableJson: true}, nil)
+	servicesStore, err := sqlite.NewStore(servicesDBPath, &pb.SearchConfig{EnableJson: true})
 	if err != nil {
 		return nil, fmt.Errorf("init services store: %w", err)
 	}
@@ -239,7 +239,7 @@ func New(config Config) (*Server, error) {
 	}
 
 	// Create repo with PathConfig and registry store
-	dummyStore, err := sqlite.NewStore(":memory:", &pb.SearchConfig{EnableJson: true}, nil)
+	dummyStore, err := sqlite.NewStore(":memory:", &pb.SearchConfig{EnableJson: true})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create dummy store: %w", err)
 	}
@@ -247,15 +247,7 @@ func New(config Config) (*Server, error) {
 
 	// Create store factory wrapper
 	storeFactory := func(path string, searchConfig *pb.SearchConfig) (collection.Store, error) {
-		var embedder collection.Embedder
-		if searchConfig != nil && searchConfig.EnableVector {
-			dims := int(searchConfig.VectorDimensions)
-			if dims <= 0 {
-				dims = 128
-			}
-			embedder = collection.NewDeterministicEmbedder(dims, 1)
-		}
-		return sqlite.NewStore(path, searchConfig, embedder)
+		return sqlite.NewStore(path, searchConfig)
 	}
 
 	collectionRepo := collection.NewCollectionRepo(dummyStore, pathConfig, registryStore, storeFactory)

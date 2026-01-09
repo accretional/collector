@@ -24,7 +24,7 @@ func TestIssue1_JSONSchemaErrorHandling(t *testing.T) {
 		tmpDir := t.TempDir()
 		dbPath := filepath.Join(tmpDir, "test.db")
 
-		store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: true}, nil)
+		store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: true})
 		if err != nil {
 			t.Fatalf("Expected store creation to succeed, got error: %v", err)
 		}
@@ -63,14 +63,14 @@ func TestIssue1_JSONSchemaErrorHandling(t *testing.T) {
 		dbPath := filepath.Join(tmpDir, "test.db")
 
 		// First creation
-		store1, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: true}, nil)
+		store1, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: true})
 		if err != nil {
 			t.Fatalf("First store creation failed: %v", err)
 		}
 		store1.Close()
 
 		// Second creation on same DB - should succeed (column already exists)
-		store2, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: true}, nil)
+		store2, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: true})
 		if err != nil {
 			t.Fatalf("Second store creation should succeed (idempotent), got error: %v", err)
 		}
@@ -111,7 +111,7 @@ func TestIssue1_JSONSchemaErrorHandling(t *testing.T) {
 		// With the bug, this error would be silently ignored
 		// After fix, the store creation should still succeed (duplicate column is OK)
 		// but if the column type mismatch causes issues, they should surface
-		store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: true}, nil)
+		store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: true})
 		if err != nil {
 			// If we get an error here, that's actually fine - it means we're not
 			// silently ignoring errors. But duplicate column errors should be OK.
@@ -167,7 +167,7 @@ func TestIssue1_JSONSchemaErrorHandling(t *testing.T) {
 		// Try to create store with EnableJson - should fail because we can't write
 		// With the current bug, this might silently ignore the JSON schema error
 		// After fix, we should get an error
-		_, err = NewStore(dbPath, &pb.SearchConfig{EnableJson: true}, nil)
+		_, err = NewStore(dbPath, &pb.SearchConfig{EnableJson: true})
 		if err == nil {
 			t.Error("Expected error when creating store on read-only database with EnableJson, got nil")
 		} else {
@@ -186,7 +186,7 @@ func TestIssue2_EnableJSONValidationBeforeSearch(t *testing.T) {
 		dbPath := filepath.Join(tmpDir, "test.db")
 
 		// Create store WITHOUT EnableJson
-		store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: false}, nil)
+		store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: false})
 		if err != nil {
 			t.Fatalf("Store creation failed: %v", err)
 		}
@@ -217,7 +217,7 @@ func TestIssue2_EnableJSONValidationBeforeSearch(t *testing.T) {
 		dbPath := filepath.Join(tmpDir, "test.db")
 
 		// Create store WITHOUT EnableJson
-		store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: false}, nil)
+		store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: false})
 		if err != nil {
 			t.Fatalf("Store creation failed: %v", err)
 		}
@@ -249,7 +249,7 @@ func TestIssue2_EnableJSONValidationBeforeSearch(t *testing.T) {
 		dbPath := filepath.Join(tmpDir, "test.db")
 
 		// Create store WITHOUT EnableJson
-		store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: false}, nil)
+		store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: false})
 		if err != nil {
 			t.Fatalf("Store creation failed: %v", err)
 		}
@@ -277,7 +277,7 @@ func TestIssue3_InvalidJSONHandling(t *testing.T) {
 		tmpDir := t.TempDir()
 		dbPath := filepath.Join(tmpDir, "test.db")
 
-		store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: true}, nil)
+		store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: true})
 		if err != nil {
 			t.Fatalf("Store creation failed: %v", err)
 		}
@@ -320,7 +320,7 @@ func TestIssue3_InvalidJSONHandling(t *testing.T) {
 		tmpDir := t.TempDir()
 		dbPath := filepath.Join(tmpDir, "test.db")
 
-		store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: true}, nil)
+		store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: true})
 		if err != nil {
 			t.Fatalf("Store creation failed: %v", err)
 		}
@@ -361,7 +361,7 @@ func TestIssue3_InvalidJSONHandling(t *testing.T) {
 		tmpDir := t.TempDir()
 		dbPath := filepath.Join(tmpDir, "test.db")
 
-		store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: true}, nil)
+		store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: true})
 		if err != nil {
 			t.Fatalf("Store creation failed: %v", err)
 		}
@@ -417,7 +417,7 @@ func TestIssue3_InvalidJSONHandling(t *testing.T) {
 		dbPath := filepath.Join(tmpDir, "test.db")
 
 		// Create store WITHOUT EnableJson - binary protobuf should be fine
-		store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: false}, nil)
+		store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: false})
 		if err != nil {
 			t.Fatalf("Store creation failed: %v", err)
 		}
@@ -453,7 +453,7 @@ func TestIssue6_LabelKeyEscaping(t *testing.T) {
 		tmpDir := t.TempDir()
 		dbPath := filepath.Join(tmpDir, "test.db")
 
-		store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: true}, nil)
+		store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: true})
 		if err != nil {
 			t.Fatalf("Store creation failed: %v", err)
 		}
@@ -499,7 +499,7 @@ func TestIssue6_LabelKeyEscaping(t *testing.T) {
 		tmpDir := t.TempDir()
 		dbPath := filepath.Join(tmpDir, "test.db")
 
-		store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: true}, nil)
+		store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: true})
 		if err != nil {
 			t.Fatalf("Store creation failed: %v", err)
 		}
@@ -544,7 +544,7 @@ func TestIssue6_LabelKeyEscaping(t *testing.T) {
 		tmpDir := t.TempDir()
 		dbPath := filepath.Join(tmpDir, "test.db")
 
-		store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: true}, nil)
+		store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: true})
 		if err != nil {
 			t.Fatalf("Store creation failed: %v", err)
 		}

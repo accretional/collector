@@ -21,7 +21,7 @@ func TestBackupConcurrentReads(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	// Create store with test data
-	store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: true}, nil)
+	store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: true})
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestBackupConcurrentReads(t *testing.T) {
 	}
 
 	// Verify backup is valid
-	backupStore, err := NewStore(backupPath, &pb.SearchConfig{}, nil)
+	backupStore, err := NewStore(backupPath, &pb.SearchConfig{})
 	if err != nil {
 		t.Fatalf("failed to open backup: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestBackupConcurrentWrites(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	// Create store with initial data
-	store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: true}, nil)
+	store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: true})
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
@@ -232,7 +232,7 @@ func TestBackupConcurrentWrites(t *testing.T) {
 	}
 
 	// Verify backup is consistent (should have initial records, may not have concurrent writes)
-	backupStore, err := NewStore(backupPath, &pb.SearchConfig{}, nil)
+	backupStore, err := NewStore(backupPath, &pb.SearchConfig{})
 	if err != nil {
 		t.Fatalf("failed to open backup: %v", err)
 	}
@@ -271,7 +271,7 @@ func TestBackupLockDuration(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: true}, nil)
+			store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: true})
 			if err != nil {
 				t.Fatalf("failed to create store: %v", err)
 			}
@@ -361,7 +361,7 @@ func TestBackupConsistency(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: true}, nil)
+	store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: true})
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
@@ -397,7 +397,7 @@ func TestBackupConsistency(t *testing.T) {
 	}
 
 	// Open backup and verify all data
-	backupStore, err := NewStore(backupPath, &pb.SearchConfig{}, nil)
+	backupStore, err := NewStore(backupPath, &pb.SearchConfig{})
 	if err != nil {
 		t.Fatalf("failed to open backup: %v", err)
 	}
@@ -432,7 +432,7 @@ func TestBackupUnderLoad(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: true}, nil)
+	store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: true})
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
@@ -567,7 +567,7 @@ func TestBackupUnderLoad(t *testing.T) {
 	}
 
 	// Verify backup
-	backupStore, err := NewStore(backupPath, &pb.SearchConfig{}, nil)
+	backupStore, err := NewStore(backupPath, &pb.SearchConfig{})
 	if err != nil {
 		t.Fatalf("failed to open backup: %v", err)
 	}
@@ -587,7 +587,7 @@ func TestBackupOnline(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: true}, nil)
+	store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: true})
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
@@ -678,7 +678,7 @@ func TestBackupOnline(t *testing.T) {
 	}
 
 	// Verify backup
-	backupStore, err := NewStore(backupPath, &pb.SearchConfig{}, nil)
+	backupStore, err := NewStore(backupPath, &pb.SearchConfig{})
 	if err != nil {
 		t.Fatalf("failed to open backup: %v", err)
 	}
@@ -700,7 +700,7 @@ func TestBackupFailureRecovery(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: true}, nil)
+	store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: true})
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
@@ -742,7 +742,7 @@ func BenchmarkBackupWithLoad(b *testing.B) {
 	tmpDir := b.TempDir()
 	dbPath := filepath.Join(tmpDir, "bench.db")
 
-	store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: true}, nil)
+	store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: true})
 	if err != nil {
 		b.Fatalf("failed to create store: %v", err)
 	}

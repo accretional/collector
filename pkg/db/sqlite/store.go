@@ -34,12 +34,15 @@ type execContext interface {
 	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
 }
 
-func NewStore(path string, searchCfg *pb.SearchConfig, embedder embed.Embedder) (*Store, error) {
-	if searchCfg.EnableVector && embedder == nil {
-		return nil, fmt.Errorf("embedder required when EnableVector is true")
-	}
+func NewStore(path string, searchCfg *pb.SearchConfig) (*Store, error) {
 	if searchCfg.EnableVector && searchCfg.VectorDimensions <= 0 {
 		return nil, fmt.Errorf("VectorDimensions must be > 0 when EnableVector is true")
+	}
+
+	// Create embedder internally if vector search is enabled
+	var embedder embed.Embedder
+	if searchCfg.EnableVector {
+		embedder = embed.NewDeterministicEmbedder(int(searchCfg.VectorDimensions), 1)
 	}
 
 	dsn := fmt.Sprintf("file:%s?_journal_mode=WAL&_busy_timeout=10000", path)
@@ -562,8 +565,9 @@ func (s *Store) Search(ctx context.Context, q *collection.SearchQuery) ([]*colle
 		return nil, fmt.Errorf("search with Filters or LabelFilters requires EnableJson to be true")
 	}
 
-	// Generate vector from SemanticText if provided and Vector is empty
-	if q.SemanticText != "" && len(q.Vector) == 0 && s.searchConfig.EnableVector {
+	// Generate vector from SemanticText if provided
+	var queryVector []float32
+	if q.SemanticText != "" && s.searchConfig.EnableVector {
 		if s.embedder == nil {
 			return nil, fmt.Errorf("SemanticText provided but no embedder configured for vector search")
 		}
@@ -574,17 +578,18 @@ func (s *Store) Search(ctx context.Context, q *collection.SearchQuery) ([]*colle
 		if int32(len(vector)) != s.searchConfig.VectorDimensions {
 			return nil, fmt.Errorf("embedder produced %d dimensions, expected %d", len(vector), s.searchConfig.VectorDimensions)
 		}
-		q.Vector = vector
+		queryVector = vector
 	}
 
-	hasVector := len(q.Vector) > 0 && s.searchConfig.EnableVector
+	hasVector := len(queryVector) > 0 && s.searchConfig.EnableVector
 	hasFTS := q.FullText != "" && s.ftsAvailable
 
 	builder := &searchQueryBuilder{
-		store:     s,
-		query:     q,
-		hasVector: hasVector,
-		hasFTS:    hasFTS,
+		store:       s,
+		query:       q,
+		queryVector: queryVector,
+		hasVector:   hasVector,
+		hasFTS:      hasFTS,
 	}
 
 	switch {
@@ -602,6 +607,7 @@ func (s *Store) Search(ctx context.Context, q *collection.SearchQuery) ([]*colle
 type searchQueryBuilder struct {
 	store        *Store
 	query        *collection.SearchQuery
+	queryVector  []float32
 	hasVector    bool
 	hasFTS       bool
 	querySQL     strings.Builder
@@ -610,12 +616,12 @@ type searchQueryBuilder struct {
 }
 
 func (b *searchQueryBuilder) buildHybrid(ctx context.Context) ([]*collection.SearchResult, error) {
-	if int32(len(b.query.Vector)) != b.store.searchConfig.VectorDimensions {
+	if int32(len(b.queryVector)) != b.store.searchConfig.VectorDimensions {
 		return nil, fmt.Errorf("query vector dimension mismatch: got %d, expected %d",
-			len(b.query.Vector), b.store.searchConfig.VectorDimensions)
+			len(b.queryVector), b.store.searchConfig.VectorDimensions)
 	}
 
-	queryVector, err := sqlite_vec.SerializeFloat32(b.query.Vector)
+	serializedVector, err := sqlite_vec.SerializeFloat32(b.queryVector)
 	if err != nil {
 		return nil, fmt.Errorf("serialize query vector: %w", err)
 	}
@@ -633,7 +639,7 @@ func (b *searchQueryBuilder) buildHybrid(ctx context.Context) ([]*collection.Sea
 		`k = ?`,
 		`records_fts MATCH ?`,
 	}
-	b.args = append(b.args, queryVector, limit, b.query.FullText)
+	b.args = append(b.args, serializedVector, limit, b.query.FullText)
 
 	b.addSimilarityThreshold()
 	b.addFilters()
@@ -645,12 +651,12 @@ func (b *searchQueryBuilder) buildHybrid(ctx context.Context) ([]*collection.Sea
 }
 
 func (b *searchQueryBuilder) buildVector(ctx context.Context) ([]*collection.SearchResult, error) {
-	if int32(len(b.query.Vector)) != b.store.searchConfig.VectorDimensions {
+	if int32(len(b.queryVector)) != b.store.searchConfig.VectorDimensions {
 		return nil, fmt.Errorf("query vector dimension mismatch: got %d, expected %d",
-			len(b.query.Vector), b.store.searchConfig.VectorDimensions)
+			len(b.queryVector), b.store.searchConfig.VectorDimensions)
 	}
 
-	queryVector, err := sqlite_vec.SerializeFloat32(b.query.Vector)
+	serializedVector, err := sqlite_vec.SerializeFloat32(b.queryVector)
 	if err != nil {
 		return nil, fmt.Errorf("serialize query vector: %w", err)
 	}
@@ -664,7 +670,7 @@ func (b *searchQueryBuilder) buildVector(ctx context.Context) ([]*collection.Sea
 		`v.vector MATCH ?`,
 		`k = ?`,
 	}
-	b.args = append(b.args, queryVector, limit)
+	b.args = append(b.args, serializedVector, limit)
 
 	b.addSimilarityThreshold()
 	b.addFilters()

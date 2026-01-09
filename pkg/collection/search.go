@@ -20,8 +20,7 @@ type SearchQuery struct {
 	LabelFilters map[string]string // Label key -> value
 
 	// Vector search options
-	Vector              []float32 // For pre-computed vectors (legacy - prefer SemanticText)
-	SimilarityThreshold float32   // Minimum similarity (0-1), filters results
+	SimilarityThreshold float32 // Minimum similarity (0-1), filters results
 
 	// Pagination & sorting
 	Limit     int

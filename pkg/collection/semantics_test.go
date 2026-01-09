@@ -17,7 +17,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-func setupTestCollectionWithVector(t *testing.T) (*collection.Collection, collection.Embedder, func()) {
+func setupTestCollectionWithVector(t *testing.T) (*collection.Collection, func()) {
 	t.Helper()
 
 	tempDir := t.TempDir()
@@ -28,7 +28,6 @@ func setupTestCollectionWithVector(t *testing.T) (*collection.Collection, collec
 
 	dbPath := tempDir + "/test.db"
 	const dims = 16
-	embedder := collection.NewDeterministicEmbedder(dims, 1)
 
 	store, err := db.NewStore(context.Background(), db.Config{
 		Type:       db.DBTypeSQLite,
@@ -39,7 +38,7 @@ func setupTestCollectionWithVector(t *testing.T) (*collection.Collection, collec
 			EnableVector:     true,
 			VectorDimensions: int32(dims),
 		},
-	}, embedder)
+	})
 	if err != nil {
 		t.Fatalf("failed to create sqlite store: %v", err)
 	}
@@ -67,17 +66,16 @@ func setupTestCollectionWithVector(t *testing.T) (*collection.Collection, collec
 		store.Close()
 	}
 
-	return coll, embedder, cleanup
+	return coll, cleanup
 }
 
 func TestSemanticEngine_FindSimilar_Basic(t *testing.T) {
-	coll, embedder, cleanup := setupTestCollectionWithVector(t)
+	coll, cleanup := setupTestCollectionWithVector(t)
 	defer cleanup()
 	ctx := context.Background()
 
 	engine := &collection.SemanticEngine{
 		Collection: coll,
-		Embedder:   embedder,
 	}
 
 	now := timestamppb.New(time.Now())
@@ -163,13 +161,12 @@ func TestSemanticEngine_FindSimilar_Basic(t *testing.T) {
 }
 
 func TestSemanticEngine_FindSimilar_Ordering(t *testing.T) {
-	coll, embedder, cleanup := setupTestCollectionWithVector(t)
+	coll, cleanup := setupTestCollectionWithVector(t)
 	defer cleanup()
 	ctx := context.Background()
 
 	engine := &collection.SemanticEngine{
 		Collection: coll,
-		Embedder:   embedder,
 	}
 
 	// Create records with varying similarity to query
@@ -229,13 +226,12 @@ func TestSemanticEngine_FindSimilar_Ordering(t *testing.T) {
 }
 
 func TestSemanticEngine_FindSimilar_Limit(t *testing.T) {
-	coll, embedder, cleanup := setupTestCollectionWithVector(t)
+	coll, cleanup := setupTestCollectionWithVector(t)
 	defer cleanup()
 	ctx := context.Background()
 
 	engine := &collection.SemanticEngine{
 		Collection: coll,
-		Embedder:   embedder,
 	}
 
 	now := timestamppb.New(time.Now())
@@ -264,13 +260,12 @@ func TestSemanticEngine_FindSimilar_Limit(t *testing.T) {
 }
 
 func TestSemanticEngine_FindSimilar_NoResults(t *testing.T) {
-	coll, embedder, cleanup := setupTestCollectionWithVector(t)
+	coll, cleanup := setupTestCollectionWithVector(t)
 	defer cleanup()
 	ctx := context.Background()
 
 	engine := &collection.SemanticEngine{
 		Collection: coll,
-		Embedder:   embedder,
 	}
 
 	results, err := engine.FindSimilar(ctx, "any query", 10)
@@ -283,49 +278,17 @@ func TestSemanticEngine_FindSimilar_NoResults(t *testing.T) {
 	}
 }
 
-func TestSemanticEngine_FindSimilar_EmbedderError(t *testing.T) {
-	coll, _, cleanup := setupTestCollectionWithVector(t)
-	defer cleanup()
-	ctx := context.Background()
-
-	errorEmbedder := &errorEmbedder{}
-
-	engine := &collection.SemanticEngine{
-		Collection: coll,
-		Embedder:   errorEmbedder,
-	}
-
-	results, err := engine.FindSimilar(ctx, "test query", 10)
-	if err == nil {
-		t.Error("expected error from embedder, got nil")
-	}
-	if results != nil {
-		t.Errorf("expected nil results on error, got %v", results)
-	}
-}
-
-type errorEmbedder struct{}
-
-func (e *errorEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
-	return nil, &embedderError{msg: "test embedder error"}
-}
-
-type embedderError struct {
-	msg string
-}
-
-func (e *embedderError) Error() string {
-	return e.msg
-}
+// TestSemanticEngine_FindSimilar_EmbedderError removed:
+// Embedding is now handled by Store, so embedder errors would come from Store.
+// Store-level error handling should be tested in Store tests.
 
 func TestSemanticEngine_FindSimilar_WithFilters(t *testing.T) {
-	coll, embedder, cleanup := setupTestCollectionWithVector(t)
+	coll, cleanup := setupTestCollectionWithVector(t)
 	defer cleanup()
 	ctx := context.Background()
 
 	engine := &collection.SemanticEngine{
 		Collection: coll,
-		Embedder:   embedder,
 	}
 
 	now := timestamppb.New(time.Now())
@@ -371,13 +334,8 @@ func TestSemanticEngine_FindSimilar_WithFilters(t *testing.T) {
 		t.Fatal("expected at least one result")
 	}
 
-	queryVec, err := embedder.Embed(ctx, "learning algorithms")
-	if err != nil {
-		t.Fatalf("Embed failed: %v", err)
-	}
-
 	filteredResults, err := coll.Search(ctx, &collection.SearchQuery{
-		Vector: queryVec,
+		SemanticText: "learning algorithms",
 		Filters: map[string]collection.Filter{
 			"category": {Operator: collection.OpEquals, Value: "technology"},
 		},
@@ -399,7 +357,7 @@ func TestSemanticEngine_FindSimilar_WithFilters(t *testing.T) {
 }
 
 func TestSemanticEngine_FindSimilar_SimilarityThreshold(t *testing.T) {
-	coll, embedder, cleanup := setupTestCollectionWithVector(t)
+	coll, cleanup := setupTestCollectionWithVector(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -429,14 +387,9 @@ func TestSemanticEngine_FindSimilar_SimilarityThreshold(t *testing.T) {
 		}
 	}
 
-	queryVec, err := embedder.Embed(ctx, "artificial intelligence")
-	if err != nil {
-		t.Fatalf("Embed failed: %v", err)
-	}
-
 	allResults, err := coll.Search(ctx, &collection.SearchQuery{
-		Vector: queryVec,
-		Limit:  10,
+		SemanticText: "artificial intelligence",
+		Limit:        10,
 	})
 	if err != nil {
 		t.Fatalf("Search failed: %v", err)
@@ -455,7 +408,7 @@ func TestSemanticEngine_FindSimilar_SimilarityThreshold(t *testing.T) {
 		threshold = 0.99
 	}
 	thresholdResults, err := coll.Search(ctx, &collection.SearchQuery{
-		Vector:              queryVec,
+		SemanticText:        "artificial intelligence",
 		SimilarityThreshold: threshold,
 		Limit:               10,
 	})
@@ -476,13 +429,12 @@ func TestSemanticEngine_FindSimilar_SimilarityThreshold(t *testing.T) {
 }
 
 func TestSemanticEngine_FindSimilar_UpdateMaintainsVectors(t *testing.T) {
-	coll, embedder, cleanup := setupTestCollectionWithVector(t)
+	coll, cleanup := setupTestCollectionWithVector(t)
 	defer cleanup()
 	ctx := context.Background()
 
 	engine := &collection.SemanticEngine{
 		Collection: coll,
-		Embedder:   embedder,
 	}
 
 	now := timestamppb.New(time.Now())
@@ -556,7 +508,7 @@ func TestSemanticEngine_FindSimilar_UpdateMaintainsVectors(t *testing.T) {
 }
 
 func TestSemanticEngine_VectorIndexPopulated(t *testing.T) {
-	coll, embedder, cleanup := setupTestCollectionWithVector(t)
+	coll, cleanup := setupTestCollectionWithVector(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -587,11 +539,8 @@ func TestSemanticEngine_VectorIndexPopulated(t *testing.T) {
 	}
 
 	results, err := coll.Search(ctx, &collection.SearchQuery{
-		Vector: func() []float32 {
-			v, _ := embedder.Embed(ctx, "alpha gamma")
-			return v
-		}(),
-		Limit: 10,
+		SemanticText: "alpha gamma",
+		Limit:        10,
 	})
 	if err != nil {
 		t.Fatalf("vector search: %v", err)

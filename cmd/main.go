@@ -75,7 +75,7 @@ func run() error {
 		Type:         db.DBTypeSQLite,
 		SQLitePath:   dbPath,
 		SearchConfig: searchConfig,
-	}, collection.NewDeterministicEmbedder(vectorDims, 1))
+	})
 	if err != nil {
 		return fmt.Errorf("init store: %w", err)
 	}

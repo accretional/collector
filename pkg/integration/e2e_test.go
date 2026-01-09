@@ -102,7 +102,7 @@ func TestEndToEndIntegration(t *testing.T) {
 		t.Fatalf("failed to create registry dir: %v", err)
 	}
 
-	registryDBStore, err := sqlite.NewStore(registryPath, &pb.SearchConfig{EnableJson: true}, nil)
+	registryDBStore, err := sqlite.NewStore(registryPath, &pb.SearchConfig{EnableJson: true})
 	if err != nil {
 		t.Fatalf("failed to create registry db store: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestEndToEndIntegration(t *testing.T) {
 	defer registryStore.Close()
 
 	// Create dummy store (not used for metadata)
-	repoStore, err := sqlite.NewStore(":memory:", &pb.SearchConfig{}, nil)
+	repoStore, err := sqlite.NewStore(":memory:", &pb.SearchConfig{})
 	if err != nil {
 		t.Fatalf("failed to create repo store: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestEndToEndIntegration(t *testing.T) {
 
 	// Create store factory
 	storeFactory := func(path string, searchConfig *pb.SearchConfig) (collection.Store, error) {
-		return sqlite.NewStore(path, searchConfig, nil)
+		return sqlite.NewStore(path, searchConfig)
 	}
 	collectionRepo := collection.NewCollectionRepo(repoStore, pathConfig, registryStore, storeFactory)
 

@@ -21,7 +21,7 @@ func TestSearch_LabelFilters(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	dbPath := filepath.Join(tmpDir, "test.db")
-	store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: true}, nil)
+	store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: true})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -262,7 +262,7 @@ func TestCreateCollectionValidation(t *testing.T) {
 		t.Fatalf("failed to create registry dir: %v", err)
 	}
 
-	registryDBStore, err := sqlite.NewStore(registryPath, &pb.SearchConfig{EnableJson: true}, nil)
+	registryDBStore, err := sqlite.NewStore(registryPath, &pb.SearchConfig{EnableJson: true})
 	if err != nil {
 		t.Fatalf("failed to create registry db store: %v", err)
 	}
@@ -275,7 +275,7 @@ func TestCreateCollectionValidation(t *testing.T) {
 	defer registryStore.Close()
 
 	// Create dummy store for repo - use real sqlite store
-	dummyStore, err := sqlite.NewStore(":memory:", &pb.SearchConfig{}, nil)
+	dummyStore, err := sqlite.NewStore(":memory:", &pb.SearchConfig{})
 	if err != nil {
 		t.Fatalf("failed to create dummy store: %v", err)
 	}
@@ -283,7 +283,7 @@ func TestCreateCollectionValidation(t *testing.T) {
 
 	// Create store factory that returns real stores
 	storeFactory := func(path string, searchConfig *pb.SearchConfig) (collection.Store, error) {
-		return sqlite.NewStore(path, searchConfig, nil)
+		return sqlite.NewStore(path, searchConfig)
 	}
 
 	repo := collection.NewCollectionRepo(dummyStore, pathConfig, registryStore, storeFactory)
