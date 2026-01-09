@@ -2,17 +2,14 @@ package collection
 
 import (
 	"context"
-)
 
-// Embedder defines how to turn text into vectors.
-type Embedder interface {
-	Embed(ctx context.Context, text string) ([]float32, error)
-}
+	"github.com/accretional/collector/pkg/embed"
+)
 
 // SemanticEngine defines intelligence operations on a Collection.
 type SemanticEngine struct {
 	Collection *Collection
-	Embedder   Embedder
+	Embedder   embed.Embedder
 }
 
 // FindSimilar performs a semantic search by embedding the query text
