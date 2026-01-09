@@ -126,14 +126,17 @@ func (r *DefaultCollectionRepo) CreateCollection(ctx context.Context, collection
 		return nil, fmt.Errorf("failed to create files directory: %w", err)
 	}
 
+	// Validate collection config if present
+	if err := ValidateCollectionConfig(collection.GetCollectionConfig()); err != nil {
+		return nil, fmt.Errorf("invalid collection config: %w", err)
+	}
+
+	// Normalize and get search config
 	var searchConfig *pb.SearchConfig
 	if cfg := collection.GetCollectionConfig(); cfg != nil && cfg.GetSearchConfig() != nil {
-		searchConfig = cfg.GetSearchConfig()
+		searchConfig = NormalizeSearchConfig(cfg.GetSearchConfig())
 	} else {
-		searchConfig = &pb.SearchConfig{
-			EnableFts:  true,
-			EnableJson: true,
-		}
+		searchConfig = NormalizeSearchConfig(nil)
 	}
 
 	store, err := r.storeFactory(dbPath, searchConfig)
@@ -275,14 +278,17 @@ func (r *DefaultCollectionRepo) GetCollection(ctx context.Context, namespace, na
 		return nil, fmt.Errorf("invalid collection path: %w", err)
 	}
 
+	// Validate collection config if present
+	if err := ValidateCollectionConfig(metadata.Collection.GetCollectionConfig()); err != nil {
+		return nil, fmt.Errorf("invalid collection config: %w", err)
+	}
+
+	// Normalize and get search config
 	var searchConfig *pb.SearchConfig
 	if cfg := metadata.Collection.GetCollectionConfig(); cfg != nil && cfg.GetSearchConfig() != nil {
-		searchConfig = cfg.GetSearchConfig()
+		searchConfig = NormalizeSearchConfig(cfg.GetSearchConfig())
 	} else {
-		searchConfig = &pb.SearchConfig{
-			EnableFts:  true,
-			EnableJson: true,
-		}
+		searchConfig = NormalizeSearchConfig(nil)
 	}
 
 	store, err := r.storeFactory(dbPath, searchConfig)

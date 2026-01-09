@@ -35,14 +35,14 @@ type execContext interface {
 }
 
 func NewStore(path string, searchCfg *pb.SearchConfig) (*Store, error) {
-	if searchCfg.EnableVector && searchCfg.VectorDimensions <= 0 {
-		return nil, fmt.Errorf("VectorDimensions must be > 0 when EnableVector is true")
+	searchConfig := collection.NormalizeSearchConfig(searchCfg)
+	if err := collection.ValidateSearchConfig(searchConfig); err != nil {
+		return nil, fmt.Errorf("invalid search config: %w", err)
 	}
 
-	// Create embedder internally if vector search is enabled
-	var embedder embed.Embedder
-	if searchCfg.EnableVector {
-		embedder = embed.NewDeterministicEmbedder(int(searchCfg.VectorDimensions), 1)
+	embedder, err := embed.NewEmbedder(searchConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create embedder: %w", err)
 	}
 
 	dsn := fmt.Sprintf("file:%s?_journal_mode=WAL&_busy_timeout=10000", path)
@@ -51,7 +51,7 @@ func NewStore(path string, searchCfg *pb.SearchConfig) (*Store, error) {
 		return nil, fmt.Errorf("failed to open db: %w", err)
 	}
 
-	if searchCfg.EnableVector {
+	if searchConfig.EnableVector {
 		sqlite_vec.Auto()
 	}
 
@@ -71,7 +71,7 @@ func NewStore(path string, searchCfg *pb.SearchConfig) (*Store, error) {
 		return nil, fmt.Errorf("default schema failed: %w", err)
 	}
 
-	if searchCfg.EnableJson {
+	if searchConfig.EnableJson {
 		if _, err := db.Exec(collection.JSONSchema); err != nil {
 			// Ignore "duplicate column" errors (column already exists from previous init)
 			if !strings.Contains(err.Error(), "duplicate column") {
@@ -82,12 +82,12 @@ func NewStore(path string, searchCfg *pb.SearchConfig) (*Store, error) {
 		}
 	}
 
-	if searchCfg.EnableVector {
+	if searchConfig.EnableVector {
 		if _, err := db.Exec(collection.VectorSchema); err != nil {
 			log.Println("VectorSchema already exists")
 		}
 
-		stmt := fmt.Sprintf(`CREATE VIRTUAL TABLE IF NOT EXISTS records_vec USING vec0(vector FLOAT[%d]);`, searchCfg.VectorDimensions)
+		stmt := fmt.Sprintf(`CREATE VIRTUAL TABLE IF NOT EXISTS records_vec USING vec0(vector FLOAT[%d]);`, searchConfig.VectorDimensions)
 		if _, err := db.Exec(stmt); err != nil {
 			db.Close()
 			return nil, fmt.Errorf("create vec0 table: %w", err)
@@ -95,7 +95,7 @@ func NewStore(path string, searchCfg *pb.SearchConfig) (*Store, error) {
 	}
 
 	ftsAvailable := false
-	if searchCfg.EnableFts {
+	if searchConfig.EnableFts {
 		// Check if FTS5 is available by trying to create a test table
 		testTx, testErr := db.Begin()
 		if testErr == nil {
@@ -153,7 +153,7 @@ func NewStore(path string, searchCfg *pb.SearchConfig) (*Store, error) {
 	return &Store{
 		db:           db,
 		path:         path,
-		searchConfig: searchCfg,
+		searchConfig: searchConfig,
 		embedder:     embedder,
 		ftsAvailable: ftsAvailable,
 	}, nil

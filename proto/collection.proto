@@ -55,11 +55,19 @@ message BackupPolicy {
   bool enabled = 3;               // Enable automatic cleanup (false = manual only)
 }
 
+// EmbedderType specifies which embedder implementation to use for vector search.
+enum EmbedderType {
+	EMBEDDER_UNSPECIFIED = 0;
+	EMBEDDER_DETERMINISTIC = 1;
+	// Future: EMBEDDER_OPENAI, EMBEDDER_COHERE, etc.
+}
+
 message SearchConfig {
 	bool enable_fts = 1;
 	bool enable_json = 2;
 	bool enable_vector = 3;
 	int32  vector_dimensions = 4;
+	EmbedderType embedder_type = 5;
 }
 
 message CollectionConfig {
