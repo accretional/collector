@@ -55,6 +55,17 @@ message BackupPolicy {
   bool enabled = 3;               // Enable automatic cleanup (false = manual only)
 }
 
+message SearchConfig {
+	bool enable_fts
+	bool enable_json
+	bool enable_vector
+	int64 vector_dim
+}
+
+message CollectionConfig {
+  SearchConfig search_config = 1;
+}
+
 // The Collection itself: table (inode) + optional filesystem
 message Collection {
   string namespace = 1;
@@ -71,4 +82,6 @@ message Collection {
   // When set and enabled=true, old backups are automatically cleaned up
   // after each new backup based on age and count rules.
   BackupPolicy backup_policy = 7;
+
+  CollectionConfig config = 8;
 }
