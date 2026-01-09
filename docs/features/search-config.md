@@ -104,6 +104,7 @@ Embedders are created using `embed.NewEmbedder()` which switches on the `Embedde
 
 - **EMBEDDER_DETERMINISTIC** (default): Hash-based deterministic embedder
   - Produces stable, fixed-dimension vectors
+  - Uses a fixed seed (1) for deterministic behavior
   - Suitable for testing and local development
   - Not suitable for production semantic search (use external embedders when available)
 
@@ -131,12 +132,13 @@ When a search query is executed:
    - Requires `enable_json` to be `true`
    - Uses `json_extract()` for field filtering
 4. **Hybrid Search**: If both FTS and vector search are provided, results are combined
+5. **Scalar Search**: If no `FullText` or `SemanticText` is provided, performs scalar search (no text matching, only filters/pagination/ordering)
 
 ### Fallback Behavior
 
-- If FTS is disabled but `FullText` query is provided: Falls back to scalar search (no text matching)
-- If vector search is disabled but `SemanticText` is provided: Returns an error
-- If JSON is disabled but Filters/LabelFilters are provided: Returns an error
+- If FTS is disabled but `FullText` query is provided: **Silently falls back to scalar search** (FullText is ignored, no error)
+- If vector search is disabled but `SemanticText` is provided: **Returns an error** - `"SemanticText provided but vector search is disabled (enable_vector must be true)"`
+- If JSON is disabled but Filters/LabelFilters are provided: **Returns an error** - `"search with Filters or LabelFilters requires EnableJson to be true"`
 
 ### Search Result Ordering
 
@@ -245,11 +247,24 @@ collection := &pb.Collection{
 
 ## Error Messages
 
-Common validation errors and their meanings:
+Common validation and runtime errors and their meanings:
 
-- `"vector_dimensions must be > 0 when enable_vector is true"`: Vector search is enabled but dimensions not set
+### Configuration Errors (at store creation)
+
+- `"invalid search config: ..."`: Wraps validation errors from `ValidateSearchConfig()`
+- `"vector_dimensions must be > 0 when enable_vector is true"`: Vector search is enabled but dimensions not set (or got 0)
+- `"vector_dimensions is unreasonably large: X (max: 10000)"`: Vector dimensions exceed maximum allowed value
 - `"FTS5 is not available but EnableFts is true"`: FTS requested but SQLite not built with FTS5 support
+- `"failed to create embedder: ..."`: Embedder creation failed (wraps embedder-specific errors)
+- `"unsupported embedder type: X"`: Unknown embedder type specified
+
+### Search Query Errors (at search time)
+
 - `"search with Filters or LabelFilters requires EnableJson to be true"`: JSON filtering attempted but JSON not enabled
+- `"SemanticText provided but vector search is disabled (enable_vector must be true)"`: SemanticText query provided but vector search not enabled
+- `"SemanticText provided but no embedder configured for vector search"`: Vector search enabled but embedder creation failed (should not happen with proper config)
+- `"embedder produced X dimensions, expected Y"`: Embedder returned wrong vector dimensions (internal error)
+- `"full-text search requested but FTS5 is not available"`: FTS query attempted but FTS5 not available (should be caught at store creation, but checked again for safety)
 
 ## Migration and Compatibility
 
@@ -282,11 +297,15 @@ Common validation errors and their meanings:
 
 The store (`pkg/db/sqlite/store.go`) receives a normalized and validated config:
 
-1. Config is normalized (if not already)
-2. Config is validated
-3. Embedder is created using the factory
-4. Database schema is created based on enabled features
-5. FTS availability is checked if FTS is enabled
+1. Config is normalized (if not already) using `NormalizeSearchConfig()`
+2. Config is validated using `ValidateSearchConfig()`
+3. Embedder is created using `embed.NewEmbedder()` (returns nil if vector search disabled)
+4. Database schema is created based on enabled features:
+   - Always: base schema
+   - If JSON enabled: `jsontext` column
+   - If vector enabled: `vector` column and `records_vec` virtual table
+   - If FTS enabled: `records_fts` virtual table and triggers
+5. FTS availability is checked if FTS is enabled (fails store creation if unavailable)
 
 ## Best Practices
 
