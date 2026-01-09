@@ -149,7 +149,11 @@ func New(config Config) (*Server, error) {
 
 	// Registry protos collection
 	protosDBPath := filepath.Join(registryPath, "protos.db")
-	protosStore, err := sqlite.NewStore(protosDBPath, collection.Options{EnableJSON: true})
+	protosStore, err := sqlite.NewStore(protosDBPath, &pb.CollectionConfig{
+		Search: &pb.SearchConfig{
+			EnableJson: true,
+		},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("init protos store: %w", err)
 	}
@@ -174,7 +178,11 @@ func New(config Config) (*Server, error) {
 
 	// Registry services collection
 	servicesDBPath := filepath.Join(registryPath, "services.db")
-	servicesStore, err := sqlite.NewStore(servicesDBPath, collection.Options{EnableJSON: true})
+	servicesStore, err := sqlite.NewStore(servicesDBPath, &pb.CollectionConfig{
+		Search: &pb.SearchConfig{
+			EnableJson: true,
+		},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("init services store: %w", err)
 	}
@@ -239,15 +247,19 @@ func New(config Config) (*Server, error) {
 	}
 
 	// Create repo with PathConfig and registry store
-	dummyStore, err := sqlite.NewStore(":memory:", collection.Options{EnableJSON: true})
+	dummyStore, err := sqlite.NewStore(":memory:", &pb.CollectionConfig{
+		Search: &pb.SearchConfig{
+			EnableJson: true,
+		},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create dummy store: %w", err)
 	}
 	s.stores = append(s.stores, dummyStore)
 
 	// Create store factory wrapper
-	storeFactory := func(path string, opts collection.Options) (collection.Store, error) {
-		return sqlite.NewStore(path, opts)
+	storeFactory := func(path string, cfg *pb.CollectionConfig) (collection.Store, error) {
+		return sqlite.NewStore(path, cfg)
 	}
 
 	collectionRepo := collection.NewCollectionRepo(dummyStore, pathConfig, registryStore, storeFactory)

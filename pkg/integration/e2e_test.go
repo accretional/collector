@@ -36,7 +36,11 @@ func TestEndToEndIntegration(t *testing.T) {
 	protosStore, err := db.NewStore(ctx, db.Config{
 		Type:       db.DBTypeSQLite,
 		SQLitePath: filepath.Join(tempDir, "protos.db"),
-		Options:    collection.Options{EnableJSON: true},
+		CollectionConfig: &pb.CollectionConfig{
+			Search: &pb.SearchConfig{
+				EnableJson: true,
+			},
+		},
 	})
 	if err != nil {
 		t.Fatalf("failed to create protos store: %v", err)
@@ -62,7 +66,11 @@ func TestEndToEndIntegration(t *testing.T) {
 	servicesStore, err := db.NewStore(ctx, db.Config{
 		Type:       db.DBTypeSQLite,
 		SQLitePath: filepath.Join(tempDir, "services.db"),
-		Options:    collection.Options{EnableJSON: true},
+		CollectionConfig: &pb.CollectionConfig{
+			Search: &pb.SearchConfig{
+				EnableJson: true,
+			},
+		},
 	})
 	if err != nil {
 		t.Fatalf("failed to create services store: %v", err)
@@ -102,7 +110,11 @@ func TestEndToEndIntegration(t *testing.T) {
 		t.Fatalf("failed to create registry dir: %v", err)
 	}
 
-	registryDBStore, err := sqlite.NewStore(registryPath, collection.Options{EnableJSON: true})
+	registryDBStore, err := sqlite.NewStore(registryPath, &pb.CollectionConfig{
+		Search: &pb.SearchConfig{
+			EnableJson: true,
+		},
+	})
 	if err != nil {
 		t.Fatalf("failed to create registry db store: %v", err)
 	}
@@ -115,15 +127,15 @@ func TestEndToEndIntegration(t *testing.T) {
 	defer registryStore.Close()
 
 	// Create dummy store (not used for metadata)
-	repoStore, err := sqlite.NewStore(":memory:", collection.Options{})
+	repoStore, err := sqlite.NewStore(":memory:", nil)
 	if err != nil {
 		t.Fatalf("failed to create repo store: %v", err)
 	}
 	defer repoStore.Close()
 
 	// Create store factory
-	storeFactory := func(path string, opts collection.Options) (collection.Store, error) {
-		return sqlite.NewStore(path, opts)
+	storeFactory := func(path string, cfg *pb.CollectionConfig) (collection.Store, error) {
+		return sqlite.NewStore(path, cfg)
 	}
 	collectionRepo := collection.NewCollectionRepo(repoStore, pathConfig, registryStore, storeFactory)
 

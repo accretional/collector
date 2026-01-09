@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/accretional/collector/gen/collector"
+	pb "github.com/accretional/collector/gen/collector"
 	"github.com/accretional/collector/pkg/collection"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -23,7 +23,11 @@ func TestIssue1_JSONSchemaErrorHandling(t *testing.T) {
 		tmpDir := t.TempDir()
 		dbPath := filepath.Join(tmpDir, "test.db")
 
-		store, err := NewStore(dbPath, collection.Options{EnableJSON: true})
+		store, err := NewStore(dbPath, &pb.CollectionConfig{
+			Search: &pb.SearchConfig{
+				EnableJson: true,
+			},
+		})
 		if err != nil {
 			t.Fatalf("Expected store creation to succeed, got error: %v", err)
 		}
@@ -31,10 +35,10 @@ func TestIssue1_JSONSchemaErrorHandling(t *testing.T) {
 
 		// Verify jsontext column exists by inserting a record
 		ctx := context.Background()
-		record := &collector.CollectionRecord{
+		record := &pb.CollectionRecord{
 			Id:        "test-1",
 			ProtoData: []byte(`{"name": "test"}`),
-			Metadata: &collector.Metadata{
+			Metadata: &pb.Metadata{
 				CreatedAt: timestamppb.Now(),
 				UpdatedAt: timestamppb.Now(),
 				Labels:    map[string]string{"env": "test"},
@@ -62,14 +66,22 @@ func TestIssue1_JSONSchemaErrorHandling(t *testing.T) {
 		dbPath := filepath.Join(tmpDir, "test.db")
 
 		// First creation
-		store1, err := NewStore(dbPath, collection.Options{EnableJSON: true})
+		store1, err := NewStore(dbPath, &pb.CollectionConfig{
+			Search: &pb.SearchConfig{
+				EnableJson: true,
+			},
+		})
 		if err != nil {
 			t.Fatalf("First store creation failed: %v", err)
 		}
 		store1.Close()
 
 		// Second creation on same DB - should succeed (column already exists)
-		store2, err := NewStore(dbPath, collection.Options{EnableJSON: true})
+		store2, err := NewStore(dbPath, &pb.CollectionConfig{
+			Search: &pb.SearchConfig{
+				EnableJson: true,
+			},
+		})
 		if err != nil {
 			t.Fatalf("Second store creation should succeed (idempotent), got error: %v", err)
 		}
@@ -110,7 +122,11 @@ func TestIssue1_JSONSchemaErrorHandling(t *testing.T) {
 		// With the bug, this error would be silently ignored
 		// After fix, the store creation should still succeed (duplicate column is OK)
 		// but if the column type mismatch causes issues, they should surface
-		store, err := NewStore(dbPath, collection.Options{EnableJSON: true})
+		store, err := NewStore(dbPath, &pb.CollectionConfig{
+			Search: &pb.SearchConfig{
+				EnableJson: true,
+			},
+		})
 		if err != nil {
 			// If we get an error here, that's actually fine - it means we're not
 			// silently ignoring errors. But duplicate column errors should be OK.
@@ -122,10 +138,10 @@ func TestIssue1_JSONSchemaErrorHandling(t *testing.T) {
 			// Store was created - verify the column is actually usable
 			// If the column exists but is wrong type, operations may fail
 			ctx := context.Background()
-			record := &collector.CollectionRecord{
+			record := &pb.CollectionRecord{
 				Id:        "test-1",
 				ProtoData: []byte(`{"name": "test"}`),
-				Metadata: &collector.Metadata{
+				Metadata: &pb.Metadata{
 					CreatedAt: timestamppb.Now(),
 					UpdatedAt: timestamppb.Now(),
 					Labels:    map[string]string{"key": "value"},
@@ -166,7 +182,11 @@ func TestIssue1_JSONSchemaErrorHandling(t *testing.T) {
 		// Try to create store with EnableJSON - should fail because we can't write
 		// With the current bug, this might silently ignore the JSON schema error
 		// After fix, we should get an error
-		_, err = NewStore(dbPath, collection.Options{EnableJSON: true})
+		_, err = NewStore(dbPath, &pb.CollectionConfig{
+			Search: &pb.SearchConfig{
+				EnableJson: true,
+			},
+		})
 		if err == nil {
 			t.Error("Expected error when creating store on read-only database with EnableJSON, got nil")
 		} else {
@@ -185,7 +205,7 @@ func TestIssue2_EnableJSONValidationBeforeSearch(t *testing.T) {
 		dbPath := filepath.Join(tmpDir, "test.db")
 
 		// Create store WITHOUT EnableJSON
-		store, err := NewStore(dbPath, collection.Options{EnableJSON: false})
+		store, err := NewStore(dbPath, &pb.CollectionConfig{})
 		if err != nil {
 			t.Fatalf("Store creation failed: %v", err)
 		}
@@ -216,7 +236,7 @@ func TestIssue2_EnableJSONValidationBeforeSearch(t *testing.T) {
 		dbPath := filepath.Join(tmpDir, "test.db")
 
 		// Create store WITHOUT EnableJSON
-		store, err := NewStore(dbPath, collection.Options{EnableJSON: false})
+		store, err := NewStore(dbPath, &pb.CollectionConfig{})
 		if err != nil {
 			t.Fatalf("Store creation failed: %v", err)
 		}
@@ -248,7 +268,7 @@ func TestIssue2_EnableJSONValidationBeforeSearch(t *testing.T) {
 		dbPath := filepath.Join(tmpDir, "test.db")
 
 		// Create store WITHOUT EnableJSON
-		store, err := NewStore(dbPath, collection.Options{EnableJSON: false})
+		store, err := NewStore(dbPath, &pb.CollectionConfig{})
 		if err != nil {
 			t.Fatalf("Store creation failed: %v", err)
 		}
@@ -276,7 +296,11 @@ func TestIssue3_InvalidJSONHandling(t *testing.T) {
 		tmpDir := t.TempDir()
 		dbPath := filepath.Join(tmpDir, "test.db")
 
-		store, err := NewStore(dbPath, collection.Options{EnableJSON: true})
+		store, err := NewStore(dbPath, &pb.CollectionConfig{
+			Search: &pb.SearchConfig{
+				EnableJson: true,
+			},
+		})
 		if err != nil {
 			t.Fatalf("Store creation failed: %v", err)
 		}
@@ -285,10 +309,10 @@ func TestIssue3_InvalidJSONHandling(t *testing.T) {
 		ctx := context.Background()
 
 		// Create record with valid JSON proto_data
-		record := &collector.CollectionRecord{
+		record := &pb.CollectionRecord{
 			Id:        "valid-json",
 			ProtoData: []byte(`{"name": "test", "status": "active"}`),
-			Metadata: &collector.Metadata{
+			Metadata: &pb.Metadata{
 				CreatedAt: timestamppb.Now(),
 				UpdatedAt: timestamppb.Now(),
 				Labels:    map[string]string{"type": "test"},
@@ -319,7 +343,11 @@ func TestIssue3_InvalidJSONHandling(t *testing.T) {
 		tmpDir := t.TempDir()
 		dbPath := filepath.Join(tmpDir, "test.db")
 
-		store, err := NewStore(dbPath, collection.Options{EnableJSON: true})
+		store, err := NewStore(dbPath, &pb.CollectionConfig{
+			Search: &pb.SearchConfig{
+				EnableJson: true,
+			},
+		})
 		if err != nil {
 			t.Fatalf("Store creation failed: %v", err)
 		}
@@ -329,10 +357,10 @@ func TestIssue3_InvalidJSONHandling(t *testing.T) {
 
 		// Create record with binary protobuf (not JSON)
 		// Without a converter set, this should fall back to "{}" for jsontext
-		record := &collector.CollectionRecord{
+		record := &pb.CollectionRecord{
 			Id:        "binary-proto",
 			ProtoData: []byte{0x0a, 0x04, 0x74, 0x65, 0x73, 0x74}, // binary protobuf, not JSON
-			Metadata: &collector.Metadata{
+			Metadata: &pb.Metadata{
 				CreatedAt: timestamppb.Now(),
 				UpdatedAt: timestamppb.Now(),
 				Labels:    map[string]string{"type": "test"},
@@ -360,19 +388,23 @@ func TestIssue3_InvalidJSONHandling(t *testing.T) {
 		tmpDir := t.TempDir()
 		dbPath := filepath.Join(tmpDir, "test.db")
 
-		store, err := NewStore(dbPath, collection.Options{EnableJSON: true})
+		store, err := NewStore(dbPath, &pb.CollectionConfig{
+			Search: &pb.SearchConfig{
+				EnableJson: true,
+			},
+		})
 		if err != nil {
 			t.Fatalf("Store creation failed: %v", err)
 		}
 		defer store.Close()
 
 		// Use real converter for Collection type
-		store.SetJSONConverter(collection.NewStaticJSONConverter(&collector.Collection{}))
+		store.SetJSONConverter(collection.NewStaticJSONConverter(&pb.Collection{}))
 
 		ctx := context.Background()
 
 		// Create a real Collection proto and marshal it
-		testCollection := &collector.Collection{
+		testCollection := &pb.Collection{
 			Namespace: "test",
 			Name:      "mytest",
 		}
@@ -381,10 +413,10 @@ func TestIssue3_InvalidJSONHandling(t *testing.T) {
 			t.Fatalf("Failed to marshal test proto: %v", err)
 		}
 
-		record := &collector.CollectionRecord{
+		record := &pb.CollectionRecord{
 			Id:        "converted-proto",
 			ProtoData: protoBytes,
-			Metadata: &collector.Metadata{
+			Metadata: &pb.Metadata{
 				CreatedAt: timestamppb.Now(),
 				UpdatedAt: timestamppb.Now(),
 				Labels:    map[string]string{"type": "test"},
@@ -416,7 +448,7 @@ func TestIssue3_InvalidJSONHandling(t *testing.T) {
 		dbPath := filepath.Join(tmpDir, "test.db")
 
 		// Create store WITHOUT EnableJSON - binary protobuf should be fine
-		store, err := NewStore(dbPath, collection.Options{EnableJSON: false})
+		store, err := NewStore(dbPath, &pb.CollectionConfig{})
 		if err != nil {
 			t.Fatalf("Store creation failed: %v", err)
 		}
@@ -425,10 +457,10 @@ func TestIssue3_InvalidJSONHandling(t *testing.T) {
 		ctx := context.Background()
 
 		// Create record with binary protobuf (not JSON)
-		record := &collector.CollectionRecord{
+		record := &pb.CollectionRecord{
 			Id:        "binary-proto",
 			ProtoData: []byte{0x0a, 0x04, 0x74, 0x65, 0x73, 0x74}, // binary protobuf
-			Metadata: &collector.Metadata{
+			Metadata: &pb.Metadata{
 				CreatedAt: timestamppb.Now(),
 				UpdatedAt: timestamppb.Now(),
 				Labels:    map[string]string{},
@@ -452,7 +484,11 @@ func TestIssue6_LabelKeyEscaping(t *testing.T) {
 		tmpDir := t.TempDir()
 		dbPath := filepath.Join(tmpDir, "test.db")
 
-		store, err := NewStore(dbPath, collection.Options{EnableJSON: true})
+		store, err := NewStore(dbPath, &pb.CollectionConfig{
+			Search: &pb.SearchConfig{
+				EnableJson: true,
+			},
+		})
 		if err != nil {
 			t.Fatalf("Store creation failed: %v", err)
 		}
@@ -461,10 +497,10 @@ func TestIssue6_LabelKeyEscaping(t *testing.T) {
 		ctx := context.Background()
 
 		// Create record with label key containing dots
-		record := &collector.CollectionRecord{
+		record := &pb.CollectionRecord{
 			Id:        "dotted-label",
 			ProtoData: []byte(`{}`),
-			Metadata: &collector.Metadata{
+			Metadata: &pb.Metadata{
 				CreatedAt: timestamppb.Now(),
 				UpdatedAt: timestamppb.Now(),
 				Labels: map[string]string{
@@ -498,7 +534,11 @@ func TestIssue6_LabelKeyEscaping(t *testing.T) {
 		tmpDir := t.TempDir()
 		dbPath := filepath.Join(tmpDir, "test.db")
 
-		store, err := NewStore(dbPath, collection.Options{EnableJSON: true})
+		store, err := NewStore(dbPath, &pb.CollectionConfig{
+			Search: &pb.SearchConfig{
+				EnableJson: true,
+			},
+		})
 		if err != nil {
 			t.Fatalf("Store creation failed: %v", err)
 		}
@@ -507,10 +547,10 @@ func TestIssue6_LabelKeyEscaping(t *testing.T) {
 		ctx := context.Background()
 
 		// Create record with label key containing quotes
-		record := &collector.CollectionRecord{
+		record := &pb.CollectionRecord{
 			Id:        "quoted-label",
 			ProtoData: []byte(`{}`),
-			Metadata: &collector.Metadata{
+			Metadata: &pb.Metadata{
 				CreatedAt: timestamppb.Now(),
 				UpdatedAt: timestamppb.Now(),
 				Labels: map[string]string{
@@ -543,7 +583,11 @@ func TestIssue6_LabelKeyEscaping(t *testing.T) {
 		tmpDir := t.TempDir()
 		dbPath := filepath.Join(tmpDir, "test.db")
 
-		store, err := NewStore(dbPath, collection.Options{EnableJSON: true})
+		store, err := NewStore(dbPath, &pb.CollectionConfig{
+			Search: &pb.SearchConfig{
+				EnableJson: true,
+			},
+		})
 		if err != nil {
 			t.Fatalf("Store creation failed: %v", err)
 		}
@@ -552,10 +596,10 @@ func TestIssue6_LabelKeyEscaping(t *testing.T) {
 		ctx := context.Background()
 
 		// Create record with label key containing brackets
-		record := &collector.CollectionRecord{
+		record := &pb.CollectionRecord{
 			Id:        "bracket-label",
 			ProtoData: []byte(`{}`),
-			Metadata: &collector.Metadata{
+			Metadata: &pb.Metadata{
 				CreatedAt: timestamppb.Now(),
 				UpdatedAt: timestamppb.Now(),
 				Labels: map[string]string{

@@ -18,7 +18,11 @@ func TestTypeRegistry_CacheInvalidation(t *testing.T) {
 
 	// 1. Setup minimal collection for types
 	dbPath := filepath.Join(tempDir, "types.db")
-	store, err := sqlite.NewStore(dbPath, collection.Options{EnableJSON: true})
+	store, err := sqlite.NewStore(dbPath, &pb.CollectionConfig{
+		Search: &pb.SearchConfig{
+			EnableJson: true,
+		},
+	})
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}

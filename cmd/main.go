@@ -41,7 +41,7 @@ func run() error {
 	// 4. Initialize Dependencies (The "Glue")
 
 	// Determine whether to enable vector support via env toggle.
-	vectorEnabled := os.Getenv("ENABLE_VECTOR") != ""
+	vectorSearchEnabled := os.Getenv("ENABLE_VECTOR_SEARCH") != ""
 	vectorDims := 128
 	if v := os.Getenv("VECTOR_DIMENSIONS"); v != "" {
 		if d, err := strconv.Atoi(v); err == nil {
@@ -60,20 +60,24 @@ func run() error {
 		return fmt.Errorf("create db dir: %w", err)
 	}
 
-	storeOpts := collection.Options{
-		EnableFTS:        true,
-		EnableJSON:       true,
-		EnableVector:     vectorEnabled,
-		VectorDimensions: vectorDims,
+	collectionCfg := &pb.CollectionConfig{
+		Search: &pb.SearchConfig{
+			EnableFts:          true,
+			EnableJson:         true,
+			EnableVectorSearch: vectorSearchEnabled,
+		},
 	}
-	if vectorEnabled {
-		storeOpts.Embedder = collection.NewDeterministicEmbedder(vectorDims, 1)
+	if vectorSearchEnabled {
+		collectionCfg.Vector = &pb.VectorConfig{
+			Dimensions:   int32(vectorDims),
+			EmbedderType: "deterministic",
+		}
 	}
 
 	store, err := db.NewStore(ctx, db.Config{
-		Type:       db.DBTypeSQLite,
-		SQLitePath: dbPath,
-		Options:    storeOpts,
+		Type:             db.DBTypeSQLite,
+		SQLitePath:       dbPath,
+		CollectionConfig: collectionCfg,
 	})
 	if err != nil {
 		return fmt.Errorf("init store: %w", err)

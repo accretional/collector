@@ -40,11 +40,13 @@ func setupTestCollection(t *testing.T) (*collection.Collection, func()) {
 	}
 
 	store, err := db.NewStore(context.Background(), db.Config{
-		Type:       db.DBTypeSQLite,
-		SQLitePath: dbPath,
-		Options: collection.Options{
-			EnableFTS:  true, // Test FTS tables
-			EnableJSON: true, // Test JSON columns
+		Type:             db.DBTypeSQLite,
+		SQLitePath:       dbPath,
+		CollectionConfig: &pb.CollectionConfig{
+			Search: &pb.SearchConfig{
+				EnableFts:  true,
+				EnableJson: true,
+			},
 		},
 	})
 	if err != nil {
@@ -107,7 +109,11 @@ func setupTestRepo(t *testing.T) (collection.CollectionRepo, func()) {
 		t.Fatalf("failed to create registry dir: %v", err)
 	}
 
-	registryDBStore, err := sqlite.NewStore(registryDBPath, collection.Options{EnableJSON: true})
+	registryDBStore, err := sqlite.NewStore(registryDBPath, &pb.CollectionConfig{
+		Search: &pb.SearchConfig{
+			EnableJson: true,
+		},
+	})
 	if err != nil {
 		os.RemoveAll(tempDir)
 		t.Fatalf("failed to create registry db store: %v", err)
@@ -121,15 +127,15 @@ func setupTestRepo(t *testing.T) (collection.CollectionRepo, func()) {
 	}
 
 	// 4. Create dummy store (not used for metadata anymore)
-	dummyStore, err := sqlite.NewStore(":memory:", collection.Options{})
+	dummyStore, err := sqlite.NewStore(":memory:", nil)
 	if err != nil {
 		os.RemoveAll(tempDir)
 		t.Fatalf("failed to create dummy store: %v", err)
 	}
 
 	// 5. Create the DefaultCollectionRepo with StoreFactory
-	storeFactory := func(path string, opts collection.Options) (collection.Store, error) {
-		return sqlite.NewStore(path, opts)
+	storeFactory := func(path string, cfg *pb.CollectionConfig) (collection.Store, error) {
+		return sqlite.NewStore(path, cfg)
 	}
 	repo := collection.NewCollectionRepo(dummyStore, pathConfig, registryStore, storeFactory)
 

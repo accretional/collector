@@ -6,17 +6,25 @@ import (
 	"testing"
 
 	pb "github.com/accretional/collector/gen/collector"
-	"github.com/accretional/collector/pkg/collection"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-func setupTestStore(t *testing.T, opts collection.Options) (*Store, func()) {
+func setupTestStore(t *testing.T, cfg *pb.CollectionConfig) (*Store, func()) {
 	t.Helper()
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	opts.EnableJSON = true // Always enable JSON for tests
-	store, err := NewStore(dbPath, opts)
+	// Always enable JSON for tests
+	if cfg == nil {
+		cfg = &pb.CollectionConfig{
+			Search: &pb.SearchConfig{EnableJson: true},
+		}
+	} else if cfg.GetSearch() == nil {
+		cfg.Search = &pb.SearchConfig{EnableJson: true}
+	} else {
+		cfg.Search.EnableJson = true
+	}
+	store, err := NewStore(dbPath, cfg)
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
@@ -40,7 +48,7 @@ func createTestRecord(id string, data string, labels map[string]string) *pb.Coll
 }
 
 func TestStore_CreateAndGetRecord(t *testing.T) {
-	store, cleanup := setupTestStore(t, collection.Options{})
+	store, cleanup := setupTestStore(t, nil)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -63,7 +71,7 @@ func TestStore_CreateAndGetRecord(t *testing.T) {
 }
 
 func TestStore_GetRecord_NotFound(t *testing.T) {
-	store, cleanup := setupTestStore(t, collection.Options{})
+	store, cleanup := setupTestStore(t, nil)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -74,7 +82,7 @@ func TestStore_GetRecord_NotFound(t *testing.T) {
 }
 
 func TestStore_UpdateRecord(t *testing.T) {
-	store, cleanup := setupTestStore(t, collection.Options{})
+	store, cleanup := setupTestStore(t, nil)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -102,7 +110,7 @@ func TestStore_UpdateRecord(t *testing.T) {
 }
 
 func TestStore_DeleteRecord(t *testing.T) {
-	store, cleanup := setupTestStore(t, collection.Options{})
+	store, cleanup := setupTestStore(t, nil)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -125,7 +133,7 @@ func TestStore_DeleteRecord(t *testing.T) {
 }
 
 func TestStore_ListRecords(t *testing.T) {
-	store, cleanup := setupTestStore(t, collection.Options{})
+	store, cleanup := setupTestStore(t, nil)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -153,7 +161,7 @@ func TestStore_ListRecords(t *testing.T) {
 }
 
 func TestStore_ListRecords_Pagination(t *testing.T) {
-	store, cleanup := setupTestStore(t, collection.Options{})
+	store, cleanup := setupTestStore(t, nil)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -194,7 +202,7 @@ func TestStore_ListRecords_Pagination(t *testing.T) {
 }
 
 func TestStore_CountRecords(t *testing.T) {
-	store, cleanup := setupTestStore(t, collection.Options{})
+	store, cleanup := setupTestStore(t, nil)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -225,7 +233,7 @@ func TestStore_CountRecords(t *testing.T) {
 }
 
 func TestStore_CreateRecord_DuplicateID(t *testing.T) {
-	store, cleanup := setupTestStore(t, collection.Options{})
+	store, cleanup := setupTestStore(t, nil)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -244,7 +252,7 @@ func TestStore_CreateRecord_DuplicateID(t *testing.T) {
 }
 
 func TestStore_Labels(t *testing.T) {
-	store, cleanup := setupTestStore(t, collection.Options{})
+	store, cleanup := setupTestStore(t, nil)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -272,7 +280,7 @@ func TestStore_Labels(t *testing.T) {
 }
 
 func TestStore_Path(t *testing.T) {
-	store, cleanup := setupTestStore(t, collection.Options{})
+	store, cleanup := setupTestStore(t, nil)
 	defer cleanup()
 
 	path := store.Path()
@@ -282,7 +290,7 @@ func TestStore_Path(t *testing.T) {
 }
 
 func TestStore_Checkpoint(t *testing.T) {
-	store, cleanup := setupTestStore(t, collection.Options{})
+	store, cleanup := setupTestStore(t, nil)
 	defer cleanup()
 	ctx := context.Background()
 

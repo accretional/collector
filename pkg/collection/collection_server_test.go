@@ -463,8 +463,14 @@ func TestCollectionServer_Search_WithFilters(t *testing.T) {
 	server := collection.NewCollectionServer(repo)
 	ctx := context.Background()
 
-	// Setup
-	coll := &pb.Collection{Namespace: "test", Name: "items"}
+	// Setup - need JSON enabled for filter searches
+	coll := &pb.Collection{
+		Namespace: "test",
+		Name:      "items",
+		CollectionConfig: &pb.CollectionConfig{
+			Search: &pb.SearchConfig{EnableJson: true},
+		},
+	}
 	_, err := repo.CreateCollection(ctx, coll)
 	if err != nil {
 		t.Fatalf("failed to create collection: %v", err)

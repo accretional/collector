@@ -33,12 +33,16 @@ func setupTestCollectionWithVector(t *testing.T) (*collection.Collection, collec
 	store, err := db.NewStore(context.Background(), db.Config{
 		Type:       db.DBTypeSQLite,
 		SQLitePath: dbPath,
-		Options: collection.Options{
-			EnableFTS:        true,
-			EnableJSON:       true,
-			EnableVector:     true,
-			VectorDimensions: dims,
-			Embedder:         embedder,
+		CollectionConfig: &pb.CollectionConfig{
+			Search: &pb.SearchConfig{
+				EnableFts:          true,
+				EnableJson:         true,
+				EnableVectorSearch: true,
+			},
+			Vector: &pb.VectorConfig{
+				Dimensions:   int32(dims),
+				EmbedderType: "deterministic",
+			},
 		},
 	})
 	if err != nil {

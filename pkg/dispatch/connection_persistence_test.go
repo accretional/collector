@@ -16,7 +16,11 @@ import (
 func setupTestCollection(t *testing.T) *collection.Collection {
 	t.Helper()
 
-	store, err := sqlite.NewStore(":memory:", collection.Options{EnableJSON: true})
+	store, err := sqlite.NewStore(":memory:", &pb.CollectionConfig{
+		Search: &pb.SearchConfig{
+			EnableJson: true,
+		},
+	})
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}

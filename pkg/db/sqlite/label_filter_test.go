@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/accretional/collector/gen/collector"
+	pb "github.com/accretional/collector/gen/collector"
 	"github.com/accretional/collector/pkg/collection"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -20,7 +20,11 @@ func TestSearch_LabelFilters(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	dbPath := filepath.Join(tmpDir, "test.db")
-	store, err := NewStore(dbPath, collection.Options{EnableJSON: true})
+	store, err := NewStore(dbPath, &pb.CollectionConfig{
+		Search: &pb.SearchConfig{
+			EnableJson: true,
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,13 +47,13 @@ func TestSearch_LabelFilters(t *testing.T) {
 	}
 
 	for _, td := range testData {
-		testProto := &collector.NamespacedName{Namespace: td.namespace, Name: td.data}
+		testProto := &pb.NamespacedName{Namespace: td.namespace, Name: td.data}
 		data, _ := proto.Marshal(testProto)
 
-		record := &collector.CollectionRecord{
+		record := &pb.CollectionRecord{
 			Id:        td.id,
 			ProtoData: data,
-			Metadata: &collector.Metadata{
+			Metadata: &pb.Metadata{
 				CreatedAt: &timestamppb.Timestamp{Seconds: 1000000},
 				UpdatedAt: &timestamppb.Timestamp{Seconds: 1000000},
 				Labels: map[string]string{

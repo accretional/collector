@@ -359,7 +359,11 @@ func TestRecovery_AfterAbnormalClose(t *testing.T) {
 	store, err := db.NewStore(context.Background(), db.Config{
 		Type:       db.DBTypeSQLite,
 		SQLitePath: dbPath,
-		Options:    collection.Options{EnableJSON: true},
+		CollectionConfig: &pb.CollectionConfig{
+			Search: &pb.SearchConfig{
+				EnableJson: true,
+			},
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -397,7 +401,11 @@ func TestRecovery_AfterAbnormalClose(t *testing.T) {
 	newStore, err := db.NewStore(context.Background(), db.Config{
 		Type:       db.DBTypeSQLite,
 		SQLitePath: dbPath,
-		Options:    collection.Options{EnableJSON: true},
+		CollectionConfig: &pb.CollectionConfig{
+			Search: &pb.SearchConfig{
+				EnableJson: true,
+			},
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -443,12 +451,17 @@ func TestRecovery_FTSIndexConsistency(t *testing.T) {
 
 	// Setup with FTS enabled
 	dbPath := filepath.Join(tempDir, "fts.db")
-	opts := collection.Options{EnableFTS: true, EnableJSON: true}
+	collectionConfig := &pb.CollectionConfig{
+		Search: &pb.SearchConfig{
+			EnableFts:  true,
+			EnableJson: true,
+		},
+	}
 
 	store, _ := db.NewStore(context.Background(), db.Config{
-		Type:       db.DBTypeSQLite,
-		SQLitePath: dbPath,
-		Options:    opts,
+		Type:             db.DBTypeSQLite,
+		SQLitePath:       dbPath,
+		CollectionConfig: collectionConfig,
 	})
 	fs, _ := collection.NewLocalFileSystem(filepath.Join(tempDir, "files"))
 	proto := &pb.Collection{Namespace: "fts", Name: "test"}
@@ -474,9 +487,9 @@ func TestRecovery_FTSIndexConsistency(t *testing.T) {
 
 	// Reopen
 	newStore, _ := db.NewStore(context.Background(), db.Config{
-		Type:       db.DBTypeSQLite,
-		SQLitePath: dbPath,
-		Options:    opts,
+		Type:             db.DBTypeSQLite,
+		SQLitePath:       dbPath,
+		CollectionConfig: collectionConfig,
 	})
 	reopened, err := collection.NewCollection(proto, newStore, fs)
 	if err != nil {
@@ -776,7 +789,11 @@ func TestMetadataConsistency(t *testing.T) {
 	store, _ := db.NewStore(context.Background(), db.Config{
 		Type:       db.DBTypeSQLite,
 		SQLitePath: dbPath,
-		Options:    collection.Options{EnableJSON: true},
+		CollectionConfig: &pb.CollectionConfig{
+			Search: &pb.SearchConfig{
+				EnableJson: true,
+			},
+		},
 	})
 	fs, _ := collection.NewLocalFileSystem(filepath.Join(tempDir, "files"))
 
@@ -808,7 +825,11 @@ func TestMetadataConsistency(t *testing.T) {
 	newStore, _ := db.NewStore(context.Background(), db.Config{
 		Type:       db.DBTypeSQLite,
 		SQLitePath: dbPath,
-		Options:    collection.Options{EnableJSON: true},
+		CollectionConfig: &pb.CollectionConfig{
+			Search: &pb.SearchConfig{
+				EnableJson: true,
+			},
+		},
 	})
 	reopened, err := collection.NewCollection(proto, newStore, fs)
 	if err != nil {
