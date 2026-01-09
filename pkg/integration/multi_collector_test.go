@@ -38,7 +38,7 @@ func setupCollector(t *testing.T, collectorID, namespace string, port int) (
 		Type:         db.DBTypeSQLite,
 		SQLitePath:   filepath.Join(tempDir, "protos.db"),
 		SearchConfig: &pb.SearchConfig{EnableJson: true},
-	}, nil)
+	})
 	if err != nil {
 		t.Fatalf("failed to create protos store: %v", err)
 	}
@@ -64,7 +64,7 @@ func setupCollector(t *testing.T, collectorID, namespace string, port int) (
 		Type:         db.DBTypeSQLite,
 		SQLitePath:   filepath.Join(tempDir, "services.db"),
 		SearchConfig: &pb.SearchConfig{EnableJson: true},
-	}, nil)
+	})
 	if err != nil {
 		t.Fatalf("failed to create services store: %v", err)
 	}

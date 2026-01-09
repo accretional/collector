@@ -37,7 +37,7 @@ func TestEndToEndIntegration(t *testing.T) {
 		Type:         db.DBTypeSQLite,
 		SQLitePath:   filepath.Join(tempDir, "protos.db"),
 		SearchConfig: &pb.SearchConfig{EnableJson: true},
-	}, nil)
+	})
 	if err != nil {
 		t.Fatalf("failed to create protos store: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestEndToEndIntegration(t *testing.T) {
 		Type:         db.DBTypeSQLite,
 		SQLitePath:   filepath.Join(tempDir, "services.db"),
 		SearchConfig: &pb.SearchConfig{EnableJson: true},
-	}, nil)
+	})
 	if err != nil {
 		t.Fatalf("failed to create services store: %v", err)
 	}
