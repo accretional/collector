@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	pb "github.com/accretional/collector/gen/collector"
 	"github.com/accretional/collector/pkg/collection"
 	"github.com/accretional/collector/pkg/db/sqlite"
 )
@@ -26,8 +27,8 @@ type Config struct {
 	// PostgresPort     int
 	// ...
 
-	// Common
-	Options collection.Options
+	// Store configuration (from Collection.CollectionConfig)
+	CollectionConfig *pb.CollectionConfig
 }
 
 func NewStore(ctx context.Context, config Config) (collection.Store, error) {
@@ -48,5 +49,5 @@ func newSQLiteStore(ctx context.Context, config Config) (collection.Store, error
 		return nil, fmt.Errorf("SQLite path required for sqlite database type")
 	}
 
-	return sqlite.NewStore(config.SQLitePath, config.Options)
+	return sqlite.NewStore(config.SQLitePath, config.CollectionConfig)
 }
