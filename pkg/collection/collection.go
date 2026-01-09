@@ -132,7 +132,93 @@ func (c *Collection) CountRecords(ctx context.Context) (int64, error) {
 }
 
 func (c *Collection) Search(ctx context.Context, query *SearchQuery) ([]*SearchResult, error) {
+	if err := c.validateSearchQuery(query); err != nil {
+		return nil, err
+	}
+
 	return c.Store.Search(ctx, query)
+}
+
+// SearchCapabilities represents the search capabilities of a Collection.
+type SearchCapabilities struct {
+	FTSEnabled          bool
+	JSONEnabled         bool
+	VectorSearchEnabled bool
+	VectorDimensions    int // 0 if vector search is not enabled
+}
+
+// GetSearchCapabilities returns the search capabilities of this Collection.
+func (c *Collection) GetSearchCapabilities() SearchCapabilities {
+	cfg := c.Meta.GetCollectionConfig()
+	if cfg == nil || cfg.GetSearch() == nil {
+		return SearchCapabilities{
+			FTSEnabled:          false,
+			JSONEnabled:         false,
+			VectorSearchEnabled: false,
+			VectorDimensions:    0,
+		}
+	}
+
+	searchCfg := cfg.GetSearch()
+	capabilities := SearchCapabilities{
+		FTSEnabled:          searchCfg.GetEnableFts(),
+		JSONEnabled:         searchCfg.GetEnableJson(),
+		VectorSearchEnabled: searchCfg.GetEnableVectorSearch(),
+		VectorDimensions:    0,
+	}
+
+	if capabilities.VectorSearchEnabled {
+		if vectorCfg := cfg.GetVector(); vectorCfg != nil {
+			capabilities.VectorDimensions = int(vectorCfg.GetDimensions())
+		}
+	}
+
+	return capabilities
+}
+
+func (c *Collection) validateSearchQuery(query *SearchQuery) error {
+	cfg := c.Meta.GetCollectionConfig()
+	if cfg == nil || cfg.GetSearch() == nil {
+		if query.FullText != "" {
+			return fmt.Errorf("full-text search requested but FTS is not enabled for this collection")
+		}
+		if len(query.Filters) > 0 || len(query.LabelFilters) > 0 {
+			return fmt.Errorf("JSON filters requested but JSON filtering is not enabled for this collection")
+		}
+		if len(query.Vector) > 0 {
+			return fmt.Errorf("vector search requested but vector search is not enabled for this collection")
+		}
+		return nil
+	}
+
+	searchCfg := cfg.GetSearch()
+	if query.FullText != "" && !searchCfg.GetEnableFts() {
+		return fmt.Errorf("full-text search requested but FTS is not enabled for this collection")
+	}
+
+	hasJSONFilters := len(query.Filters) > 0 || len(query.LabelFilters) > 0
+	if hasJSONFilters && !searchCfg.GetEnableJson() {
+		return fmt.Errorf("JSON filters requested but JSON filtering is not enabled for this collection")
+	}
+
+	if len(query.Vector) > 0 {
+		if !searchCfg.GetEnableVectorSearch() {
+			return fmt.Errorf("vector search requested but vector search is not enabled for this collection")
+		}
+		vectorCfg := cfg.GetVector()
+		if vectorCfg == nil {
+			return fmt.Errorf("vector search requested but VectorConfig is not set for this collection")
+		}
+		expectedDims := int(vectorCfg.GetDimensions())
+		if expectedDims <= 0 {
+			return fmt.Errorf("vector search requested but vector dimensions are not configured")
+		}
+		if len(query.Vector) != expectedDims {
+			return fmt.Errorf("query vector dimension mismatch: got %d, expected %d", len(query.Vector), expectedDims)
+		}
+	}
+
+	return nil
 }
 
 func (c *Collection) Checkpoint(ctx context.Context) error {
