@@ -13,6 +13,7 @@ import (
 
 	pb "github.com/accretional/collector/gen/collector"
 	"github.com/accretional/collector/pkg/collection"
+	"github.com/accretional/collector/pkg/embed"
 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -23,7 +24,7 @@ type Store struct {
 	db            *sql.DB
 	path          string
 	searchConfig  *pb.SearchConfig
-	embedder      collection.Embedder
+	embedder      embed.Embedder
 	ftsAvailable  bool
 	mu            sync.RWMutex
 	jsonConverter collection.ProtoToJSONConverter // Converts binary proto to JSON for jsontext column
@@ -33,7 +34,7 @@ type execContext interface {
 	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
 }
 
-func NewStore(path string, searchCfg *pb.SearchConfig, embedder collection.Embedder) (*Store, error) {
+func NewStore(path string, searchCfg *pb.SearchConfig, embedder embed.Embedder) (*Store, error) {
 	if searchCfg.EnableVector && embedder == nil {
 		return nil, fmt.Errorf("embedder required when EnableVector is true")
 	}
@@ -559,6 +560,21 @@ func (s *Store) Search(ctx context.Context, q *collection.SearchQuery) ([]*colle
 	hasJSONFilters := len(q.Filters) > 0 || len(q.LabelFilters) > 0
 	if hasJSONFilters && !s.searchConfig.EnableJson {
 		return nil, fmt.Errorf("search with Filters or LabelFilters requires EnableJson to be true")
+	}
+
+	// Generate vector from SemanticText if provided and Vector is empty
+	if q.SemanticText != "" && len(q.Vector) == 0 && s.searchConfig.EnableVector {
+		if s.embedder == nil {
+			return nil, fmt.Errorf("SemanticText provided but no embedder configured for vector search")
+		}
+		vector, err := s.embedder.Embed(ctx, q.SemanticText)
+		if err != nil {
+			return nil, fmt.Errorf("failed to embed SemanticText: %w", err)
+		}
+		if int32(len(vector)) != s.searchConfig.VectorDimensions {
+			return nil, fmt.Errorf("embedder produced %d dimensions, expected %d", len(vector), s.searchConfig.VectorDimensions)
+		}
+		q.Vector = vector
 	}
 
 	hasVector := len(q.Vector) > 0 && s.searchConfig.EnableVector
