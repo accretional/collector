@@ -246,8 +246,16 @@ func New(config Config) (*Server, error) {
 	s.stores = append(s.stores, dummyStore)
 
 	// Create store factory wrapper
-	storeFactory := func(path string, opts collection.Options) (collection.Store, error) {
-		return sqlite.NewStore(path, opts)
+	storeFactory := func(path string, searchConfig *pb.SearchConfig) (collection.Store, error) {
+		var embedder collection.Embedder
+		if searchConfig != nil && searchConfig.EnableVector {
+			dims := int(searchConfig.VectorDimensions)
+			if dims <= 0 {
+				dims = 128
+			}
+			embedder = collection.NewDeterministicEmbedder(dims, 1)
+		}
+		return sqlite.NewStore(path, searchConfig, embedder)
 	}
 
 	collectionRepo := collection.NewCollectionRepo(dummyStore, pathConfig, registryStore, storeFactory)

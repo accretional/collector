@@ -27,8 +27,8 @@ store, err := db.NewStore(ctx, db.Config{
     Type:       db.DBTypeSQLite,
     SQLitePath: "/path/to/database.db",
     Options: collection.Options{
-        EnableJSON:   true,
-        EnableFTS:    true,
+        EnableJson:   true,
+        EnableFts:    true,
         EnableVector: true,
         VectorDimensions: 384,
     },

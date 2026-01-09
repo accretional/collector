@@ -42,11 +42,11 @@ func setupTestCollection(t *testing.T) (*collection.Collection, func()) {
 	store, err := db.NewStore(context.Background(), db.Config{
 		Type:       db.DBTypeSQLite,
 		SQLitePath: dbPath,
-		Options: collection.Options{
-			EnableFTS:  true, // Test FTS tables
-			EnableJSON: true, // Test JSON columns
+		SearchConfig: &pb.SearchConfig{
+			EnableFts:  true,
+			EnableJson: true,
 		},
-	})
+	}, nil)
 	if err != nil {
 		os.RemoveAll(tempDir)
 		t.Fatalf("failed to create sqlite store: %v", err)
@@ -128,8 +128,8 @@ func setupTestRepo(t *testing.T) (collection.CollectionRepo, func()) {
 	}
 
 	// 5. Create the DefaultCollectionRepo with StoreFactory
-	storeFactory := func(path string, opts collection.Options) (collection.Store, error) {
-		return sqlite.NewStore(path, opts)
+	storeFactory := func(path string, searchConfig *pb.SearchConfig) (collection.Store, error) {
+		return sqlite.NewStore(path, searchConfig, nil)
 	}
 	repo := collection.NewCollectionRepo(dummyStore, pathConfig, registryStore, storeFactory)
 

@@ -33,14 +33,13 @@ func setupTestCollectionWithVector(t *testing.T) (*collection.Collection, collec
 	store, err := db.NewStore(context.Background(), db.Config{
 		Type:       db.DBTypeSQLite,
 		SQLitePath: dbPath,
-		Options: collection.Options{
-			EnableFTS:        true,
-			EnableJSON:       true,
+		SearchConfig: &pb.SearchConfig{
+			EnableFts:        true,
+			EnableJson:       true,
 			EnableVector:     true,
-			VectorDimensions: dims,
-			Embedder:         embedder,
+			VectorDimensions: int32(dims),
 		},
-	})
+	}, embedder)
 	if err != nil {
 		t.Fatalf("failed to create sqlite store: %v", err)
 	}

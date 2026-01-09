@@ -282,8 +282,8 @@ func TestCreateCollectionValidation(t *testing.T) {
 	defer dummyStore.Close()
 
 	// Create store factory that returns real stores
-	storeFactory := func(path string, opts collection.Options) (collection.Store, error) {
-		return sqlite.NewStore(path, opts)
+	storeFactory := func(path string, searchConfig *pb.SearchConfig) (collection.Store, error) {
+		return sqlite.NewStore(path, searchConfig, nil)
 	}
 
 	repo := collection.NewCollectionRepo(dummyStore, pathConfig, registryStore, storeFactory)

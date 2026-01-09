@@ -19,11 +19,11 @@ func setupTestService(t *testing.T) (*collection.CollectionRepoService, func()) 
 	store, err := db.NewStore(context.Background(), db.Config{
 		Type:       db.DBTypeSQLite,
 		SQLitePath: ":memory:",
-		Options: collection.Options{
-			EnableFTS:  true,
-			EnableJSON: true,
+		SearchConfig: &pb.SearchConfig{
+			EnableFts:  true,
+			EnableJson: true,
 		},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}

@@ -6,7 +6,6 @@ toolchain go1.24.10
 
 require (
 	github.com/asg017/sqlite-vec-go-bindings v0.1.6
-	github.com/golang/protobuf v1.5.4
 	github.com/google/uuid v1.6.0
 	github.com/mattn/go-sqlite3 v1.14.32
 	google.golang.org/grpc v1.78.0

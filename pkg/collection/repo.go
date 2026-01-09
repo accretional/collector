@@ -126,7 +126,15 @@ func (r *DefaultCollectionRepo) CreateCollection(ctx context.Context, collection
 		return nil, fmt.Errorf("failed to create files directory: %w", err)
 	}
 
-	searchConfig := collection.GetCollectionConfig().GetSearchConfig()
+	var searchConfig *pb.SearchConfig
+	if cfg := collection.GetCollectionConfig(); cfg != nil && cfg.GetSearchConfig() != nil {
+		searchConfig = cfg.GetSearchConfig()
+	} else {
+		searchConfig = &pb.SearchConfig{
+			EnableFts:  true,
+			EnableJson: true,
+		}
+	}
 
 	store, err := r.storeFactory(dbPath, searchConfig)
 	if err != nil {
@@ -267,7 +275,15 @@ func (r *DefaultCollectionRepo) GetCollection(ctx context.Context, namespace, na
 		return nil, fmt.Errorf("invalid collection path: %w", err)
 	}
 
-	searchConfig := metadata.Collection.GetCollectionConfig().GetSearchConfig()
+	var searchConfig *pb.SearchConfig
+	if cfg := metadata.Collection.GetCollectionConfig(); cfg != nil && cfg.GetSearchConfig() != nil {
+		searchConfig = cfg.GetSearchConfig()
+	} else {
+		searchConfig = &pb.SearchConfig{
+			EnableFts:  true,
+			EnableJson: true,
+		}
+	}
 
 	store, err := r.storeFactory(dbPath, searchConfig)
 	if err != nil {

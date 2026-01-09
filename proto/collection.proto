@@ -28,7 +28,7 @@ message CollectionDir {
 }
 
 // A record in the Collection table (the "inode")
-// proto_data contains binary serialized protobuf. When stored with EnableJSON,
+// proto_data contains binary serialized protobuf. When stored with EnableJson,
 // the Store derives a JSON representation and stores it in the jsontext column
 // for efficient searching via json_extract().
 message CollectionRecord {

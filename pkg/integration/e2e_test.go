@@ -34,10 +34,10 @@ func TestEndToEndIntegration(t *testing.T) {
 
 	// Create registry collections
 	protosStore, err := db.NewStore(ctx, db.Config{
-		Type:       db.DBTypeSQLite,
-		SQLitePath: filepath.Join(tempDir, "protos.db"),
-		Options:    &pb.SearchConfig{EnableJson: true}, nil,
-	})
+		Type:         db.DBTypeSQLite,
+		SQLitePath:   filepath.Join(tempDir, "protos.db"),
+		SearchConfig: &pb.SearchConfig{EnableJson: true},
+	}, nil)
 	if err != nil {
 		t.Fatalf("failed to create protos store: %v", err)
 	}
@@ -60,10 +60,10 @@ func TestEndToEndIntegration(t *testing.T) {
 	}
 
 	servicesStore, err := db.NewStore(ctx, db.Config{
-		Type:       db.DBTypeSQLite,
-		SQLitePath: filepath.Join(tempDir, "services.db"),
-		Options:    &pb.SearchConfig{EnableJson: true}, nil,
-	})
+		Type:         db.DBTypeSQLite,
+		SQLitePath:   filepath.Join(tempDir, "services.db"),
+		SearchConfig: &pb.SearchConfig{EnableJson: true},
+	}, nil)
 	if err != nil {
 		t.Fatalf("failed to create services store: %v", err)
 	}
@@ -122,8 +122,8 @@ func TestEndToEndIntegration(t *testing.T) {
 	defer repoStore.Close()
 
 	// Create store factory
-	storeFactory := func(path string, opts collection.Options) (collection.Store, error) {
-		return sqlite.NewStore(path, opts)
+	storeFactory := func(path string, searchConfig *pb.SearchConfig) (collection.Store, error) {
+		return sqlite.NewStore(path, searchConfig, nil)
 	}
 	collectionRepo := collection.NewCollectionRepo(repoStore, pathConfig, registryStore, storeFactory)
 

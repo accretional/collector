@@ -357,10 +357,10 @@ func TestRecovery_AfterAbnormalClose(t *testing.T) {
 	// 2. Initialize manually so we can simulate abnormal close
 	dbPath := filepath.Join(tempDir, "recovery.db")
 	store, err := db.NewStore(context.Background(), db.Config{
-		Type:       db.DBTypeSQLite,
-		SQLitePath: dbPath,
-		Options:    &pb.SearchConfig{EnableJson: true}, nil,
-	})
+		Type:         db.DBTypeSQLite,
+		SQLitePath:   dbPath,
+		SearchConfig: &pb.SearchConfig{EnableJson: true},
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -395,10 +395,10 @@ func TestRecovery_AfterAbnormalClose(t *testing.T) {
 
 	// 5. Reopen (Recovery)
 	newStore, err := db.NewStore(context.Background(), db.Config{
-		Type:       db.DBTypeSQLite,
-		SQLitePath: dbPath,
-		Options:    &pb.SearchConfig{EnableJson: true}, nil,
-	})
+		Type:         db.DBTypeSQLite,
+		SQLitePath:   dbPath,
+		SearchConfig: &pb.SearchConfig{EnableJson: true},
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -443,13 +443,13 @@ func TestRecovery_FTSIndexConsistency(t *testing.T) {
 
 	// Setup with FTS enabled
 	dbPath := filepath.Join(tempDir, "fts.db")
-	opts := collection.Options{EnableFTS: true, EnableJSON: true}
+	searchConfig := &pb.SearchConfig{EnableFts: true, EnableJson: true}
 
 	store, _ := db.NewStore(context.Background(), db.Config{
-		Type:       db.DBTypeSQLite,
-		SQLitePath: dbPath,
-		Options:    opts,
-	})
+		Type:         db.DBTypeSQLite,
+		SQLitePath:   dbPath,
+		SearchConfig: searchConfig,
+	}, nil)
 	fs, _ := collection.NewLocalFileSystem(filepath.Join(tempDir, "files"))
 	proto := &pb.Collection{Namespace: "fts", Name: "test"}
 
@@ -474,10 +474,10 @@ func TestRecovery_FTSIndexConsistency(t *testing.T) {
 
 	// Reopen
 	newStore, _ := db.NewStore(context.Background(), db.Config{
-		Type:       db.DBTypeSQLite,
-		SQLitePath: dbPath,
-		Options:    opts,
-	})
+		Type:         db.DBTypeSQLite,
+		SQLitePath:   dbPath,
+		SearchConfig: searchConfig,
+	}, nil)
 	reopened, err := collection.NewCollection(proto, newStore, fs)
 	if err != nil {
 		t.Fatalf("failed to reopen collection: %v", err)
@@ -774,10 +774,10 @@ func TestMetadataConsistency(t *testing.T) {
 
 	dbPath := filepath.Join(tempDir, "meta.db")
 	store, _ := db.NewStore(context.Background(), db.Config{
-		Type:       db.DBTypeSQLite,
-		SQLitePath: dbPath,
-		Options:    &pb.SearchConfig{EnableJson: true}, nil,
-	})
+		Type:         db.DBTypeSQLite,
+		SQLitePath:   dbPath,
+		SearchConfig: &pb.SearchConfig{EnableJson: true},
+	}, nil)
 	fs, _ := collection.NewLocalFileSystem(filepath.Join(tempDir, "files"))
 
 	proto := &pb.Collection{
@@ -806,10 +806,10 @@ func TestMetadataConsistency(t *testing.T) {
 
 	// Reopen
 	newStore, _ := db.NewStore(context.Background(), db.Config{
-		Type:       db.DBTypeSQLite,
-		SQLitePath: dbPath,
-		Options:    &pb.SearchConfig{EnableJson: true}, nil,
-	})
+		Type:         db.DBTypeSQLite,
+		SQLitePath:   dbPath,
+		SearchConfig: &pb.SearchConfig{EnableJson: true},
+	}, nil)
 	reopened, err := collection.NewCollection(proto, newStore, fs)
 	if err != nil {
 		t.Fatalf("failed to reopen: %v", err)

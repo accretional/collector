@@ -107,7 +107,7 @@ func NewStore(path string, searchCfg *pb.SearchConfig, embedder collection.Embed
 
 		if !ftsAvailable {
 			db.Close()
-			return nil, fmt.Errorf("FTS5 is not available but EnableFTS is true. Build with -tags sqlite_fts5 to enable FTS5 support")
+			return nil, fmt.Errorf("FTS5 is not available but EnableFts is true. Build with -tags sqlite_fts5 to enable FTS5 support")
 		}
 
 		tx, err := db.Begin()

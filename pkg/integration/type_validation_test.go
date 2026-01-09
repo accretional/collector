@@ -56,8 +56,8 @@ func TestTypeValidationIntegration(t *testing.T) {
 	}
 	defer dummyStore.Close()
 
-	storeFactory := func(path string, opts collection.Options) (collection.Store, error) {
-		return sqlite.NewStore(path, opts)
+	storeFactory := func(path string, searchConfig *pb.SearchConfig) (collection.Store, error) {
+		return sqlite.NewStore(path, searchConfig, nil)
 	}
 
 	collectionRepo := collection.NewCollectionRepo(dummyStore, pathConfig, registryStore, storeFactory)

@@ -19,7 +19,7 @@ import (
 // Issue: Silent error on JSON schema creation (store.go:55-59)
 // The error from JSONSchema execution was silently ignored, which could hide real failures.
 func TestIssue1_JSONSchemaErrorHandling(t *testing.T) {
-	// Test 1: Normal creation with EnableJSON should work
+	// Test 1: Normal creation with EnableJson should work
 	t.Run("NormalCreation", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		dbPath := filepath.Join(tmpDir, "test.db")
@@ -57,7 +57,7 @@ func TestIssue1_JSONSchemaErrorHandling(t *testing.T) {
 		}
 	})
 
-	// Test 2: Idempotent creation - calling twice with EnableJSON should work
+	// Test 2: Idempotent creation - calling twice with EnableJson should work
 	t.Run("IdempotentCreation", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		dbPath := filepath.Join(tmpDir, "test.db")
@@ -105,7 +105,7 @@ func TestIssue1_JSONSchemaErrorHandling(t *testing.T) {
 		}
 		db.Close()
 
-		// Now try to create a SqliteStore with EnableJSON
+		// Now try to create a SqliteStore with EnableJson
 		// The JSONSchema tries: ALTER TABLE records ADD COLUMN jsontext TEXT
 		// This should fail because jsontext already exists (but as INTEGER)
 		// With the bug, this error would be silently ignored
@@ -164,12 +164,12 @@ func TestIssue1_JSONSchemaErrorHandling(t *testing.T) {
 		// Restore permissions after test
 		defer os.Chmod(dbPath, 0644)
 
-		// Try to create store with EnableJSON - should fail because we can't write
+		// Try to create store with EnableJson - should fail because we can't write
 		// With the current bug, this might silently ignore the JSON schema error
 		// After fix, we should get an error
 		_, err = NewStore(dbPath, &pb.SearchConfig{EnableJson: true}, nil)
 		if err == nil {
-			t.Error("Expected error when creating store on read-only database with EnableJSON, got nil")
+			t.Error("Expected error when creating store on read-only database with EnableJson, got nil")
 		} else {
 			t.Logf("Got expected error for read-only database: %v", err)
 		}
@@ -177,15 +177,15 @@ func TestIssue1_JSONSchemaErrorHandling(t *testing.T) {
 }
 
 // TestIssue2_EnableJSONValidationBeforeSearch tests that Search properly validates
-// EnableJSON state before executing JSON queries.
-// Issue: No EnableJSON validation before Search() (store.go:260-365)
+// EnableJson state before executing JSON queries.
+// Issue: No EnableJson validation before Search() (store.go:260-365)
 func TestIssue2_EnableJSONValidationBeforeSearch(t *testing.T) {
-	// Test: Search with filters on store created WITHOUT EnableJSON should return clear error
+	// Test: Search with filters on store created WITHOUT EnableJson should return clear error
 	t.Run("SearchWithoutEnableJSON", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		dbPath := filepath.Join(tmpDir, "test.db")
 
-		// Create store WITHOUT EnableJSON
+		// Create store WITHOUT EnableJson
 		store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: false}, nil)
 		if err != nil {
 			t.Fatalf("Store creation failed: %v", err)
@@ -195,28 +195,28 @@ func TestIssue2_EnableJSONValidationBeforeSearch(t *testing.T) {
 		ctx := context.Background()
 
 		// Try to search with label filters - this uses json_extract on labels column
-		// which doesn't exist when EnableJSON is false
+		// which doesn't exist when EnableJson is false
 		_, err = store.Search(ctx, &collection.SearchQuery{
 			LabelFilters: map[string]string{"namespace": "test"},
 		})
 
-		// Should get a clear error message about EnableJSON
+		// Should get a clear error message about EnableJson
 		if err == nil {
 			t.Error("Expected error when searching with filters on non-JSON store, got nil")
 		} else {
 			errStr := err.Error()
-			if !strings.Contains(errStr, "EnableJSON") {
-				t.Errorf("Error should mention EnableJSON, got: %v", err)
+			if !strings.Contains(errStr, "EnableJson") {
+				t.Errorf("Error should mention EnableJson, got: %v", err)
 			}
 		}
 	})
 
-	// Test: Search with JSON field filters on store without EnableJSON
+	// Test: Search with JSON field filters on store without EnableJson
 	t.Run("SearchFiltersWithoutEnableJSON", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		dbPath := filepath.Join(tmpDir, "test.db")
 
-		// Create store WITHOUT EnableJSON
+		// Create store WITHOUT EnableJson
 		store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: false}, nil)
 		if err != nil {
 			t.Fatalf("Store creation failed: %v", err)
@@ -232,23 +232,23 @@ func TestIssue2_EnableJSONValidationBeforeSearch(t *testing.T) {
 			},
 		})
 
-		// Should get a clear error message about EnableJSON
+		// Should get a clear error message about EnableJson
 		if err == nil {
 			t.Error("Expected error when searching with filters on non-JSON store, got nil")
 		} else {
 			errStr := err.Error()
-			if !strings.Contains(errStr, "EnableJSON") {
-				t.Errorf("Error should mention EnableJSON, got: %v", err)
+			if !strings.Contains(errStr, "EnableJson") {
+				t.Errorf("Error should mention EnableJson, got: %v", err)
 			}
 		}
 	})
 
-	// Test: Empty search query should work even without EnableJSON
+	// Test: Empty search query should work even without EnableJson
 	t.Run("EmptySearchWithoutEnableJSON", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		dbPath := filepath.Join(tmpDir, "test.db")
 
-		// Create store WITHOUT EnableJSON
+		// Create store WITHOUT EnableJson
 		store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: false}, nil)
 		if err != nil {
 			t.Fatalf("Store creation failed: %v", err)
@@ -260,7 +260,7 @@ func TestIssue2_EnableJSONValidationBeforeSearch(t *testing.T) {
 		// Empty search query should work - no JSON features needed
 		results, err := store.Search(ctx, &collection.SearchQuery{})
 		if err != nil {
-			t.Errorf("Empty search should work without EnableJSON: %v", err)
+			t.Errorf("Empty search should work without EnableJson: %v", err)
 		}
 		// Should return empty results (no records created)
 		if len(results) != 0 {
@@ -315,7 +315,7 @@ func TestIssue3_InvalidJSONHandling(t *testing.T) {
 		}
 	})
 
-	// Test 2: Binary proto_data with EnableJSON but no converter falls back gracefully
+	// Test 2: Binary proto_data with EnableJson but no converter falls back gracefully
 	t.Run("BinaryProtoWithoutConverter", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		dbPath := filepath.Join(tmpDir, "test.db")
@@ -411,12 +411,12 @@ func TestIssue3_InvalidJSONHandling(t *testing.T) {
 		}
 	})
 
-	// Test 4: Invalid JSON proto_data WITHOUT EnableJSON should work (no JSON features used)
+	// Test 4: Invalid JSON proto_data WITHOUT EnableJson should work (no JSON features used)
 	t.Run("InvalidJSONWithoutEnableJSON", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		dbPath := filepath.Join(tmpDir, "test.db")
 
-		// Create store WITHOUT EnableJSON - binary protobuf should be fine
+		// Create store WITHOUT EnableJson - binary protobuf should be fine
 		store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: false}, nil)
 		if err != nil {
 			t.Fatalf("Store creation failed: %v", err)
@@ -436,10 +436,10 @@ func TestIssue3_InvalidJSONHandling(t *testing.T) {
 			},
 		}
 
-		// Without EnableJSON, binary proto_data should be fine
+		// Without EnableJson, binary proto_data should be fine
 		err = store.CreateRecord(ctx, record)
 		if err != nil {
-			t.Errorf("CreateRecord without EnableJSON should accept binary proto_data: %v", err)
+			t.Errorf("CreateRecord without EnableJson should accept binary proto_data: %v", err)
 		}
 	})
 }
