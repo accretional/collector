@@ -150,6 +150,55 @@ func (s *CollectionServer) List(ctx context.Context, req *pb.ListRequest) (*pb.L
 		limit = 100
 	}
 
+	// If filter is provided, use Search instead of ListRecords
+	if req.Filter != nil && len(req.Filter.Fields) > 0 {
+		// Convert filter Struct to SearchQuery filters
+		// The filter Struct has fields like {"age": 30} which we convert to Filters
+		filters := make(map[string]Filter)
+		for key, value := range req.Filter.Fields {
+			// Convert structpb.Value to native Go value for Filter
+			filterValue := convertStructpbValue(value)
+			filters[key] = Filter{
+				Operator: OpEquals,
+				Value:    filterValue,
+			}
+		}
+
+		query := &SearchQuery{
+			Filters: filters,
+			Limit:   limit,
+			Offset:  offset,
+		}
+
+		searchResults, err := collection.Search(ctx, query)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to search records: %v", err)
+		}
+
+		typeUrl := buildTypeUrl(collection)
+		items := make([]*anypb.Any, 0, len(searchResults))
+		for _, result := range searchResults {
+			if result.Record != nil {
+				items = append(items, &anypb.Any{
+					TypeUrl: typeUrl,
+					Value:   result.Record.ProtoData,
+				})
+			}
+		}
+
+		var nextPageToken string
+		if len(items) == limit {
+			nextPageToken = offsetToPageToken(offset + limit)
+		}
+
+		return &pb.ListResponse{
+			Items:         items,
+			NextPageToken: nextPageToken,
+			TotalCount:    int64(len(items)),
+		}, nil
+	}
+
+	// No filter - use simple ListRecords
 	records, err := collection.ListRecords(ctx, offset, limit)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to list records: %v", err)
@@ -172,6 +221,7 @@ func (s *CollectionServer) List(ctx context.Context, req *pb.ListRequest) (*pb.L
 	return &pb.ListResponse{
 		Items:         items,
 		NextPageToken: nextPageToken,
+		TotalCount:    int64(len(items)),
 	}, nil
 }
 

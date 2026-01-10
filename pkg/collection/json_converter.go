@@ -11,6 +11,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoregistry"
 	"google.golang.org/protobuf/types/descriptorpb"
 	"google.golang.org/protobuf/types/dynamicpb"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // NewStaticJSONConverter creates a converter for a known proto.Message type.
@@ -105,7 +106,7 @@ func DefaultJSONConverterFactory(namespace, messageName string) ProtoToJSONConve
 }
 
 // NewRegistryConverterFactory creates a converter factory that looks up types from the registry.
-// It first checks system types, then uses the provided lookup function for dynamic types.
+// It first checks system types, then well-known types, then uses the provided lookup function for dynamic types.
 // The lookup function should return the FileDescriptorProto for a given namespace/message.
 func NewRegistryConverterFactory(lookup ProtoLookupFunc) JSONConverterFactory {
 	// Cache converters to avoid repeated lookups
@@ -116,6 +117,20 @@ func NewRegistryConverterFactory(lookup ProtoLookupFunc) JSONConverterFactory {
 		if namespace == "collector" {
 			if conv := SystemTypeConverters[messageName]; conv != nil {
 				return conv
+			}
+		}
+
+		// Check well-known types (google.protobuf.*)
+		if namespace == "google.protobuf" {
+			switch messageName {
+			case "Struct":
+				// Use structpb.Struct for google.protobuf.Struct
+				return NewStaticJSONConverter(&structpb.Struct{})
+			case "Value", "ListValue", "NullValue", "NumberValue", "StringValue", "BoolValue":
+				// These are nested types within Struct, not used as top-level collection message types.
+				// Collections use "Struct" as the message type, which already handles these nested types.
+				// Returning nil triggers fallback behavior (use proto_data if valid JSON, otherwise "{}").
+				return nil
 			}
 		}
 
