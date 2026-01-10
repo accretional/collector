@@ -179,6 +179,11 @@ func (tr *TypeRegistry) RegisterFileDescriptor(ctx context.Context, namespace st
 
 // ValidateMessageType checks if a message type is registered
 func (tr *TypeRegistry) ValidateMessageType(ctx context.Context, namespace, messageName string) error {
+	// Skip validation for well-known types (google.protobuf.*)
+	if namespace == "google.protobuf" {
+		return nil
+	}
+
 	typeID := fmt.Sprintf("%s/%s", namespace, messageName)
 	_, err := tr.GetMessageType(ctx, namespace, messageName)
 	if err != nil {
@@ -195,6 +200,11 @@ func (tr *TypeRegistry) ValidateCollectionMessageType(ctx context.Context, coll 
 
 	if coll.MessageType == nil {
 		// Collections without a message type are allowed (untyped collections)
+		return nil
+	}
+
+	// Skip validation for well-known types (google.protobuf.*)
+	if coll.MessageType.Namespace == "google.protobuf" {
 		return nil
 	}
 

@@ -72,7 +72,7 @@ func (s *CollectionRepoService) CreateCollection(ctx context.Context, collection
 	}
 
 	return &pb.CreateCollectionResponse{
-		Status:       &pb.Status{Code: 200, Message: "OK"},
+		Status:       &pb.Status{Code: pb.Status_OK, Message: "OK"},
 		CollectionId: id,
 	}, nil
 }
@@ -150,7 +150,7 @@ func (s *CollectionRepoService) Discover(ctx context.Context, req *pb.DiscoverRe
 	}
 
 	return &pb.DiscoverResponse{
-		Status:        &pb.Status{Code: 200, Message: "OK"},
+		Status:        &pb.Status{Code: pb.Status_OK, Message: "OK"},
 		Collections:   results,
 		NextPageToken: nextPageToken,
 	}, nil
@@ -164,7 +164,7 @@ func (s *CollectionRepoService) Route(ctx context.Context, req *pb.RouteRequest)
 	// Validate input
 	if req.Collection == nil {
 		return &pb.RouteResponse{
-			Status: &pb.Status{Code: 400, Message: "collection is required"},
+			Status: &pb.Status{Code: pb.Status_INVALID_ARGUMENT, Message: "collection is required"},
 		}, nil
 	}
 
@@ -173,7 +173,7 @@ func (s *CollectionRepoService) Route(ctx context.Context, req *pb.RouteRequest)
 	coll, exists := s.collections[id]
 	if !exists {
 		return &pb.RouteResponse{
-			Status: &pb.Status{Code: 404, Message: fmt.Sprintf("collection %s not found", id)},
+			Status: &pb.Status{Code: pb.Status_NOT_FOUND, Message: fmt.Sprintf("collection %s not found", id)},
 		}, nil
 	}
 
@@ -185,7 +185,7 @@ func (s *CollectionRepoService) Route(ctx context.Context, req *pb.RouteRequest)
 	}
 
 	return &pb.RouteResponse{
-		Status:         &pb.Status{Code: 200, Message: "OK"},
+		Status:         &pb.Status{Code: pb.Status_OK, Message: "OK"},
 		ServerEndpoint: endpoint,
 		Collection:     coll,
 	}, nil
@@ -232,7 +232,7 @@ func (s *CollectionRepoService) SearchCollections(ctx context.Context, req *pb.S
 	// Return empty results with metadata about what would be searched
 	return &pb.SearchCollectionsResponse{
 		Status: &pb.Status{
-			Code:    200,
+			Code:    pb.Status_OK,
 			Message: fmt.Sprintf("Would search %d collections: %s", len(collectionsToSearch), strings.Join(collectionIds, ", ")),
 		},
 		Results:      []*pb.SearchCollectionsResponse_CollectionResult{},
