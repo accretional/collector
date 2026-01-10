@@ -51,6 +51,7 @@ func (l *AuditLogger) Log(ctx context.Context, event *pb.AuditEvent) error {
 		ProtoData: protoData,
 		Metadata: &pb.Metadata{
 			CreatedAt: event.Timestamp,
+			UpdatedAt: event.Timestamp, // Set UpdatedAt to avoid nil pointer dereference
 			Labels: map[string]string{
 				"operation": event.Operation,
 				"namespace": event.Namespace,
@@ -96,9 +97,9 @@ func (l *AuditLogger) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 		// But request parsing depends on the specific message type.
 		// For now, we log the method name as operation.
 
-		status := &pb.Status{Code: 200, Message: "OK"}
+		status := &pb.Status{Code: pb.Status_OK, Message: "OK"}
 		if err != nil {
-			status.Code = 500 // Map gRPC code?
+			status.Code = pb.Status_INTERNAL
 			status.Message = err.Error()
 		}
 

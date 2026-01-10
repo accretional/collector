@@ -306,7 +306,7 @@ func New(config Config) (*Server, error) {
 	s.log.Info("Registered CollectionRepo")
 
 	// ========================================================================
-	// 5. Setup Listener (but don't start serving yet)
+	// 4. Setup Listener and Address (needed for dispatcher)
 	// ========================================================================
 
 	lis, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", config.Port))
@@ -315,15 +315,44 @@ func New(config Config) (*Server, error) {
 	}
 	s.listener = lis
 
-	// Start server in background so we can connect to it for dispatcher setup
+	actualAddr := lis.Addr().String()
+	s.log.Info("Server address", "address", actualAddr)
+
+	// ========================================================================
+	// 5. Create Dispatcher with Stub Validator (before starting server)
+	// ========================================================================
+	// We need to register the dispatcher service before starting the server,
+	// but the dispatcher needs a loopback connection. So we create it with
+	// a stub validator first, then update it after the server starts.
+
+	// Create a stub validator that will be replaced after server starts
+	stubValidator := registry.NewGRPCRegistryValidator(&grpcRegistryClientValidator{client: nil})
+
+	// Create dispatcher with stub validator (will be updated after server starts)
+	dispatcher := dispatch.NewDispatcherWithRegistry(
+		config.CollectorID,
+		actualAddr,
+		[]string{config.Namespace},
+		stubValidator,
+		s.systemCollections.Connections,
+	)
+	s.dispatcher = dispatcher
+
+	// Register Dispatcher service BEFORE starting the server
+	pb.RegisterCollectiveDispatcherServer(grpcServer, dispatcher)
+	s.log.Info("Registered CollectiveDispatcher service")
+
+	// ========================================================================
+	// 6. Start Server
+	// ========================================================================
+
+	// Start server in background
 	go grpcServer.Serve(lis)
 	time.Sleep(100 * time.Millisecond) // Let server start
-
-	actualAddr := lis.Addr().String()
 	s.log.Info("Server started", "address", actualAddr)
 
 	// ========================================================================
-	// 6. Setup Dispatcher with gRPC-based Registry Validation
+	// 7. Setup Loopback Connection and Update Dispatcher Validator
 	// ========================================================================
 
 	// Create loopback gRPC connection
@@ -340,20 +369,9 @@ func New(config Config) (*Server, error) {
 	grpcValidator := &grpcRegistryClientValidator{client: registryClient}
 	validator := registry.NewGRPCRegistryValidator(grpcValidator)
 
-	// Create dispatcher with gRPC-based validation
-	dispatcher := dispatch.NewDispatcherWithRegistry(
-		config.CollectorID,
-		actualAddr,
-		[]string{config.Namespace},
-		validator,
-		s.systemCollections.Connections,
-	)
-	s.dispatcher = dispatcher
-	s.log.Info("Dispatcher created with gRPC-based registry validation")
-
-	// Register Dispatcher service
-	pb.RegisterCollectiveDispatcherServer(grpcServer, dispatcher)
-	s.log.Info("Registered CollectiveDispatcher service")
+	// Update dispatcher with real validator
+	dispatcher.SetRegistryValidator(validator)
+	s.log.Info("Dispatcher validator updated with gRPC-based registry validation")
 
 	// Recover connections from previous session
 	if err := dispatcher.GetConnectionManager().RecoverFromRestart(ctx); err != nil {
@@ -476,6 +494,12 @@ type grpcRegistryClientValidator struct {
 
 // ValidateServiceMethod validates by calling the Registry via gRPC
 func (v *grpcRegistryClientValidator) ValidateServiceMethod(ctx context.Context, namespace, serviceName, methodName string) error {
+	// If client is nil (stub validator), skip validation
+	// This allows the dispatcher to be registered before the server starts
+	if v.client == nil {
+		return nil
+	}
+
 	// Create a minimal service descriptor
 	serviceDesc := &pb.RegisterServiceRequest{
 		Namespace: namespace,
