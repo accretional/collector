@@ -33,6 +33,12 @@ func (s *RegistryServer) ValidationInterceptor(namespace string) grpc.UnaryServe
 		}
 		serviceName := serviceParts[len(serviceParts)-1]
 
+		// Skip validation for CollectorRegistry - it's a system service that manages the registry itself
+		// and doesn't need to be registered in the namespace registry
+		if serviceName == "CollectorRegistry" {
+			return handler(ctx, req)
+		}
+
 		// Validate the method
 		resp, err := s.ValidateMethod(ctx, &collector.ValidateMethodRequest{
 			Namespace:   namespace,
@@ -71,6 +77,12 @@ func (s *RegistryServer) StreamValidationInterceptor(namespace string) grpc.Stre
 			return handler(srv, ss)
 		}
 		serviceName := serviceParts[len(serviceParts)-1]
+
+		// Skip validation for CollectorRegistry - it's a system service that manages the registry itself
+		// and doesn't need to be registered in the namespace registry
+		if serviceName == "CollectorRegistry" {
+			return handler(srv, ss)
+		}
 
 		// Validate the method
 		resp, err := s.ValidateMethod(ss.Context(), &collector.ValidateMethodRequest{
