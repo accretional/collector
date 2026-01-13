@@ -62,6 +62,7 @@ func (l *SystemLogger) writeLog(logEntry *pb.SystemLog) {
 		ProtoData: protoData,
 		Metadata: &pb.Metadata{
 			CreatedAt: logEntry.Timestamp,
+			UpdatedAt: logEntry.Timestamp,
 			Labels: map[string]string{
 				"level":     logEntry.Level.String(),
 				"component": logEntry.Component,

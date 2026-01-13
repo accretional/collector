@@ -10,6 +10,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"time"
 
 	pb "github.com/accretional/collector/gen/collector"
 	"github.com/accretional/collector/pkg/collection"
@@ -171,6 +172,25 @@ func (s *Store) SetJSONConverter(conv collection.ProtoToJSONConverter) {
 }
 
 func (s *Store) CreateRecord(ctx context.Context, r *pb.CollectionRecord) error {
+	// Handle nil Metadata
+	if r.Metadata == nil {
+		r.Metadata = &pb.Metadata{}
+	}
+
+	// Handle nil timestamps - default to current time
+	now := time.Now().Unix()
+	var createdAt, updatedAt int64
+	if r.Metadata.CreatedAt != nil {
+		createdAt = r.Metadata.CreatedAt.Seconds
+	} else {
+		createdAt = now
+	}
+	if r.Metadata.UpdatedAt != nil {
+		updatedAt = r.Metadata.UpdatedAt.Seconds
+	} else {
+		updatedAt = now
+	}
+
 	labelsJSON, _ := json.Marshal(r.Metadata.Labels)
 
 	// Determine JSON representation for the jsontext column
@@ -210,8 +230,8 @@ func (s *Store) CreateRecord(ctx context.Context, r *pb.CollectionRecord) error 
 		r.Id,
 		r.ProtoData,
 		r.DataUri,
-		r.Metadata.CreatedAt.Seconds,
-		r.Metadata.UpdatedAt.Seconds,
+		createdAt,
+		updatedAt,
 		string(labelsJSON),
 	}
 
