@@ -23,7 +23,6 @@ import (
 	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/descriptorpb"
 )
 
@@ -149,7 +148,7 @@ func New(config Config) (*Server, error) {
 
 	// Registry protos collection
 	protosDBPath := filepath.Join(registryPath, "protos.db")
-	protosStore, err := sqlite.NewStore(protosDBPath, collection.Options{EnableJSON: true})
+	protosStore, err := sqlite.NewStore(protosDBPath, &pb.SearchConfig{EnableJson: true})
 	if err != nil {
 		return nil, fmt.Errorf("init protos store: %w", err)
 	}
@@ -174,7 +173,7 @@ func New(config Config) (*Server, error) {
 
 	// Registry services collection
 	servicesDBPath := filepath.Join(registryPath, "services.db")
-	servicesStore, err := sqlite.NewStore(servicesDBPath, collection.Options{EnableJSON: true})
+	servicesStore, err := sqlite.NewStore(servicesDBPath, &pb.SearchConfig{EnableJson: true})
 	if err != nil {
 		return nil, fmt.Errorf("init services store: %w", err)
 	}
@@ -239,15 +238,15 @@ func New(config Config) (*Server, error) {
 	}
 
 	// Create repo with PathConfig and registry store
-	dummyStore, err := sqlite.NewStore(":memory:", collection.Options{EnableJSON: true})
+	dummyStore, err := sqlite.NewStore(":memory:", &pb.SearchConfig{EnableJson: true})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create dummy store: %w", err)
 	}
 	s.stores = append(s.stores, dummyStore)
 
 	// Create store factory wrapper
-	storeFactory := func(path string, opts collection.Options) (collection.Store, error) {
-		return sqlite.NewStore(path, opts)
+	storeFactory := func(path string, searchConfig *pb.SearchConfig) (collection.Store, error) {
+		return sqlite.NewStore(path, searchConfig)
 	}
 
 	collectionRepo := collection.NewCollectionRepo(dummyStore, pathConfig, registryStore, storeFactory)
@@ -306,7 +305,7 @@ func New(config Config) (*Server, error) {
 	s.log.Info("Registered CollectionRepo")
 
 	// ========================================================================
-	// 5. Setup Listener (but don't start serving yet)
+	// 5. Setup Listener and Dispatcher
 	// ========================================================================
 
 	lis, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", config.Port))
@@ -315,32 +314,11 @@ func New(config Config) (*Server, error) {
 	}
 	s.listener = lis
 
-	// Start server in background so we can connect to it for dispatcher setup
-	go grpcServer.Serve(lis)
-	time.Sleep(100 * time.Millisecond) // Let server start
-
 	actualAddr := lis.Addr().String()
-	s.log.Info("Server started", "address", actualAddr)
 
-	// ========================================================================
-	// 6. Setup Dispatcher with gRPC-based Registry Validation
-	// ========================================================================
+	// Create dispatcher with direct registry validation
+	validator := registry.NewRegistryValidator(registryServer)
 
-	// Create loopback gRPC connection
-	loopbackConn, err := grpc.NewClient(actualAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create loopback connection: %w", err)
-	}
-	s.loopbackConn = loopbackConn
-
-	// Create Registry client for validation via gRPC
-	registryClient := pb.NewCollectorRegistryClient(loopbackConn)
-
-	// Wrap the registry client to implement the ServiceMethodValidator interface
-	grpcValidator := &grpcRegistryClientValidator{client: registryClient}
-	validator := registry.NewGRPCRegistryValidator(grpcValidator)
-
-	// Create dispatcher with gRPC-based validation
 	dispatcher := dispatch.NewDispatcherWithRegistry(
 		config.CollectorID,
 		actualAddr,
@@ -349,11 +327,24 @@ func New(config Config) (*Server, error) {
 		s.systemCollections.Connections,
 	)
 	s.dispatcher = dispatcher
-	s.log.Info("Dispatcher created with gRPC-based registry validation")
+	s.log.Info("Dispatcher created with registry validation")
 
-	// Register Dispatcher service
+	// Register Dispatcher service before starting the server
 	pb.RegisterCollectiveDispatcherServer(grpcServer, dispatcher)
 	s.log.Info("Registered CollectiveDispatcher service")
+
+	// Start the server
+	go grpcServer.Serve(lis)
+	time.Sleep(100 * time.Millisecond)
+
+	s.log.Info("Server started", "address", actualAddr)
+
+	// Create loopback connection for any future needs
+	loopbackConn, err := grpc.NewClient(actualAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create loopback connection: %w", err)
+	}
+	s.loopbackConn = loopbackConn
 
 	// Recover connections from previous session
 	if err := dispatcher.GetConnectionManager().RecoverFromRestart(ctx); err != nil {
@@ -469,32 +460,3 @@ func (s *Server) Namespace() string {
 	return s.config.Namespace
 }
 
-// grpcRegistryClientValidator wraps a gRPC Registry client to implement ServiceMethodValidator
-type grpcRegistryClientValidator struct {
-	client pb.CollectorRegistryClient
-}
-
-// ValidateServiceMethod validates by calling the Registry via gRPC
-func (v *grpcRegistryClientValidator) ValidateServiceMethod(ctx context.Context, namespace, serviceName, methodName string) error {
-	// Create a minimal service descriptor
-	serviceDesc := &pb.RegisterServiceRequest{
-		Namespace: namespace,
-		ServiceDescriptor: &descriptorpb.ServiceDescriptorProto{
-			Name: proto.String(serviceName),
-		},
-	}
-
-	// Try to register - if it exists, we get AlreadyExists
-	_, err := v.client.RegisterService(ctx, serviceDesc)
-	if err != nil {
-		// AlreadyExists means the service is registered - validation passes!
-		if grpc.Code(err).String() == "AlreadyExists" {
-			return nil
-		}
-		// Other errors mean service not found or registry issue
-		return fmt.Errorf("service %s.%s not registered: %w", serviceName, methodName, err)
-	}
-
-	// If registration succeeded, the service wasn't registered before
-	return fmt.Errorf("service %s.%s was not registered in namespace %s", serviceName, methodName, namespace)
-}

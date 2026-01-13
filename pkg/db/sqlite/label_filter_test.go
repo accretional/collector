@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/accretional/collector/gen/collector"
+	pb "github.com/accretional/collector/gen/collector"
 	"github.com/accretional/collector/pkg/collection"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -20,7 +21,7 @@ func TestSearch_LabelFilters(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	dbPath := filepath.Join(tmpDir, "test.db")
-	store, err := NewStore(dbPath, collection.Options{EnableJSON: true})
+	store, err := NewStore(dbPath, &pb.SearchConfig{EnableJson: true})
 	if err != nil {
 		t.Fatal(err)
 	}

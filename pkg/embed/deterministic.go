@@ -1,4 +1,4 @@
-package collection
+package embed
 
 import (
 	"context"
@@ -7,18 +7,19 @@ import (
 	"strings"
 )
 
-// A lightweight, dependency-free embedder that produces stable,
+// DeterministicEmbedder is a lightweight, dependency-free embedder that produces stable,
 // fixed-dimension vectors by hashing tokens. Intended for tests and local runs.
 type DeterministicEmbedder struct {
 	dim  int
 	seed uint32
 }
 
+// NewDeterministicEmbedder creates a new DeterministicEmbedder with the given dimension and seed.
 func NewDeterministicEmbedder(dim int, seed uint32) *DeterministicEmbedder {
 	return &DeterministicEmbedder{dim: dim, seed: seed}
 }
 
-// Splits text on whitespace and hashes tokens into the vector space.
+// Embed splits text on whitespace and hashes tokens into the vector space.
 func (d *DeterministicEmbedder) Embed(_ context.Context, text string) ([]float32, error) {
 	if d.dim <= 0 {
 		return nil, fmt.Errorf("invalid dimension: %d", d.dim)

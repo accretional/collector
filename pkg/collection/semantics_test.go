@@ -17,7 +17,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-func setupTestCollectionWithVector(t *testing.T) (*collection.Collection, collection.Embedder, func()) {
+func setupTestCollectionWithVector(t *testing.T) (*collection.Collection, func()) {
 	t.Helper()
 
 	tempDir := t.TempDir()
@@ -28,17 +28,15 @@ func setupTestCollectionWithVector(t *testing.T) (*collection.Collection, collec
 
 	dbPath := tempDir + "/test.db"
 	const dims = 16
-	embedder := collection.NewDeterministicEmbedder(dims, 1)
 
 	store, err := db.NewStore(context.Background(), db.Config{
 		Type:       db.DBTypeSQLite,
 		SQLitePath: dbPath,
-		Options: collection.Options{
-			EnableFTS:        true,
-			EnableJSON:       true,
+		SearchConfig: &pb.SearchConfig{
+			EnableFts:        true,
+			EnableJson:       true,
 			EnableVector:     true,
-			VectorDimensions: dims,
-			Embedder:         embedder,
+			VectorDimensions: int32(dims),
 		},
 	})
 	if err != nil {
@@ -68,18 +66,13 @@ func setupTestCollectionWithVector(t *testing.T) (*collection.Collection, collec
 		store.Close()
 	}
 
-	return coll, embedder, cleanup
+	return coll, cleanup
 }
 
 func TestSemanticEngine_FindSimilar_Basic(t *testing.T) {
-	coll, embedder, cleanup := setupTestCollectionWithVector(t)
+	coll, cleanup := setupTestCollectionWithVector(t)
 	defer cleanup()
 	ctx := context.Background()
-
-	engine := &collection.SemanticEngine{
-		Collection: coll,
-		Embedder:   embedder,
-	}
 
 	now := timestamppb.New(time.Now())
 	records := []*pb.CollectionRecord{
@@ -115,9 +108,12 @@ func TestSemanticEngine_FindSimilar_Basic(t *testing.T) {
 		}
 	}
 
-	results, err := engine.FindSimilar(ctx, "artificial intelligence", 10)
+	results, err := coll.Search(ctx, &collection.SearchQuery{
+		SemanticText: "artificial intelligence",
+		Limit:        10,
+	})
 	if err != nil {
-		t.Fatalf("FindSimilar failed: %v", err)
+		t.Fatalf("Search failed: %v", err)
 	}
 
 	if len(results) == 0 {
@@ -164,14 +160,9 @@ func TestSemanticEngine_FindSimilar_Basic(t *testing.T) {
 }
 
 func TestSemanticEngine_FindSimilar_Ordering(t *testing.T) {
-	coll, embedder, cleanup := setupTestCollectionWithVector(t)
+	coll, cleanup := setupTestCollectionWithVector(t)
 	defer cleanup()
 	ctx := context.Background()
-
-	engine := &collection.SemanticEngine{
-		Collection: coll,
-		Embedder:   embedder,
-	}
 
 	// Create records with varying similarity to query
 	now := timestamppb.New(time.Now())
@@ -208,9 +199,12 @@ func TestSemanticEngine_FindSimilar_Ordering(t *testing.T) {
 		}
 	}
 
-	results, err := engine.FindSimilar(ctx, "python programming", 10)
+	results, err := coll.Search(ctx, &collection.SearchQuery{
+		SemanticText: "python programming",
+		Limit:        10,
+	})
 	if err != nil {
-		t.Fatalf("FindSimilar failed: %v", err)
+		t.Fatalf("Search failed: %v", err)
 	}
 
 	if len(results) < 2 {
@@ -230,14 +224,9 @@ func TestSemanticEngine_FindSimilar_Ordering(t *testing.T) {
 }
 
 func TestSemanticEngine_FindSimilar_Limit(t *testing.T) {
-	coll, embedder, cleanup := setupTestCollectionWithVector(t)
+	coll, cleanup := setupTestCollectionWithVector(t)
 	defer cleanup()
 	ctx := context.Background()
-
-	engine := &collection.SemanticEngine{
-		Collection: coll,
-		Embedder:   embedder,
-	}
 
 	now := timestamppb.New(time.Now())
 	for i := 0; i < 10; i++ {
@@ -254,9 +243,12 @@ func TestSemanticEngine_FindSimilar_Limit(t *testing.T) {
 		}
 	}
 
-	results, err := engine.FindSimilar(ctx, "test document", 3)
+	results, err := coll.Search(ctx, &collection.SearchQuery{
+		SemanticText: "test document",
+		Limit:        3,
+	})
 	if err != nil {
-		t.Fatalf("FindSimilar failed: %v", err)
+		t.Fatalf("Search failed: %v", err)
 	}
 
 	if len(results) > 3 {
@@ -265,18 +257,16 @@ func TestSemanticEngine_FindSimilar_Limit(t *testing.T) {
 }
 
 func TestSemanticEngine_FindSimilar_NoResults(t *testing.T) {
-	coll, embedder, cleanup := setupTestCollectionWithVector(t)
+	coll, cleanup := setupTestCollectionWithVector(t)
 	defer cleanup()
 	ctx := context.Background()
 
-	engine := &collection.SemanticEngine{
-		Collection: coll,
-		Embedder:   embedder,
-	}
-
-	results, err := engine.FindSimilar(ctx, "any query", 10)
+	results, err := coll.Search(ctx, &collection.SearchQuery{
+		SemanticText: "any query",
+		Limit:        10,
+	})
 	if err != nil {
-		t.Fatalf("FindSimilar failed: %v", err)
+		t.Fatalf("Search failed: %v", err)
 	}
 
 	if len(results) != 0 {
@@ -284,50 +274,10 @@ func TestSemanticEngine_FindSimilar_NoResults(t *testing.T) {
 	}
 }
 
-func TestSemanticEngine_FindSimilar_EmbedderError(t *testing.T) {
-	coll, _, cleanup := setupTestCollectionWithVector(t)
-	defer cleanup()
-	ctx := context.Background()
-
-	errorEmbedder := &errorEmbedder{}
-
-	engine := &collection.SemanticEngine{
-		Collection: coll,
-		Embedder:   errorEmbedder,
-	}
-
-	results, err := engine.FindSimilar(ctx, "test query", 10)
-	if err == nil {
-		t.Error("expected error from embedder, got nil")
-	}
-	if results != nil {
-		t.Errorf("expected nil results on error, got %v", results)
-	}
-}
-
-type errorEmbedder struct{}
-
-func (e *errorEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
-	return nil, &embedderError{msg: "test embedder error"}
-}
-
-type embedderError struct {
-	msg string
-}
-
-func (e *embedderError) Error() string {
-	return e.msg
-}
-
 func TestSemanticEngine_FindSimilar_WithFilters(t *testing.T) {
-	coll, embedder, cleanup := setupTestCollectionWithVector(t)
+	coll, cleanup := setupTestCollectionWithVector(t)
 	defer cleanup()
 	ctx := context.Background()
-
-	engine := &collection.SemanticEngine{
-		Collection: coll,
-		Embedder:   embedder,
-	}
 
 	now := timestamppb.New(time.Now())
 	records := []*pb.CollectionRecord{
@@ -363,22 +313,20 @@ func TestSemanticEngine_FindSimilar_WithFilters(t *testing.T) {
 		}
 	}
 
-	results, err := engine.FindSimilar(ctx, "learning algorithms", 10)
+	results, err := coll.Search(ctx, &collection.SearchQuery{
+		SemanticText: "learning algorithms",
+		Limit:        10,
+	})
 	if err != nil {
-		t.Fatalf("FindSimilar failed: %v", err)
+		t.Fatalf("Search failed: %v", err)
 	}
 
 	if len(results) == 0 {
 		t.Fatal("expected at least one result")
 	}
 
-	queryVec, err := embedder.Embed(ctx, "learning algorithms")
-	if err != nil {
-		t.Fatalf("Embed failed: %v", err)
-	}
-
 	filteredResults, err := coll.Search(ctx, &collection.SearchQuery{
-		Vector: queryVec,
+		SemanticText: "learning algorithms",
 		Filters: map[string]collection.Filter{
 			"category": {Operator: collection.OpEquals, Value: "technology"},
 		},
@@ -400,7 +348,7 @@ func TestSemanticEngine_FindSimilar_WithFilters(t *testing.T) {
 }
 
 func TestSemanticEngine_FindSimilar_SimilarityThreshold(t *testing.T) {
-	coll, embedder, cleanup := setupTestCollectionWithVector(t)
+	coll, cleanup := setupTestCollectionWithVector(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -430,14 +378,9 @@ func TestSemanticEngine_FindSimilar_SimilarityThreshold(t *testing.T) {
 		}
 	}
 
-	queryVec, err := embedder.Embed(ctx, "artificial intelligence")
-	if err != nil {
-		t.Fatalf("Embed failed: %v", err)
-	}
-
 	allResults, err := coll.Search(ctx, &collection.SearchQuery{
-		Vector: queryVec,
-		Limit:  10,
+		SemanticText: "artificial intelligence",
+		Limit:        10,
 	})
 	if err != nil {
 		t.Fatalf("Search failed: %v", err)
@@ -456,7 +399,7 @@ func TestSemanticEngine_FindSimilar_SimilarityThreshold(t *testing.T) {
 		threshold = 0.99
 	}
 	thresholdResults, err := coll.Search(ctx, &collection.SearchQuery{
-		Vector:              queryVec,
+		SemanticText:        "artificial intelligence",
 		SimilarityThreshold: threshold,
 		Limit:               10,
 	})
@@ -477,14 +420,9 @@ func TestSemanticEngine_FindSimilar_SimilarityThreshold(t *testing.T) {
 }
 
 func TestSemanticEngine_FindSimilar_UpdateMaintainsVectors(t *testing.T) {
-	coll, embedder, cleanup := setupTestCollectionWithVector(t)
+	coll, cleanup := setupTestCollectionWithVector(t)
 	defer cleanup()
 	ctx := context.Background()
-
-	engine := &collection.SemanticEngine{
-		Collection: coll,
-		Embedder:   embedder,
-	}
 
 	now := timestamppb.New(time.Now())
 	record := &pb.CollectionRecord{
@@ -500,9 +438,12 @@ func TestSemanticEngine_FindSimilar_UpdateMaintainsVectors(t *testing.T) {
 		t.Fatalf("failed to create record: %v", err)
 	}
 
-	results, err := engine.FindSimilar(ctx, "machine learning", 10)
+	results, err := coll.Search(ctx, &collection.SearchQuery{
+		SemanticText: "machine learning",
+		Limit:        10,
+	})
 	if err != nil {
-		t.Fatalf("FindSimilar failed: %v", err)
+		t.Fatalf("Search failed: %v", err)
 	}
 
 	if len(results) == 0 {
@@ -522,9 +463,12 @@ func TestSemanticEngine_FindSimilar_UpdateMaintainsVectors(t *testing.T) {
 		t.Fatalf("failed to update record: %v", err)
 	}
 
-	updatedResults, err := engine.FindSimilar(ctx, "cooking recipes", 10)
+	updatedResults, err := coll.Search(ctx, &collection.SearchQuery{
+		SemanticText: "cooking recipes",
+		Limit:        10,
+	})
 	if err != nil {
-		t.Fatalf("FindSimilar failed: %v", err)
+		t.Fatalf("Search failed: %v", err)
 	}
 
 	found := false
@@ -539,9 +483,12 @@ func TestSemanticEngine_FindSimilar_UpdateMaintainsVectors(t *testing.T) {
 		t.Error("expected to find updated record")
 	}
 
-	originalResults, err := engine.FindSimilar(ctx, "machine learning", 10)
+	originalResults, err := coll.Search(ctx, &collection.SearchQuery{
+		SemanticText: "machine learning",
+		Limit:        10,
+	})
 	if err != nil {
-		t.Fatalf("FindSimilar failed: %v", err)
+		t.Fatalf("Search failed: %v", err)
 	}
 
 	stillHighSimilarity := false
@@ -557,7 +504,7 @@ func TestSemanticEngine_FindSimilar_UpdateMaintainsVectors(t *testing.T) {
 }
 
 func TestSemanticEngine_VectorIndexPopulated(t *testing.T) {
-	coll, embedder, cleanup := setupTestCollectionWithVector(t)
+	coll, cleanup := setupTestCollectionWithVector(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -588,11 +535,8 @@ func TestSemanticEngine_VectorIndexPopulated(t *testing.T) {
 	}
 
 	results, err := coll.Search(ctx, &collection.SearchQuery{
-		Vector: func() []float32 {
-			v, _ := embedder.Embed(ctx, "alpha gamma")
-			return v
-		}(),
-		Limit: 10,
+		SemanticText: "alpha gamma",
+		Limit:        10,
 	})
 	if err != nil {
 		t.Fatalf("vector search: %v", err)

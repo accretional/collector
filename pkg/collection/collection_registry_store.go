@@ -24,7 +24,7 @@ func NewCollectionRegistryStore(collection *Collection) *CollectionRegistryStore
 
 // NewCollectionRegistryStoreFromStore creates a CollectionRegistryStore using the provided Store.
 // This is useful for testing where you want to use an in-memory store.
-// The store should have EnableJSON: true for search to work properly.
+// The store should have EnableJson: true for search to work properly.
 func NewCollectionRegistryStoreFromStore(store Store, fs FileSystem) (*CollectionRegistryStore, error) {
 	coll, err := NewCollection(
 		&pb.Collection{

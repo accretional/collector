@@ -121,8 +121,8 @@ store, err := db.NewStore(ctx, db.Config{
 	Type:       db.DBTypeSQLite,
     SQLitePath: "./data/users.db",
     Options: collection.Options{
-        EnableJSON: true,  // Enable JSONB indexing
-        EnableFTS:  true,  // Enable full-text search
+        EnableJson: true,  // Enable JSONB indexing
+        EnableFts:  true,  // Enable full-text search
     },
 })
 
@@ -476,7 +476,7 @@ Records are stored with a dual representation for efficient storage and searchin
 1. **`proto_data` (BLOB)**: Binary protobuf - the source of truth
 2. **`jsontext` (TEXT)**: JSON derived from proto_data for search indexing
 3. **`labels` (TEXT)**: JSON object for label-based filtering
-4. **FTS tokens**: For full-text search (when EnableFTS is true)
+4. **FTS tokens**: For full-text search (when EnableFts is true)
 
 ```sql
 CREATE TABLE records (
@@ -488,7 +488,7 @@ CREATE TABLE records (
     labels TEXT          -- JSON: {"key": "value", ...}
 );
 
--- Added when EnableJSON is true:
+-- Added when EnableJson is true:
 ALTER TABLE records ADD COLUMN jsontext TEXT;  -- JSON derived from proto_data
 ```
 
@@ -566,8 +566,8 @@ type Store interface {
 
 ```go
 options := collection.Options{
-    EnableJSON: true,   // Enable JSON indexing (adds jsontext column)
-    EnableFTS:  true,   // Enable full-text search
+    EnableJson: true,   // Enable JSON indexing (adds jsontext column)
+    EnableFts:  true,   // Enable full-text search
 }
 
 store, err := db.NewStore(ctx, db.Config{

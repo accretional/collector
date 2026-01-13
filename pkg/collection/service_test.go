@@ -19,9 +19,9 @@ func setupTestService(t *testing.T) (*collection.CollectionRepoService, func()) 
 	store, err := db.NewStore(context.Background(), db.Config{
 		Type:       db.DBTypeSQLite,
 		SQLitePath: ":memory:",
-		Options: collection.Options{
-			EnableFTS:  true,
-			EnableJSON: true,
+		SearchConfig: &pb.SearchConfig{
+			EnableFts:  true,
+			EnableJson: true,
 		},
 	})
 	if err != nil {
@@ -29,7 +29,7 @@ func setupTestService(t *testing.T) (*collection.CollectionRepoService, func()) 
 	}
 
 	// Create registry store using CollectionRegistryStore (same as production)
-	registryDBStore, err := sqlite.NewStore(":memory:", collection.Options{EnableJSON: true})
+	registryDBStore, err := sqlite.NewStore(":memory:", &pb.SearchConfig{EnableJson: true})
 	if err != nil {
 		t.Fatalf("failed to create registry db store: %v", err)
 	}

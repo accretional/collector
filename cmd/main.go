@@ -30,18 +30,9 @@ func run() error {
 	name := "tasks"
 
 	// 3. Initialize Metadata
-	proto := &pb.Collection{
-		Namespace: namespace,
-		Name:      name,
-		Metadata: &pb.Metadata{
-			Labels: map[string]string{"version": "2.0-refactor"},
-		},
-	}
-
-	// 4. Initialize Dependencies (The "Glue")
 
 	// Determine whether to enable vector support via env toggle.
-	vectorEnabled := os.Getenv("ENABLE_VECTOR") != ""
+	vectorEnabled := os.Getenv("ENABLE_VECTOR") == "true"
 	vectorDims := 128
 	if v := os.Getenv("VECTOR_DIMENSIONS"); v != "" {
 		if d, err := strconv.Atoi(v); err == nil {
@@ -50,6 +41,26 @@ func run() error {
 			return fmt.Errorf("invalid VECTOR_DIMENSIONS: %w", err)
 		}
 	}
+
+	searchConfig := &pb.SearchConfig{
+		EnableFts:        true,
+		EnableJson:       true,
+		EnableVector:     vectorEnabled,
+		VectorDimensions: int32(vectorDims),
+	}
+
+	proto := &pb.Collection{
+		Namespace: namespace,
+		Name:      name,
+		Metadata: &pb.Metadata{
+			Labels: map[string]string{"version": "2.0-refactor"},
+		},
+		CollectionConfig: &pb.CollectionConfig{
+			SearchConfig: searchConfig,
+		},
+	}
+
+	// 4. Initialize Dependencies (The "Glue")
 
 	// A. SQLite Store
 	dbPath, err := pathConfig.CollectionDBPath(namespace, name)
@@ -60,20 +71,10 @@ func run() error {
 		return fmt.Errorf("create db dir: %w", err)
 	}
 
-	storeOpts := collection.Options{
-		EnableFTS:        true,
-		EnableJSON:       true,
-		EnableVector:     vectorEnabled,
-		VectorDimensions: vectorDims,
-	}
-	if vectorEnabled {
-		storeOpts.Embedder = collection.NewDeterministicEmbedder(vectorDims, 1)
-	}
-
 	store, err := db.NewStore(ctx, db.Config{
-		Type:       db.DBTypeSQLite,
-		SQLitePath: dbPath,
-		Options:    storeOpts,
+		Type:         db.DBTypeSQLite,
+		SQLitePath:   dbPath,
+		SearchConfig: searchConfig,
 	})
 	if err != nil {
 		return fmt.Errorf("init store: %w", err)

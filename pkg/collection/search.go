@@ -6,15 +6,22 @@ import (
 
 // SearchQuery is the generic query structure passed to the Store.
 type SearchQuery struct {
-	FullText            string
-	Filters             map[string]Filter // Field path -> Filter
-	LabelFilters        map[string]string
-	Vector              []float32 // For vector similarity search
+	// Search modes
+	FullText     string // FTS search (exact text matching)
+	SemanticText string // Semantic search (embedding-based similarity)
+
+	// Filters
+	Filters      map[string]Filter // Field path -> Filter
+	LabelFilters map[string]string // Label key -> value
+
+	// Vector search options
 	SimilarityThreshold float32
-	Limit               int
-	Offset              int
-	OrderBy             string
-	Ascending           bool
+
+	// Pagination & sorting
+	Limit     int
+	Offset    int
+	OrderBy   string
+	Ascending bool
 }
 
 // SearchResult represents a search hit with relevance info.

@@ -61,9 +61,9 @@ func newTempStore(t *testing.T) collection.Store {
 	})
 
 	store, err := db.NewStore(context.Background(), db.Config{
-		Type:       db.DBTypeSQLite,
-		SQLitePath: f.Name(),
-		Options:    collection.Options{EnableJSON: true},
+		Type:         db.DBTypeSQLite,
+		SQLitePath:   f.Name(),
+		SearchConfig: &collector.SearchConfig{EnableJson: true},
 	})
 	if err != nil {
 		t.Fatalf("failed to create in-memory store: %v", err)

@@ -183,9 +183,9 @@ func (s *CollectionServer) Search(ctx context.Context, req *pb.SearchRequest) (*
 
 	query := &SearchQuery{
 		FullText:            req.FullText,
+		SemanticText:        req.SemanticText,
 		Filters:             make(map[string]Filter),
 		LabelFilters:        req.LabelFilters,
-		Vector:              req.Vector,
 		SimilarityThreshold: req.SimilarityThreshold,
 		Limit:               int(req.Limit),
 		Offset:              int(req.Offset),

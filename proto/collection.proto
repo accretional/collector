@@ -28,7 +28,7 @@ message CollectionDir {
 }
 
 // A record in the Collection table (the "inode")
-// proto_data contains binary serialized protobuf. When stored with EnableJSON,
+// proto_data contains binary serialized protobuf. When stored with EnableJson,
 // the Store derives a JSON representation and stores it in the jsontext column
 // for efficient searching via json_extract().
 message CollectionRecord {
@@ -55,6 +55,25 @@ message BackupPolicy {
   bool enabled = 3;               // Enable automatic cleanup (false = manual only)
 }
 
+// EmbedderType specifies which embedder implementation to use for vector search.
+enum EmbedderType {
+	EMBEDDER_UNSPECIFIED = 0;
+	EMBEDDER_DETERMINISTIC = 1;
+	// Future: EMBEDDER_OPENAI, EMBEDDER_COHERE, etc.
+}
+
+message SearchConfig {
+	bool enable_fts = 1;
+	bool enable_json = 2;
+	bool enable_vector = 3;
+	int32  vector_dimensions = 4;
+	EmbedderType embedder_type = 5;
+}
+
+message CollectionConfig {
+  SearchConfig search_config = 1;
+}
+
 // The Collection itself: table (inode) + optional filesystem
 message Collection {
   string namespace = 1;
@@ -71,4 +90,6 @@ message Collection {
   // When set and enabled=true, old backups are automatically cleaned up
   // after each new backup based on age and count rules.
   BackupPolicy backup_policy = 7;
+
+  CollectionConfig collection_config = 8;
 }

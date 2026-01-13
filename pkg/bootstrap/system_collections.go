@@ -101,9 +101,9 @@ func (sc *SystemCollections) bootstrapCollectionRegistry(ctx context.Context) er
 	}
 
 	// Create store
-	storeOpts := collection.Options{
-		EnableFTS:  true,
-		EnableJSON: true,
+	storeOpts := &pb.SearchConfig{
+		EnableFts:  true,
+		EnableJson: true,
 	}
 	store, err := sqlite.NewStore(dbPath, storeOpts)
 	if err != nil {
@@ -196,9 +196,9 @@ func (sc *SystemCollections) bootstrapTypeRegistry(ctx context.Context) error {
 		return fmt.Errorf("create db dir: %w", err)
 	}
 
-	storeOpts := collection.Options{
-		EnableFTS:  true,
-		EnableJSON: true,
+	storeOpts := &pb.SearchConfig{
+		EnableFts:  true,
+		EnableJson: true,
 	}
 	store, err := sqlite.NewStore(dbPath, storeOpts)
 	if err != nil {
@@ -274,9 +274,9 @@ func (sc *SystemCollections) bootstrapConnections(ctx context.Context) error {
 		return fmt.Errorf("create db dir: %w", err)
 	}
 
-	storeOpts := collection.Options{
-		EnableFTS:  true,
-		EnableJSON: true,
+	storeOpts := &pb.SearchConfig{
+		EnableFts:  true,
+		EnableJson: true,
 	}
 	store, err := sqlite.NewStore(dbPath, storeOpts)
 	if err != nil {
@@ -345,9 +345,9 @@ func (sc *SystemCollections) bootstrapAudit(ctx context.Context) error {
 		return fmt.Errorf("create db dir: %w", err)
 	}
 
-	storeOpts := collection.Options{
-		EnableFTS:  true,
-		EnableJSON: true,
+	storeOpts := &pb.SearchConfig{
+		EnableFts:  true,
+		EnableJson: true,
 	}
 	store, err := sqlite.NewStore(dbPath, storeOpts)
 	if err != nil {
@@ -417,9 +417,9 @@ func (sc *SystemCollections) bootstrapLogs(ctx context.Context) error {
 		return fmt.Errorf("create db dir: %w", err)
 	}
 
-	storeOpts := collection.Options{
-		EnableFTS:  true,
-		EnableJSON: true,
+	storeOpts := &pb.SearchConfig{
+		EnableFts:  true,
+		EnableJson: true,
 	}
 	store, err := sqlite.NewStore(dbPath, storeOpts)
 	if err != nil {

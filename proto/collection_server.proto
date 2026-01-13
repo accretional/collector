@@ -92,7 +92,8 @@ message SearchRequest {
   string full_text = 3;
   map<string, Filter> filters = 4;
   map<string, string> label_filters = 5;
-  repeated float vector = 6;
+  repeated float vector = 6;  // Deprecated: use semantic_text instead
+  string semantic_text = 12;   // Text to embed and search by meaning
   float similarity_threshold = 7;
   int32 limit = 8;
   int32 offset = 9;

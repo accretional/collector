@@ -10,9 +10,11 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"time"
 
 	pb "github.com/accretional/collector/gen/collector"
 	"github.com/accretional/collector/pkg/collection"
+	"github.com/accretional/collector/pkg/embed"
 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -22,8 +24,8 @@ import (
 type Store struct {
 	db            *sql.DB
 	path          string
-	options       collection.Options
-	embedder      collection.Embedder
+	searchConfig  *pb.SearchConfig
+	embedder      embed.Embedder
 	ftsAvailable  bool
 	mu            sync.RWMutex
 	jsonConverter collection.ProtoToJSONConverter // Converts binary proto to JSON for jsontext column
@@ -33,12 +35,15 @@ type execContext interface {
 	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
 }
 
-func NewStore(path string, opts collection.Options) (*Store, error) {
-	if opts.EnableVector && opts.Embedder == nil {
-		return nil, fmt.Errorf("embedder required when EnableVector is true")
+func NewStore(path string, searchCfg *pb.SearchConfig) (*Store, error) {
+	searchConfig := collection.NormalizeSearchConfig(searchCfg)
+	if err := collection.ValidateSearchConfig(searchConfig); err != nil {
+		return nil, fmt.Errorf("invalid search config: %w", err)
 	}
-	if opts.EnableVector && opts.VectorDimensions <= 0 {
-		return nil, fmt.Errorf("VectorDimensions must be > 0 when EnableVector is true")
+
+	embedder, err := embed.NewEmbedder(searchConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create embedder: %w", err)
 	}
 
 	dsn := fmt.Sprintf("file:%s?_journal_mode=WAL&_busy_timeout=10000", path)
@@ -47,7 +52,7 @@ func NewStore(path string, opts collection.Options) (*Store, error) {
 		return nil, fmt.Errorf("failed to open db: %w", err)
 	}
 
-	if opts.EnableVector {
+	if searchConfig.EnableVector {
 		sqlite_vec.Auto()
 	}
 
@@ -67,7 +72,7 @@ func NewStore(path string, opts collection.Options) (*Store, error) {
 		return nil, fmt.Errorf("default schema failed: %w", err)
 	}
 
-	if opts.EnableJSON {
+	if searchConfig.EnableJson {
 		if _, err := db.Exec(collection.JSONSchema); err != nil {
 			// Ignore "duplicate column" errors (column already exists from previous init)
 			if !strings.Contains(err.Error(), "duplicate column") {
@@ -78,12 +83,12 @@ func NewStore(path string, opts collection.Options) (*Store, error) {
 		}
 	}
 
-	if opts.EnableVector {
+	if searchConfig.EnableVector {
 		if _, err := db.Exec(collection.VectorSchema); err != nil {
 			log.Println("VectorSchema already exists")
 		}
 
-		stmt := fmt.Sprintf(`CREATE VIRTUAL TABLE IF NOT EXISTS records_vec USING vec0(vector FLOAT[%d]);`, opts.VectorDimensions)
+		stmt := fmt.Sprintf(`CREATE VIRTUAL TABLE IF NOT EXISTS records_vec USING vec0(vector FLOAT[%d]);`, searchConfig.VectorDimensions)
 		if _, err := db.Exec(stmt); err != nil {
 			db.Close()
 			return nil, fmt.Errorf("create vec0 table: %w", err)
@@ -91,7 +96,7 @@ func NewStore(path string, opts collection.Options) (*Store, error) {
 	}
 
 	ftsAvailable := false
-	if opts.EnableFTS {
+	if searchConfig.EnableFts {
 		// Check if FTS5 is available by trying to create a test table
 		testTx, testErr := db.Begin()
 		if testErr == nil {
@@ -107,7 +112,7 @@ func NewStore(path string, opts collection.Options) (*Store, error) {
 
 		if !ftsAvailable {
 			db.Close()
-			return nil, fmt.Errorf("FTS5 is not available but EnableFTS is true. Build with -tags sqlite_fts5 to enable FTS5 support")
+			return nil, fmt.Errorf("FTS5 is not available but EnableFts is true. Build with -tags sqlite_fts5 to enable FTS5 support")
 		}
 
 		tx, err := db.Begin()
@@ -149,8 +154,8 @@ func NewStore(path string, opts collection.Options) (*Store, error) {
 	return &Store{
 		db:           db,
 		path:         path,
-		options:      opts,
-		embedder:     opts.Embedder,
+		searchConfig: searchConfig,
+		embedder:     embedder,
 		ftsAvailable: ftsAvailable,
 	}, nil
 }
@@ -161,12 +166,31 @@ func (s *Store) Close() error {
 func (s *Store) Path() string { return s.path }
 
 // SetJSONConverter sets the function used to convert binary proto_data to JSON for the jsontext column.
-// This must be called before CreateRecord/UpdateRecord if EnableJSON is true and proto_data contains binary protobuf.
+// This must be called before CreateRecord/UpdateRecord if EnableJson is true and proto_data contains binary protobuf.
 func (s *Store) SetJSONConverter(conv collection.ProtoToJSONConverter) {
 	s.jsonConverter = conv
 }
 
 func (s *Store) CreateRecord(ctx context.Context, r *pb.CollectionRecord) error {
+	// Handle nil Metadata
+	if r.Metadata == nil {
+		r.Metadata = &pb.Metadata{}
+	}
+
+	// Handle nil timestamps - default to current time
+	now := time.Now().Unix()
+	var createdAt, updatedAt int64
+	if r.Metadata.CreatedAt != nil {
+		createdAt = r.Metadata.CreatedAt.Seconds
+	} else {
+		createdAt = now
+	}
+	if r.Metadata.UpdatedAt != nil {
+		updatedAt = r.Metadata.UpdatedAt.Seconds
+	} else {
+		updatedAt = now
+	}
+
 	labelsJSON, _ := json.Marshal(r.Metadata.Labels)
 
 	// Determine JSON representation for the jsontext column
@@ -206,21 +230,21 @@ func (s *Store) CreateRecord(ctx context.Context, r *pb.CollectionRecord) error 
 		r.Id,
 		r.ProtoData,
 		r.DataUri,
-		r.Metadata.CreatedAt.Seconds,
-		r.Metadata.UpdatedAt.Seconds,
+		createdAt,
+		updatedAt,
 		string(labelsJSON),
 	}
 
 	switch {
-	case s.options.EnableVector && s.options.EnableJSON:
+	case s.searchConfig.EnableVector && s.searchConfig.EnableJson:
 		query = `INSERT INTO records (id, proto_data, data_uri, created_at, updated_at, labels, jsontext, vector)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
 		args = append(baseArgs, jsonText, vectorBlob)
-	case s.options.EnableVector:
+	case s.searchConfig.EnableVector:
 		query = `INSERT INTO records (id, proto_data, data_uri, created_at, updated_at, labels, vector)
                  VALUES (?, ?, ?, ?, ?, ?, ?)`
 		args = append(baseArgs, vectorBlob)
-	case s.options.EnableJSON:
+	case s.searchConfig.EnableJson:
 		query = `INSERT INTO records (id, proto_data, data_uri, created_at, updated_at, labels, jsontext)
                  VALUES (?, ?, ?, ?, ?, ?, ?)`
 		args = append(baseArgs, jsonText)
@@ -234,7 +258,7 @@ func (s *Store) CreateRecord(ctx context.Context, r *pb.CollectionRecord) error 
 		return err
 	}
 
-	if s.options.EnableVector && len(rawVector) > 0 {
+	if s.searchConfig.EnableVector && len(rawVector) > 0 {
 		if err := s.upsertVecTable(ctx, tx, r.Id, rawVector); err != nil {
 			return fmt.Errorf("update vector index: %w", err)
 		}
@@ -317,13 +341,13 @@ func (s *Store) UpdateRecord(ctx context.Context, r *pb.CollectionRecord) error 
 
 	// Build UPDATE statement based on enabled features
 	switch {
-	case s.options.EnableVector && s.options.EnableJSON:
+	case s.searchConfig.EnableVector && s.searchConfig.EnableJson:
 		query = `UPDATE records SET proto_data=?, updated_at=?, labels=?, jsontext=?, vector=? WHERE id=?`
 		args = []interface{}{r.ProtoData, r.Metadata.UpdatedAt.Seconds, string(labelsJSON), jsonText, vectorBlob, r.Id}
-	case s.options.EnableVector:
+	case s.searchConfig.EnableVector:
 		query = `UPDATE records SET proto_data=?, updated_at=?, labels=?, vector=? WHERE id=?`
 		args = []interface{}{r.ProtoData, r.Metadata.UpdatedAt.Seconds, string(labelsJSON), vectorBlob, r.Id}
-	case s.options.EnableJSON:
+	case s.searchConfig.EnableJson:
 		query = `UPDATE records SET proto_data=?, updated_at=?, labels=?, jsontext=? WHERE id=?`
 		args = []interface{}{r.ProtoData, r.Metadata.UpdatedAt.Seconds, string(labelsJSON), jsonText, r.Id}
 	default:
@@ -344,7 +368,7 @@ func (s *Store) UpdateRecord(ctx context.Context, r *pb.CollectionRecord) error 
 		return fmt.Errorf("record not found")
 	}
 
-	if s.options.EnableVector {
+	if s.searchConfig.EnableVector {
 		if len(rawVector) > 0 {
 			if err := s.upsertVecTable(ctx, tx, r.Id, rawVector); err != nil {
 				return fmt.Errorf("update vector index: %w", err)
@@ -370,7 +394,7 @@ func (s *Store) DeleteRecord(ctx context.Context, id string) error {
 	}
 	defer tx.Rollback()
 
-	if s.options.EnableVector {
+	if s.searchConfig.EnableVector {
 		if err := s.deleteVecEntry(ctx, tx, id); err != nil {
 			return fmt.Errorf("delete vector index entry: %w", err)
 		}
@@ -555,20 +579,41 @@ func (s *Store) BackupOnline(ctx context.Context, destPath string, pagesBatchSiz
 }
 
 func (s *Store) Search(ctx context.Context, q *collection.SearchQuery) ([]*collection.SearchResult, error) {
-	// Validate EnableJSON is set when using JSON features
+	// Validate EnableJson is set when using JSON features
 	hasJSONFilters := len(q.Filters) > 0 || len(q.LabelFilters) > 0
-	if hasJSONFilters && !s.options.EnableJSON {
-		return nil, fmt.Errorf("search with Filters or LabelFilters requires EnableJSON to be true")
+	if hasJSONFilters && !s.searchConfig.EnableJson {
+		return nil, fmt.Errorf("search with Filters or LabelFilters requires EnableJson to be true")
 	}
 
-	hasVector := len(q.Vector) > 0 && s.options.EnableVector
+	if q.SemanticText != "" && !s.searchConfig.EnableVector {
+		return nil, fmt.Errorf("SemanticText provided but vector search is disabled (enable_vector must be true)")
+	}
+
+	// Generate vector from SemanticText if provided
+	var queryVector []float32
+	if q.SemanticText != "" && s.searchConfig.EnableVector {
+		if s.embedder == nil {
+			return nil, fmt.Errorf("SemanticText provided but no embedder configured for vector search")
+		}
+		vector, err := s.embedder.Embed(ctx, q.SemanticText)
+		if err != nil {
+			return nil, fmt.Errorf("failed to embed SemanticText: %w", err)
+		}
+		if int32(len(vector)) != s.searchConfig.VectorDimensions {
+			return nil, fmt.Errorf("embedder produced %d dimensions, expected %d", len(vector), s.searchConfig.VectorDimensions)
+		}
+		queryVector = vector
+	}
+
+	hasVector := len(queryVector) > 0 && s.searchConfig.EnableVector
 	hasFTS := q.FullText != "" && s.ftsAvailable
 
 	builder := &searchQueryBuilder{
-		store:     s,
-		query:     q,
-		hasVector: hasVector,
-		hasFTS:    hasFTS,
+		store:       s,
+		query:       q,
+		queryVector: queryVector,
+		hasVector:   hasVector,
+		hasFTS:      hasFTS,
 	}
 
 	switch {
@@ -586,6 +631,7 @@ func (s *Store) Search(ctx context.Context, q *collection.SearchQuery) ([]*colle
 type searchQueryBuilder struct {
 	store        *Store
 	query        *collection.SearchQuery
+	queryVector  []float32
 	hasVector    bool
 	hasFTS       bool
 	querySQL     strings.Builder
@@ -594,12 +640,12 @@ type searchQueryBuilder struct {
 }
 
 func (b *searchQueryBuilder) buildHybrid(ctx context.Context) ([]*collection.SearchResult, error) {
-	if len(b.query.Vector) != b.store.options.VectorDimensions {
+	if int32(len(b.queryVector)) != b.store.searchConfig.VectorDimensions {
 		return nil, fmt.Errorf("query vector dimension mismatch: got %d, expected %d",
-			len(b.query.Vector), b.store.options.VectorDimensions)
+			len(b.queryVector), b.store.searchConfig.VectorDimensions)
 	}
 
-	queryVector, err := sqlite_vec.SerializeFloat32(b.query.Vector)
+	serializedVector, err := sqlite_vec.SerializeFloat32(b.queryVector)
 	if err != nil {
 		return nil, fmt.Errorf("serialize query vector: %w", err)
 	}
@@ -617,7 +663,7 @@ func (b *searchQueryBuilder) buildHybrid(ctx context.Context) ([]*collection.Sea
 		`k = ?`,
 		`records_fts MATCH ?`,
 	}
-	b.args = append(b.args, queryVector, limit, b.query.FullText)
+	b.args = append(b.args, serializedVector, limit, b.query.FullText)
 
 	b.addSimilarityThreshold()
 	b.addFilters()
@@ -629,12 +675,12 @@ func (b *searchQueryBuilder) buildHybrid(ctx context.Context) ([]*collection.Sea
 }
 
 func (b *searchQueryBuilder) buildVector(ctx context.Context) ([]*collection.SearchResult, error) {
-	if len(b.query.Vector) != b.store.options.VectorDimensions {
+	if int32(len(b.queryVector)) != b.store.searchConfig.VectorDimensions {
 		return nil, fmt.Errorf("query vector dimension mismatch: got %d, expected %d",
-			len(b.query.Vector), b.store.options.VectorDimensions)
+			len(b.queryVector), b.store.searchConfig.VectorDimensions)
 	}
 
-	queryVector, err := sqlite_vec.SerializeFloat32(b.query.Vector)
+	serializedVector, err := sqlite_vec.SerializeFloat32(b.queryVector)
 	if err != nil {
 		return nil, fmt.Errorf("serialize query vector: %w", err)
 	}
@@ -648,7 +694,7 @@ func (b *searchQueryBuilder) buildVector(ctx context.Context) ([]*collection.Sea
 		`v.vector MATCH ?`,
 		`k = ?`,
 	}
-	b.args = append(b.args, queryVector, limit)
+	b.args = append(b.args, serializedVector, limit)
 
 	b.addSimilarityThreshold()
 	b.addFilters()
@@ -894,7 +940,7 @@ func (s *Store) ReIndex(ctx context.Context) error {
 		}
 	}
 
-	if s.options.EnableVector {
+	if s.searchConfig.EnableVector {
 		if err := s.rebuildVectorIndex(ctx, tx); err != nil {
 			return err
 		}
@@ -906,11 +952,11 @@ func (s *Store) ReIndex(ctx context.Context) error {
 // Vector helper methods
 
 func (s *Store) upsertVecTable(ctx context.Context, tx execContext, id string, vector []float32) error {
-	if !s.options.EnableVector {
+	if !s.searchConfig.EnableVector {
 		return fmt.Errorf("vector operations not available: vectors not enabled")
 	}
-	if len(vector) != s.options.VectorDimensions {
-		return fmt.Errorf("vector dimension mismatch: got %d, expected %d", len(vector), s.options.VectorDimensions)
+	if int32(len(vector)) != s.searchConfig.VectorDimensions {
+		return fmt.Errorf("vector dimension mismatch: got %d, expected %d", len(vector), s.searchConfig.VectorDimensions)
 	}
 
 	serialized, err := sqlite_vec.SerializeFloat32(vector)
@@ -931,7 +977,7 @@ func (s *Store) upsertVecTable(ctx context.Context, tx execContext, id string, v
 }
 
 func (s *Store) deleteVecEntry(ctx context.Context, tx execContext, id string) error {
-	if !s.options.EnableVector {
+	if !s.searchConfig.EnableVector {
 		return fmt.Errorf("vector operations not available: vectors not enabled")
 	}
 	if tx != nil {
@@ -943,7 +989,7 @@ func (s *Store) deleteVecEntry(ctx context.Context, tx execContext, id string) e
 }
 
 func (s *Store) reuseOrGenerateVector(ctx context.Context, id string, jsonText string) ([]float32, interface{}, error) {
-	if !s.options.EnableVector {
+	if !s.searchConfig.EnableVector {
 		return nil, nil, nil
 	}
 
@@ -951,7 +997,7 @@ func (s *Store) reuseOrGenerateVector(ctx context.Context, id string, jsonText s
 	var existingVector []byte
 	err := s.db.QueryRowContext(ctx, "SELECT jsontext, vector FROM records WHERE id = ?", id).Scan(&existingJSON, &existingVector)
 	if err == nil && existingJSON.Valid && existingJSON.String == jsonText && len(existingVector) > 0 {
-		if v, err := deserializeVector(existingVector); err == nil && len(v) == s.options.VectorDimensions {
+		if v, err := deserializeVector(existingVector); err == nil && int32(len(v)) == s.searchConfig.VectorDimensions {
 			return v, existingVector, nil
 		}
 	}
@@ -960,7 +1006,7 @@ func (s *Store) reuseOrGenerateVector(ctx context.Context, id string, jsonText s
 }
 
 func (s *Store) generateVector(ctx context.Context, jsonText string) ([]float32, interface{}, error) {
-	if !s.options.EnableVector || s.embedder == nil {
+	if !s.searchConfig.EnableVector || s.embedder == nil {
 		return nil, nil, nil
 	}
 
@@ -973,8 +1019,8 @@ func (s *Store) generateVector(ctx context.Context, jsonText string) ([]float32,
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to generate vector: %w", err)
 	}
-	if len(vector) != s.options.VectorDimensions {
-		return nil, nil, fmt.Errorf("embedder produced %d dims, expected %d", len(vector), s.options.VectorDimensions)
+	if int32(len(vector)) != s.searchConfig.VectorDimensions {
+		return nil, nil, fmt.Errorf("embedder produced %d dims, expected %d", len(vector), s.searchConfig.VectorDimensions)
 	}
 
 	blob, err := serializeVector(vector)
@@ -1032,7 +1078,7 @@ func deserializeVector(blob []byte) ([]float32, error) {
 }
 
 func (s *Store) rebuildVectorIndex(ctx context.Context, tx *sql.Tx) error {
-	if !s.options.EnableVector {
+	if !s.searchConfig.EnableVector {
 		return fmt.Errorf("vector operations not available: vectors not enabled")
 	}
 

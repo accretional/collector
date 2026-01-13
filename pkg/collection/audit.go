@@ -51,6 +51,7 @@ func (l *AuditLogger) Log(ctx context.Context, event *pb.AuditEvent) error {
 		ProtoData: protoData,
 		Metadata: &pb.Metadata{
 			CreatedAt: event.Timestamp,
+			UpdatedAt: event.Timestamp,
 			Labels: map[string]string{
 				"operation": event.Operation,
 				"namespace": event.Namespace,

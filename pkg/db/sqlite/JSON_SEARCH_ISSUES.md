@@ -7,12 +7,12 @@ All issues resolved except one deferred enhancement.
 | Issue | Status | Description |
 |-------|--------|-------------|
 | 1 | ✅ RESOLVED | Silent error on JSON schema creation - now returns errors |
-| 2 | ✅ RESOLVED | No EnableJSON validation - now validates before search |
+| 2 | ✅ RESOLVED | No EnableJson validation - now validates before search |
 | 3 | ✅ RESOLVED | Binary proto not converted - ProtoToJSONConverter added |
 | 4 | ⏸️ DEFERRED | No JSON indexing - documented as future enhancement |
 | 5 | ✅ BY DESIGN | Inconsistent metadata - jsontext is search-only by design |
 | 6 | ✅ RESOLVED | Label key escaping - uses json_each() for all key types |
-| 7 | ✅ RESOLVED | dummyStore options - now uses EnableJSON: true |
+| 7 | ✅ RESOLVED | dummyStore options - now uses EnableJson: true |
 
 ---
 
