@@ -1,0 +1,5 @@
+server:
+  data_dir: ./data
+  port: 50051
+  namespace: shared
+  health_port: 8080

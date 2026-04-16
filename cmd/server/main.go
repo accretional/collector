@@ -2,8 +2,6 @@ package main
 
 import (
 	"log"
-	"os"
-	"strconv"
 
 	"github.com/accretional/collector/pkg/server"
 )
@@ -15,33 +13,17 @@ func main() {
 }
 
 func run() error {
-	// Configuration from environment variables
-	dataDir := os.Getenv("COLLECTOR_DATA_DIR")
-	if dataDir == "" {
-		dataDir = "./data"
+	cfg, err := server.LoadConfig("")
+	if err != nil {
+		return err
 	}
 
-	port := 50051
-	if portStr := os.Getenv("PORT"); portStr != "" {
-		if p, err := strconv.Atoi(portStr); err == nil {
-			port = p
-		}
-	}
-
-	namespace := os.Getenv("COLLECTOR_NAMESPACE")
-	if namespace == "" {
-		namespace = "shared"
-	}
-
-	collectorID := os.Getenv("COLLECTOR_ID")
-	// If not set, server.New() will generate a random UUID7
-
-	// Create and start server
 	srv, err := server.New(server.Config{
-		DataDir:     dataDir,
-		Port:        port,
-		Namespace:   namespace,
-		CollectorID: collectorID,
+		DataDir:     cfg.DataDir,
+		Port:        cfg.Port,
+		Namespace:   cfg.Namespace,
+		CollectorID: cfg.CollectorID,
+		HealthPort:  cfg.HealthPort,
 	})
 	if err != nil {
 		return err
@@ -52,7 +34,6 @@ func run() error {
 		return err
 	}
 
-	// Wait for shutdown signal
 	srv.WaitForShutdown()
 
 	return nil

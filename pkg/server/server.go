@@ -58,6 +58,9 @@ type Config struct {
 
 	// AuthInterceptor is an optional security interceptor (default: allow all)
 	AuthInterceptor grpc.UnaryServerInterceptor
+
+	// HealthPort is the HTTP port for health checks (default: 8080, 0 to disable)
+	HealthPort int
 }
 
 // Server represents a fully configured Collector server with all services.
@@ -68,6 +71,8 @@ type Server struct {
 	grpcServer *grpc.Server
 	listener   net.Listener
 	dispatcher *dispatch.Dispatcher
+	health     *HealthServer
+	metrics    *Metrics
 
 	// Components that need cleanup
 	systemCollections *bootstrap.SystemCollections
@@ -77,6 +82,7 @@ type Server struct {
 
 	shutdownOnce sync.Once
 	shutdownChan chan struct{}
+	startTime    time.Time
 }
 
 // New creates a new Collector server with the given configuration.
@@ -102,6 +108,8 @@ func New(config Config) (*Server, error) {
 		config:       config,
 		logger:       config.Logger,
 		shutdownChan: make(chan struct{}),
+		startTime:    time.Now(),
+		metrics:      &Metrics{},
 	}
 
 	ctx := context.Background()
@@ -285,7 +293,7 @@ func New(config Config) (*Server, error) {
 	grpcServer := registry.NewServerWithValidation(
 		registryServer,
 		config.Namespace,
-		grpc.ChainUnaryInterceptor(authInterceptor, auditLogger.UnaryServerInterceptor()),
+		grpc.ChainUnaryInterceptor(MetricsInterceptor(s.metrics), authInterceptor, auditLogger.UnaryServerInterceptor()),
 	)
 	s.grpcServer = grpcServer
 
@@ -368,6 +376,16 @@ func New(config Config) (*Server, error) {
 		"services", "CollectorRegistry, CollectionService, CollectiveDispatcher, CollectionRepo",
 	)
 
+	s.metrics.Uptime = time.Since(s.startTime)
+	if config.HealthPort > 0 {
+		s.health = NewHealthServer(config.HealthPort, s.metrics)
+		s.health.Start()
+		s.logger.Printf("Health server listening on :%d", config.HealthPort)
+		s.logger.Printf("  - GET /health  - detailed health with metrics")
+		s.logger.Printf("  - GET /healthz - simple ok/error")
+		s.logger.Printf("  - GET /metrics - JSON metrics")
+	}
+
 	return s, nil
 }
 
@@ -400,6 +418,11 @@ func (s *Server) Shutdown() {
 		}
 		if s.dispatcher != nil {
 			s.dispatcher.Shutdown()
+		}
+		if s.health != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			s.health.Close(ctx)
 		}
 		close(s.shutdownChan)
 		s.logger.Println("Shutdown complete")
@@ -467,6 +490,15 @@ func (s *Server) CollectorID() string {
 // Namespace returns the default namespace for this collector.
 func (s *Server) Namespace() string {
 	return s.config.Namespace
+}
+
+// Metrics returns the server metrics.
+func (s *Server) Metrics() *Metrics {
+	if s.metrics == nil {
+		return &Metrics{}
+	}
+	s.metrics.Uptime = time.Since(s.startTime)
+	return s.metrics
 }
 
 // grpcRegistryClientValidator wraps a gRPC Registry client to implement ServiceMethodValidator
